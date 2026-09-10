@@ -187,6 +187,32 @@ pub trait Engine {
     ///
     /// When the engine could not be started or the query failed.
     fn run(&mut self, sql: &str) -> Result<Ran, BenchError>;
+
+    /// Give back the disk this engine's copy of the data is taking, now that it is measured.
+    ///
+    /// The default does nothing, which is right for an engine that reads the Parquet where it lies
+    /// and never made a copy. The three that convert override it.
+    ///
+    /// This exists because the comparison runs one engine to completion before starting the next,
+    /// so nothing needs two copies to be on disk at once, and a harness that kept all of them
+    /// needs the sum of every engine's format free rather than the largest one. On ClickBench that
+    /// is the difference between about 45 GB and about 16 GB, which is the difference between the
+    /// suite running on the quiet machine and running on the loud one.
+    ///
+    /// Everything the report says about size was read at load time and is already in [`Loaded`],
+    /// so this takes nothing away from the table. What it does take away is the ability to go and
+    /// look at an engine's data after a run, which is a debugging convenience rather than a
+    /// measurement, and `RUDB_BENCH_KEEP` turns it off for the afternoon somebody needs that.
+    fn unload(&mut self) {}
+}
+
+/// Whether the run was asked to leave every engine's copy of the data behind.
+///
+/// Off by default. On, the suite needs the sum of every engine's on disk size free rather than the
+/// largest one, which is a lot of disk on ClickBench and none at all on smoke.
+#[must_use]
+pub fn keeping() -> bool {
+    std::env::var_os("RUDB_BENCH_KEEP").is_some()
 }
 
 /// A subprocess under the timer, which is what all five of these are.
@@ -345,6 +371,16 @@ impl Engine for Duckdb {
     fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
         self.exec(&[sql])
     }
+
+    fn unload(&mut self) {
+        if keeping() {
+            return;
+        }
+        let _ = std::fs::remove_file(&self.database);
+        // The write ahead log too. A database file removed on its own leaves a .wal beside it that
+        // is most of the data on a load this size.
+        let _ = std::fs::remove_file(self.database.with_extension("duckdb.wal"));
+    }
 }
 
 /// ClickHouse, run as `clickhouse local` against a directory it keeps its own data in.
@@ -480,6 +516,13 @@ impl Engine for ClickhouseLocal {
 
     fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
         self.exec(sql)
+    }
+
+    fn unload(&mut self) {
+        if keeping() {
+            return;
+        }
+        let _ = std::fs::remove_dir_all(&self.data);
     }
 }
 
@@ -782,6 +825,20 @@ impl Engine for ClickhouseServer {
     fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
         self.start()?;
         Ok(Ran { cost: Cost::unavailable(NOT_THE_SERVER), answer: self.exec(sql)? })
+    }
+
+    fn unload(&mut self) {
+        if keeping() {
+            return;
+        }
+        // Stopped first. Removing a MergeTree directory out from under a running server leaves it
+        // writing into deleted inodes, which frees nothing until the process ends and is a strange
+        // thing to leave behind for whoever runs the next engine.
+        if let Some(mut child) = self.server.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        let _ = std::fs::remove_dir_all(&self.dir);
     }
 }
 
