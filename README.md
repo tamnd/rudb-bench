@@ -67,6 +67,16 @@ That last block is the part worth looking at. A result carries the list of reaso
 
 `rudb-bench suites` lists the seven suites from the specification with what each one needs before it can run, which is a download or a generator in every case.
 
+### ClickBench is five query sets, not one
+
+The official ClickBench repository keeps a `queries.sql` per engine and they are not copies of each other. Running one engine's text against all of them would be a measurement of somebody's translation, so this harness carries the official text per engine and says in the query table which engine gets which, and why.
+
+Most of the difference is spelling. DataFusion's file quotes every identifier, because it lowercases the ones nobody quoted and every column in `hits` is camel case. Two of the forty three are not spelling. q28 and q29 average a string length, DuckDB's `STRLEN` counts characters and ClickHouse's `length` counts bytes, and `hits` is full of percent encoded UTF-8 where those are different numbers. Both boards are right about their own engine, so both texts are here and the report says the two columns disagreed on those two answers, which is the true thing to say about them.
+
+Polars is the one engine with gaps. Its `SQLContext` accepts thirty nine of the forty three and refuses q28 for `strlen`, q29 for `regexp_replace`, q36 for the repeated `ClientIP` output name in the group by, and q43 for `date_trunc`. Those are four missing functions rather than four different opinions, and the alternative to declaring them absent is rewriting them until they ran, which would make the column a measurement of the rewrite. So they are declared absent in the query table, in a diff somebody reviewed, and never discovered at run time.
+
+A column that is short a query is then handled everywhere it would otherwise lie. The per-query grid is looked up by name rather than by position, so a missing q28 does not slide q29's time onto q28's row. The ratio against the reference engine is taken over the queries both columns ran, and the row says how many that was, because dividing a short total by a full one hands the best number on the page to whichever engine ran the least. The report prints one line per gap naming the query and the reason. And a column with any gap in it cannot be published, since rule three asks for the whole suite.
+
 ### ClickHouse is two rows, because it is two systems
 
 `clickhouse local` and a ClickHouse server are not the same engine wearing different clothes. The local one reads the Parquet where it lies and has no sorting key, no primary index and no chance to have merged anything. The server owns its data in MergeTree parts ordered by the key from the suite's own `create.sql`, which for ClickBench is the key ClickHouse Inc. publishes in theirs. Measuring only the local one and calling the result ClickHouse would flatter us, and by a lot: over three runs of the smoke suite on server3 the local row totalled between 3.5s and 5.3s hot where the tuned server totalled between 1.6s and 2.3s, so the engine our headline claim is stated against is somewhere around twice as fast as the row that was standing in for it. The harness now runs both and prints both, and the sorting key costs one or two percent on disk, 50.60 MiB against 49.49 MiB for the same ten million rows.
