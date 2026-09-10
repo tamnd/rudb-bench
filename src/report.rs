@@ -720,6 +720,12 @@ pub fn compare(
                 why: e.to_string(),
             }),
         }
+        // Right here, and on the failure path as well as the success one. Everything the report
+        // says about this engine's size was read at load time and is already in its result, and
+        // holding the data past this point only means the next engine needs disk for a copy nobody
+        // is going to read again. On ClickBench that is the difference between needing the sum of
+        // every engine's format free and needing the largest one.
+        engine.unload();
     }
 
     Comparison { suite, source_bytes: tables.iter().map(|t| t.bytes).sum(), results, skipped }
