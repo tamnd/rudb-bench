@@ -21,6 +21,20 @@ use crate::measure::{Distribution, Runs, show};
 use crate::memory::{Cost, Peak};
 use crate::suite::{Query, Suite};
 
+/// How wide a spread has to be before a run is called disturbed rather than measured.
+///
+/// Ten percent, which is the figure `cargo xtask bench` in the rudb repository already prints under
+/// its own table as the point where the machine was busy and the run should be taken again. It is
+/// not derived from anything. It is a round number that has held up on this fleet, and the reason
+/// it is a named constant with this paragraph attached is so that the day somebody wants to move it
+/// they have to say why in a commit rather than in a magic number.
+///
+/// The consequence of crossing it is a sentence and never a refusal to print. Section 13.8 of
+/// `spec/engine/13-measurement.md` is explicit that a run too noisy to be published cannot fail a
+/// build either, because a gate that fires randomly is a gate that gets disabled, and the same
+/// argument applies to a report that hides its own output.
+pub const NOISY: f64 = 0.10;
+
 /// What one query cost.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryResult {
@@ -117,6 +131,34 @@ impl SuiteResult {
         Some(total)
     }
 
+    /// The widest spread any query showed, as a fraction of its own median.
+    ///
+    /// The worst rather than the average, because the question this answers is whether anything in
+    /// the run was disturbed, and one query that swung by half while the other five were steady is
+    /// a run where something else was using the machine. An average over six would hide it.
+    ///
+    /// `None` when a query was too fast for the clock to have a ratio about, which is a different
+    /// thing from a steady one and prints differently.
+    #[must_use]
+    pub fn worst_iqr(&self) -> Option<f64> {
+        if self.queries.is_empty() {
+            return None;
+        }
+        self.queries
+            .iter()
+            .map(|q| q.runs.hot.relative_iqr())
+            .try_fold(0.0_f64, |worst, spread| Some(worst.max(spread?)))
+    }
+
+    /// The query that produced [`Self::worst_iqr`], for a sentence that has to name one.
+    #[must_use]
+    pub fn noisiest(&self) -> Option<(&str, f64)> {
+        self.queries
+            .iter()
+            .filter_map(|q| q.runs.hot.relative_iqr().map(|r| (q.name.as_str(), r)))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+    }
+
     /// Bytes read at the block layer over the hot run of every query.
     ///
     /// Expected to be zero on a machine with enough memory for the dataset, and the reason it is in
@@ -160,6 +202,17 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
         if !query.peak().measured() {
             reasons
                 .push(format!("{} has no peak resident set, and rule six wants one", query.name));
+        }
+        if let Some(spread) = query.runs.hot.relative_iqr().filter(|s| *s > NOISY) {
+            // Named per query rather than summarised, because the person reading this is deciding
+            // whether to rerun the suite or to go and find what else is on the machine, and which
+            // query swung is the thing that tells them apart.
+            reasons.push(format!(
+                "{} swung by {:.1}% of its median, and rule two wants under {:.0}%",
+                query.name,
+                spread * 100.0,
+                NOISY * 100.0
+            ));
         }
         if query.hot.implausible(query.runs.hot.headline(), crate::machine::threads_here()) {
             reasons.push(format!(
@@ -449,6 +502,32 @@ impl Comparison {
         }
         out
     }
+
+    /// Every engine whose worst query swung wider than [`NOISY`], and which query it was.
+    ///
+    /// This is the one caveat the cross engine grid could not carry until now. The single engine
+    /// table has an IQR column against every query and the grid dropped it, so the grid read as the
+    /// more precise of the two while being the one made of the same numbers. Reporting rule two
+    /// says the spread travels with the median, and a table where it travelled with only one of the
+    /// two views was a table that satisfied the rule on a technicality.
+    #[must_use]
+    pub fn disturbed(&self) -> Vec<String> {
+        self.results
+            .iter()
+            .filter_map(|result| {
+                let (query, spread) = result.noisiest()?;
+                (spread > NOISY).then(|| {
+                    format!(
+                        "{} swung by {:.1}% of its median on {query}, and rule two wants under \
+                         {:.0}%",
+                        result.engine,
+                        spread * 100.0,
+                        NOISY * 100.0
+                    )
+                })
+            })
+            .collect()
+    }
 }
 
 /// Run one suite on every engine, keeping the ones that cannot as abstentions rather than as
@@ -555,6 +634,20 @@ pub fn comparison(compared: &Comparison) -> String {
         line(&mut out, "");
     }
 
+    let disturbed = compared.disturbed();
+    if !disturbed.is_empty() {
+        line(&mut out, "Something else was using this machine while this ran:");
+        for who in &disturbed {
+            line(&mut out, &format!("  {who}"));
+        }
+        line(
+            &mut out,
+            "So the ratio row is a ratio of two disturbed numbers. Take the run again on",
+        );
+        line(&mut out, "a quiet machine before quoting anything out of it.");
+        line(&mut out, "");
+    }
+
     let disagreements = compared.disagreements();
     if disagreements.is_empty() && compared.results.len() > 1 {
         line(
@@ -584,7 +677,7 @@ pub fn comparison(compared: &Comparison) -> String {
 /// A constant because the blank line that separates the two halves of the table is placed by
 /// counting back from the end, and a table where somebody added a row and the blank line landed in
 /// the middle of the totals is a table nobody trusts.
-const SUMMARY_ROWS: usize = 8;
+const SUMMARY_ROWS: usize = 9;
 
 fn grid(compared: &Comparison) -> String {
     let reference = &compared.results[0];
@@ -608,6 +701,11 @@ fn grid(compared: &Comparison) -> String {
     }
 
     rows.push(summary("total hot", compared, |r| show(r.hot_total())));
+    // Directly under the total it qualifies, because a spread printed three rows away from the
+    // number it belongs to is a spread that gets read as its own fact rather than as a caveat.
+    rows.push(summary("worst IQR", compared, |r| {
+        r.worst_iqr().map_or_else(|| "n/a".to_owned(), |r| format!("{:.1}%", r * 100.0))
+    }));
     rows.push(summary("total cold", compared, |r| show(r.cold_total())));
     rows.push(summary("hot cpu", compared, |r| {
         r.hot_cpu().map_or_else(|| "not read".to_owned(), show)
@@ -925,6 +1023,94 @@ mod tests {
     fn a_comparison_with_nothing_in_it_says_so_rather_than_printing_an_empty_table() {
         let text = comparison(&compared(vec![], vec![]));
         assert!(text.contains("No engine produced a number"), "{text}");
+    }
+
+    /// A result whose one query swung, for the noise tests. The samples are chosen so the
+    /// interquartile range is a known fraction of the median rather than whatever a random spread
+    /// happens to be.
+    fn swung(name: &str, samples: &[u64]) -> SuiteResult {
+        let mut result = result(Peak::Bytes(1024), 5);
+        result.engine = name.to_owned();
+        result.queries[0].runs.hot =
+            Distribution::median(samples.iter().map(|&m| Duration::from_millis(m)).collect());
+        result
+    }
+
+    #[test]
+    fn the_worst_spread_is_the_worst_one_and_not_an_average_of_six() {
+        // The failure this is written against: five steady queries and one that swung by half,
+        // averaged, look like a run that was slightly disturbed rather than a run where something
+        // else grabbed the machine for one query.
+        let mut result = swung("duckdb", &[10, 10, 10, 10, 10]);
+        let mut wild = result.queries[0].clone();
+        wild.name = "q2".to_owned();
+        wild.runs.hot = Distribution::median(vec![
+            Duration::from_millis(10),
+            Duration::from_millis(10),
+            Duration::from_millis(20),
+            Duration::from_millis(30),
+            Duration::from_millis(40),
+        ]);
+        result.queries.push(wild);
+        let worst = result.worst_iqr().expect("both queries have a median");
+        assert!(worst > 0.5, "{worst}");
+        assert_eq!(result.noisiest().expect("one of them is worst").0, "q2");
+    }
+
+    #[test]
+    fn a_query_that_swung_wide_is_a_reason_not_to_publish() {
+        let result = swung("duckdb", &[10, 10, 20, 30, 40]);
+        let reasons = publishable(&result);
+        assert!(reasons.iter().any(|r| r.contains("swung by") && r.contains("q1")), "{reasons:?}");
+    }
+
+    #[test]
+    fn a_steady_query_is_not_a_reason_not_to_publish() {
+        let reasons = publishable(&result(Peak::Bytes(1024), 5));
+        assert!(!reasons.iter().any(|r| r.contains("swung by")), "{reasons:?}");
+    }
+
+    #[test]
+    fn the_grid_carries_the_spread_directly_under_the_total_it_qualifies() {
+        // Rule two says the spread travels with the median. It travelled with the single engine
+        // table and not with the grid, which made the grid look like the more precise of two views
+        // built out of the same numbers.
+        let text = comparison(&compared(vec![swung("duckdb", &[10, 10, 20, 30, 40])], vec![]));
+        let lines: Vec<&str> = text.lines().collect();
+        let at = lines.iter().position(|l| l.starts_with("worst IQR")).expect("a spread row");
+        assert!(lines[at - 1].starts_with("total hot"), "{text}");
+    }
+
+    #[test]
+    fn a_disturbed_run_names_the_engine_and_the_query_and_refuses_to_stand_behind_the_ratio() {
+        let text = comparison(&compared(
+            vec![result(Peak::Bytes(1024), 5), swung("polars", &[10, 10, 20, 30, 40])],
+            vec![],
+        ));
+        assert!(text.contains("Something else was using this machine"), "{text}");
+        assert!(text.contains("polars swung by"), "{text}");
+        assert!(text.contains("q1"), "{text}");
+        assert!(text.contains("Take the run again"), "{text}");
+        // The steady engine is not accused of anything.
+        assert!(!text.contains("duckdb swung by"), "{text}");
+    }
+
+    #[test]
+    fn a_quiet_machine_gets_no_sentence_about_noise() {
+        let text = comparison(&compared(
+            vec![result(Peak::Bytes(1024), 5), rival("polars", 5, "10000000")],
+            vec![],
+        ));
+        assert!(!text.contains("Something else was using this machine"), "{text}");
+    }
+
+    #[test]
+    fn a_query_too_fast_for_the_clock_is_not_called_noisy() {
+        // Zero median means no ratio exists, which is a different thing from a steady one, and
+        // calling it either would be inventing a fact about a measurement that did not happen.
+        let result = swung("duckdb", &[0, 0, 0, 0, 0]);
+        assert_eq!(result.worst_iqr(), None);
+        assert!(!publishable(&result).iter().any(|r| r.contains("swung by")));
     }
 
     #[test]
