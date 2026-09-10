@@ -975,8 +975,20 @@ impl Engine for Datafusion {
 ///
 /// Through Python because that is where Polars is, and a comparison that left it out because its
 /// natural interface is not a SQL shell would be leaving out the engine most likely to be the fast
-/// one on the out of core suites. The query goes through `SQLContext` over lazy frames and the
-/// collect is the streaming engine, which is the mode section 15.3 asks for.
+/// one on the out of core suites. The query goes through `SQLContext` over lazy frames.
+///
+/// The result is sunk rather than collected, which is what section 13.3 of the engine's
+/// `13-measurement.md` asks for and is not the same thing as passing `engine="streaming"` to a
+/// collect. A collect runs the streaming engine and then materializes the whole answer in memory
+/// before anything is written, so the peak this harness reads includes a result set that every
+/// other engine here streamed out. `sink_csv` writes as it goes and never has the answer in one
+/// piece, which is the mode the out of core comparison in document 10 section 10.11 is about, and
+/// it is also the mode that makes the peak resident column mean the same thing in this row as in
+/// the others.
+///
+/// `maintain_order` stays on. Turning it off is the faster way to sink and it would make the answer
+/// check meaningless, since two engines that disagree on row order are indistinguishable from two
+/// engines that disagree, and the point of this row is to be comparable rather than to be quick.
 #[derive(Debug, Clone)]
 pub struct Polars {
     python: PathBuf,
@@ -1003,7 +1015,11 @@ impl Polars {
         make(scratch)?;
         Ok(Self {
             python,
-            version,
+            // The mode goes in the version, because rule one is that the comparison is stated
+            // exactly and a Polars number means a different thing in sink mode than it does out of
+            // a collect. A reader of the table should not have to go and find out which one this
+            // was.
+            version: format!("{version} in sink mode"),
             tables: Vec::new(),
             runner: Runner::new(scratch, "polars"),
             script: scratch.join("polars-run.py"),
@@ -1024,8 +1040,12 @@ ctx = pl.SQLContext()
 for pair in sys.argv[2:]:
     name, path = pair.split("=", 1)
     ctx.register(name, pl.scan_parquet(path))
-frame = ctx.execute(sql).collect(engine="streaming")
-sys.stdout.write(frame.write_csv(include_header=False))
+ctx.execute(sql).sink_csv(
+    sys.stdout,
+    include_header=False,
+    maintain_order=True,
+    engine="streaming",
+)
 "#;
 
 impl Engine for Polars {
@@ -1177,7 +1197,7 @@ fn on_path(name: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{Ability, Duckdb, Engine, Rudb, on_path};
+    use super::{Ability, Duckdb, Engine, POLARS_SCRIPT, Rudb, on_path};
     use crate::data::Table;
     use crate::suite::find;
 
@@ -1241,6 +1261,20 @@ mod tests {
         assert!(ran.cost.peak.measured() || ran.cost.peak.bytes().is_none());
 
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn the_polars_driver_sinks_the_answer_rather_than_collecting_it() {
+        // A guard rather than a measurement, because what it is guarding is easy to undo by
+        // accident. `collect(engine="streaming")` and `sink_csv` both run the streaming engine and
+        // the first one reads like the obvious way to get a frame out, so the difference is one
+        // word and it is the difference between a peak that includes the whole answer and a peak
+        // that does not. Section 13.3 asks for the second one.
+        assert!(POLARS_SCRIPT.contains("sink_csv"), "{POLARS_SCRIPT}");
+        assert!(!POLARS_SCRIPT.contains("collect("), "{POLARS_SCRIPT}");
+        // Off is faster and would make the answer check meaningless, since a row order this
+        // harness cannot predict is indistinguishable from a wrong answer.
+        assert!(POLARS_SCRIPT.contains("maintain_order=True"), "{POLARS_SCRIPT}");
     }
 
     #[test]
