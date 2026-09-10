@@ -42,12 +42,12 @@
 //! saying so is worse than one with a gap.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::data::{Table, output, size_of_tree};
 use crate::memory::{Cost, Timer};
-use crate::suite::Suite;
+use crate::suite::{Suite, sorting_key};
 
 /// Something went wrong with the apparatus, as opposed to a query being slow.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,6 +151,18 @@ pub trait Engine {
 
     /// The exact version, which rule one says appears next to every number.
     fn version(&self) -> &str;
+
+    /// Whether anything this engine learned in one query is still there for the next one.
+    ///
+    /// False for everything driven as a fresh process per run, which is four of the five here and
+    /// is a decision rather than a limitation: a buffer pool that survives between queries makes
+    /// query five's number depend on query four. True for the tuned ClickHouse server, whose whole
+    /// point is that it does not restart. The report reads this to decide which sentence to print
+    /// about what hot means, because the two rows are hot in two different senses and one sentence
+    /// covering both would be false about one of them.
+    fn keeps_state(&self) -> bool {
+        false
+    }
 
     /// Whether this engine can run this suite, and when not, why not.
     ///
@@ -372,6 +384,21 @@ impl ClickhouseLocal {
         })
     }
 
+    /// What ClickHouse says its own active parts take.
+    ///
+    /// Asked rather than measured with `stat`, for a reason that only shows up once a table has
+    /// been merged. `OPTIMIZE ... FINAL` writes a new part and leaves the parts it replaced on disk
+    /// as inactive until a background thread gets to them eight minutes later, so a directory size
+    /// taken straight afterwards is the data counted roughly twice. The tuned server row measured
+    /// 128 MiB that way against `clickhouse local` at 49 MiB for the same ten million rows, which
+    /// reads as the sorting key having cost 2.6x on disk and is not what happened.
+    ///
+    /// `None` rather than zero when the answer does not parse, so the caller falls back to the
+    /// directory rather than publishing a table with no bytes in it.
+    fn parts_bytes(&self) -> Option<u64> {
+        parts_bytes(&self.exec(PARTS).ok()?.answer)
+    }
+
     fn exec(&self, sql: &str) -> Result<Ran, BenchError> {
         let mut command = self.runner.command(&self.binary);
         command
@@ -422,8 +449,9 @@ impl Engine for ClickhouseLocal {
         let took = start.elapsed();
         Ok(Loaded {
             took,
-            on_disk: size_of_tree(&self.data),
-            on_disk_is: "its own MergeTree parts".to_owned(),
+            on_disk: self.parts_bytes().unwrap_or_else(|| size_of_tree(&self.data)),
+            on_disk_is: "its own MergeTree parts, as system.parts counts the active ones"
+                .to_owned(),
             converted: true,
             cpu,
         })
@@ -432,6 +460,414 @@ impl Engine for ClickhouseLocal {
     fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
         self.exec(sql)
     }
+}
+
+/// ClickHouse as a real server, with the sorting key its own `create.sql` gives the table.
+///
+/// The second of the two ClickHouse rows, and it is a second row rather than a flag on the first
+/// because it is a different system in two ways that both matter.
+///
+/// It keeps its caches. A server holds a mark cache and a primary key index in memory between
+/// queries and a fresh `clickhouse local` does not, so this row's hot number is hot in the sense
+/// ClickBench means and the other four rows in the table are hot only in the sense that the page
+/// cache is warm. That is the stronger kind of hot and it is not comparable to the weaker kind, so
+/// putting the two ClickHouses in one row would be averaging two different measurements.
+///
+/// It gets a sorting key, from [`crate::suite::sorting_key`]. Nothing else in this table gets one.
+/// That is the point: a ClickHouse deployed without a sorting key is not the ClickHouse this
+/// project's headline claim is stated against, and a comparison that only ever measured the untuned
+/// one would be a comparison this project wins by picking the fight.
+///
+/// ## What it cannot tell you
+///
+/// Peak resident, CPU seconds and bytes read, and it says so per query rather than reporting a
+/// number that is not the one it appears to be. `/usr/bin/time` measures the process it started,
+/// and the process it would start here is `clickhouse client`, which parses a result set and prints
+/// it. The work happened in a server this harness started minutes earlier and the timer never saw.
+/// A peak of forty megabytes next to DuckDB's four hundred would be read as this engine winning on
+/// memory, when it is the client's memory and the server is not in the column at all.
+///
+/// The server's own high water mark is readable, from `/proc` or from `system.asynchronous_metrics`,
+/// and it is a high water mark over the whole run rather than over one query, so it does not belong
+/// in a per query cell either. Rule six then says this row is not publishable, which is the correct
+/// answer for a row whose hot number is a different kind of hot anyway.
+#[derive(Debug)]
+pub struct ClickhouseServer {
+    binary: PathBuf,
+    version: String,
+    suite: &'static str,
+    dir: PathBuf,
+    port: u16,
+    server: Option<Child>,
+    sorted_by: String,
+}
+
+/// Why the cost columns of the tuned server row are a sentence instead of a number.
+const NOT_THE_SERVER: &str =
+    "the timer wraps clickhouse client and the work happens in a server process it did not start";
+
+impl ClickhouseServer {
+    /// Find a ClickHouse, pick a port for it, and give it a directory. Nothing starts yet.
+    ///
+    /// Deliberately nothing starts yet. A ClickHouse server resident while DuckDB is being timed is
+    /// half a gigabyte of somebody else's memory and a page cache somebody else is evicting, so the
+    /// server comes up inside [`Engine::load`], which runs after every other engine in the table has
+    /// already finished. That ordering is in `discover` in the binary and it is a measurement
+    /// decision rather than a tidiness one.
+    ///
+    /// # Errors
+    ///
+    /// When the binary is missing, when it does not answer a version query, or when there is no
+    /// free port on the loopback interface.
+    pub fn discover(scratch: &Path, suite: &'static Suite) -> Result<Self, BenchError> {
+        let binary = std::env::var_os("RUDB_BENCH_CLICKHOUSE")
+            .map_or_else(|| on_path("clickhouse"), PathBuf::from);
+        let version = version_of(
+            &binary,
+            &["local", "--query", "SELECT version()"],
+            "RUDB_BENCH_CLICKHOUSE",
+        )?;
+        let dir = scratch.join("clickhouse-server");
+        make(&dir)?;
+        Ok(Self {
+            binary,
+            version,
+            suite: suite.name,
+            dir,
+            port: free_port()?,
+            server: None,
+            sorted_by: String::new(),
+        })
+    }
+
+    /// Bring the server up and wait until it answers.
+    ///
+    /// The wait is a query rather than a sleep, because a sleep long enough to be safe on a loaded
+    /// machine is long enough to be irritating on an idle one, and a sleep short enough to be
+    /// pleasant is a flaky suite. A server that died on the way up is reported as having died, with
+    /// the path to the log it wrote, rather than as sixty seconds of a query that never connected.
+    fn start(&mut self) -> Result<(), BenchError> {
+        if self.server.is_some() {
+            return Ok(());
+        }
+        let config = self.dir.join("config.xml");
+        let users = self.dir.join("users.xml");
+        write(&users, USERS)?;
+        write(
+            &config,
+            &CONFIG
+                .replace("{dir}", &self.dir.display().to_string())
+                .replace("{users}", &users.display().to_string())
+                .replace("{port}", &self.port.to_string()),
+        )?;
+
+        let child = Command::new(&self.binary)
+            .arg("server")
+            .arg("--config-file")
+            .arg(&config)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| {
+                BenchError::new(format!("cannot start {} server: {e}", self.binary.display()))
+            })?;
+        self.server = Some(child);
+
+        let log = self.dir.join("server.err.log");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            if self.exec("SELECT 1").is_ok() {
+                return Ok(());
+            }
+            // Not a let chain, because the minimum supported Rust here is 1.85 and those landed in
+            // 1.88.
+            if let Some(child) = self.server.as_mut() {
+                if let Ok(Some(status)) = child.try_wait() {
+                    return Err(BenchError::new(format!(
+                        "the clickhouse server stopped before it answered, {status}. It wrote {}",
+                        log.display()
+                    )));
+                }
+            }
+            if Instant::now() > deadline {
+                return Err(BenchError::new(format!(
+                    "the clickhouse server did not answer on port {} within a minute. It wrote {}",
+                    self.port,
+                    log.display()
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    /// A client pointed at our server and nobody else's.
+    ///
+    /// The host is spelled out rather than left to default, because a default that resolved to a
+    /// ClickHouse somebody already had running on this machine would produce a table of real
+    /// numbers from the wrong server.
+    fn client(&self) -> Command {
+        let mut command = Command::new(&self.binary);
+        command
+            .arg("client")
+            .arg("--host")
+            .arg("127.0.0.1")
+            .arg("--port")
+            .arg(self.port.to_string());
+        command
+    }
+
+    /// Run one statement and hand back what it printed.
+    fn exec(&self, sql: &str) -> Result<String, BenchError> {
+        let mut command = self.client();
+        command.arg("--format").arg("CSV").arg("--query").arg(sql);
+        let out = output(&mut command, "clickhouse client")?;
+        Ok(String::from_utf8_lossy(&out).trim().to_owned())
+    }
+
+    /// The column list a Parquet file implies, as ClickHouse would write it.
+    ///
+    /// Read out of the file rather than declared, because this harness runs suites whose schemas it
+    /// does not have, and inferred with `schema_inference_make_columns_nullable = 0`, because a
+    /// column ClickHouse decided was `Nullable(Int64)` carries a null map through every kernel it
+    /// touches and none of the other engines in the table were handed one.
+    fn columns_of(&self, parquet: &Path) -> Result<String, BenchError> {
+        let mut command = Command::new(&self.binary);
+        command.arg("local").arg("--format").arg("TSV").arg("--query").arg(format!(
+            "DESCRIBE TABLE file('{}', Parquet) SETTINGS schema_inference_make_columns_nullable = 0",
+            parquet.display()
+        ));
+        let out = output(&mut command, "clickhouse local reading a parquet schema")?;
+        let text = String::from_utf8_lossy(&out);
+        let columns: Vec<String> = text
+            .lines()
+            .filter_map(|line| {
+                let mut fields = line.split('\t');
+                let name = fields.next().filter(|n| !n.is_empty())?;
+                let kind = fields.next().filter(|k| !k.is_empty())?;
+                Some(format!("{name} {kind}"))
+            })
+            .collect();
+        if columns.is_empty() {
+            return Err(BenchError::new(format!(
+                "clickhouse described no columns in {}",
+                parquet.display()
+            )));
+        }
+        Ok(columns.join(", "))
+    }
+}
+
+impl Drop for ClickhouseServer {
+    /// Stop the server when the engine goes away.
+    ///
+    /// A benchmark harness that leaves a database server running on a random port after it exits is
+    /// one that makes the next run of itself slower and nobody connects the two.
+    fn drop(&mut self) {
+        if let Some(mut child) = self.server.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+impl Engine for ClickhouseServer {
+    fn name(&self) -> &str {
+        "clickhouse-server"
+    }
+
+    fn version(&self) -> &str {
+        &self.version
+    }
+
+    fn keeps_state(&self) -> bool {
+        true
+    }
+
+    fn can_run(&self, _suite: &Suite) -> Ability {
+        Ability::Yes
+    }
+
+    fn load(&mut self, tables: &[Table]) -> Result<Loaded, BenchError> {
+        // The server comes up before the clock starts. Bringing a database server up is not loading
+        // data, and in any deployment anybody would recognise it is already up when the data
+        // arrives. DuckDB's load column is a create and a checkpoint, so this one is a create, an
+        // insert and a merge, and neither of them is charged for existing.
+        self.start()?;
+        let start = Instant::now();
+        let mut keys = Vec::with_capacity(tables.len());
+        for table in tables {
+            let columns = self.columns_of(&table.path)?;
+            let key = sorting_key(self.suite, &table.name);
+            keys.push(format!("{} by {key}", table.name));
+            self.exec(&format!(
+                "CREATE TABLE {} ({columns}) ENGINE = MergeTree ORDER BY {key}",
+                table.name
+            ))?;
+
+            // Through the client from a file on stdin, which is how the official ClickBench load
+            // works and is also the only way that does not depend on where the file happens to be.
+            // `file()` on a server only reads inside `user_files_path`, and a harness that moved
+            // the corpus to satisfy that would be timing a copy of a seventy gigabyte file.
+            let handle = std::fs::File::open(&table.path).map_err(|e| {
+                BenchError::new(format!("cannot open {}: {e}", table.path.display()))
+            })?;
+            let mut command = self.client();
+            command
+                .arg("--query")
+                .arg(format!("INSERT INTO {} FORMAT Parquet", table.name))
+                .stdin(Stdio::from(handle));
+            output(&mut command, "clickhouse client loading a parquet file")?;
+
+            // Merge to one part before the clock stops, for the same reason DuckDB checkpoints
+            // before its clock stops. An insert that left twenty parts to be merged in the
+            // background has moved part of the load cost into whichever query runs while the merge
+            // is still going, and rule five puts load time next to the runtime precisely so that
+            // trade is visible rather than hidden in a query.
+            self.exec(&format!("OPTIMIZE TABLE {} FINAL", table.name))?;
+        }
+        let took = start.elapsed();
+        self.sorted_by = keys.join(", ");
+
+        Ok(Loaded {
+            took,
+            on_disk: self
+                .exec(PARTS)
+                .ok()
+                .and_then(|answer| parts_bytes(&answer))
+                .unwrap_or_else(|| size_of_tree(&self.dir.join("store"))),
+            on_disk_is: format!(
+                "its own MergeTree parts, sorted by {}, as system.parts counts the active ones",
+                self.sorted_by
+            ),
+            converted: true,
+            // Not None because nothing was measured, but because what could be measured is the
+            // client's, and a load whose CPU column was the cost of reading a file and writing it
+            // to a socket would understate the real one by whatever the server spent sorting.
+            cpu: None,
+        })
+    }
+
+    fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
+        self.start()?;
+        Ok(Ran { cost: Cost::unavailable(NOT_THE_SERVER), answer: self.exec(sql)? })
+    }
+}
+
+/// The server configuration, with the three things that vary substituted in.
+///
+/// Written per run rather than taken from `/etc`, because the ClickHouse on the fleet is a
+/// standalone binary somebody downloaded and there is no `/etc` for it, and because a run that
+/// picked up a configuration somebody had edited would be a measurement of that edit.
+///
+/// Every system log is switched off. That is not tidiness. `metric_log` writes a row a second and
+/// `query_log` writes one per query, both into MergeTree tables in the same directory the on disk
+/// size is read from, so leaving them on would put tens of megabytes of the server watching itself
+/// into a column that is supposed to be the size of the data. `clickhouse local` does not write
+/// them either, so switching them off is also what makes the two ClickHouse rows comparable.
+const CONFIG: &str = r#"<clickhouse>
+    <logger>
+        <level>warning</level>
+        <log>{dir}/server.log</log>
+        <errorlog>{dir}/server.err.log</errorlog>
+        <size>50M</size>
+        <count>1</count>
+    </logger>
+    <listen_host>127.0.0.1</listen_host>
+    <tcp_port>{port}</tcp_port>
+    <path>{dir}/store/</path>
+    <tmp_path>{dir}/tmp/</tmp_path>
+    <user_files_path>{dir}/user_files/</user_files_path>
+    <format_schema_path>{dir}/format_schemas/</format_schema_path>
+    <user_directories>
+        <users_xml>
+            <path>{users}</path>
+        </users_xml>
+    </user_directories>
+    <query_log remove="1"/>
+    <query_thread_log remove="1"/>
+    <query_views_log remove="1"/>
+    <query_metric_log remove="1"/>
+    <part_log remove="1"/>
+    <trace_log remove="1"/>
+    <metric_log remove="1"/>
+    <error_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <text_log remove="1"/>
+    <crash_log remove="1"/>
+    <session_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    <latency_log remove="1"/>
+    <backup_log remove="1"/>
+    <blob_storage_log remove="1"/>
+    <opentelemetry_span_log remove="1"/>
+    <s3queue_log remove="1"/>
+    <asynchronous_insert_log remove="1"/>
+</clickhouse>
+"#;
+
+/// One user with no password on the loopback interface, which is the whole access story this needs.
+///
+/// Loopback only, and the server also listens only there. A benchmark harness that opened a
+/// passwordless database to the network for the duration of a run would be a harness somebody
+/// eventually runs on a machine with a public address.
+const USERS: &str = r#"<clickhouse>
+    <profiles>
+        <default/>
+    </profiles>
+    <users>
+        <default>
+            <password/>
+            <networks>
+                <ip>127.0.0.1</ip>
+                <ip>::1</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+        </default>
+    </users>
+    <quotas>
+        <default/>
+    </quotas>
+</clickhouse>
+"#;
+
+/// What both ClickHouse rows ask for their on disk size.
+///
+/// The active parts only. An inactive part is one a merge has already replaced and a cleanup thread
+/// has not got to yet, and counting those is counting the same rows twice.
+const PARTS: &str = "SELECT sum(bytes_on_disk) FROM system.parts WHERE active";
+
+/// The number out of [`PARTS`], when it is a number.
+///
+/// Zero is refused along with everything else that does not parse. A ten million row table takes
+/// space, so a zero here means the question was answered by a server that had not flushed rather
+/// than by one with an empty table, and falling back to the directory is the honest answer to that.
+fn parts_bytes(answer: &str) -> Option<u64> {
+    answer.trim().trim_matches('"').parse::<u64>().ok().filter(|n| *n > 0)
+}
+
+/// A port nobody is listening on, found by asking the kernel for one and letting go of it.
+///
+/// There is a race between letting go and the server binding it, and it is the same race every
+/// program that does this has. The alternative is a fixed port, which does not race and does
+/// collide, with whatever ClickHouse the machine already had running, and that failure produces a
+/// full table of numbers from the wrong server rather than an error.
+fn free_port() -> Result<u16, BenchError> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|e| BenchError::new(format!("cannot find a free port: {e}")))?;
+    let port = listener
+        .local_addr()
+        .map_err(|e| BenchError::new(format!("cannot read the port back: {e}")))?
+        .port();
+    drop(listener);
+    Ok(port)
+}
+
+/// Write a file, with the failure named after the file.
+fn write(path: &Path, text: &str) -> Result<(), BenchError> {
+    std::fs::write(path, text)
+        .map_err(|e| BenchError::new(format!("cannot write {}: {e}", path.display())))
 }
 
 /// DataFusion through its own command line.

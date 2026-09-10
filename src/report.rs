@@ -35,6 +35,23 @@ use crate::suite::{Query, Suite};
 /// argument applies to a report that hides its own output.
 pub const NOISY: f64 = 0.10;
 
+/// How far apart the slowest and fastest query in a suite have to be before the column is measuring
+/// the queries rather than measuring the thing they have in common.
+///
+/// Two, which is a low bar on purpose. The `smoke` queries are a `count(*)`, a filtered sum, two
+/// group bys, a count distinct and a self join over ten million rows, and no engine does all six of
+/// those in the same amount of time. DuckDB spreads them over 6.6x and DataFusion over 7.0x. When a
+/// column comes back flat, the constant every query shares is bigger than the queries, and the
+/// constant every query shares here is the process this harness starts to ask.
+///
+/// This is worth a rule of its own rather than being left to the spread, because the two catch
+/// different failures and this one is the failure that looks like a result. A wide spread announces
+/// itself, and a reader who sees 57% next to a median knows to be careful. A column of six numbers
+/// within ten percent of each other looks like the most precise measurement on the page, and on the
+/// tuned ClickHouse server row today it is six copies of how long `clickhouse client` takes to
+/// start.
+pub const FLAT: f64 = 2.0;
+
 /// What one query cost.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryResult {
@@ -84,6 +101,14 @@ pub struct SuiteResult {
     pub loaded: Loaded,
     /// Every query, in the order they ran, losses included.
     pub queries: Vec<QueryResult>,
+    /// Whether this engine carried state from one query into the next.
+    ///
+    /// False for four of the five engines here, because a fresh process per run is what stops
+    /// query five's number depending on query four. True for the tuned ClickHouse server, which is
+    /// the whole reason that row exists and is also the reason its hot number is not the same
+    /// quantity as everybody else's hot number. A table that printed one sentence about warmth over
+    /// both kinds would be wrong about one of them, so the sentence is per result.
+    pub keeps_state: bool,
 }
 
 impl SuiteResult {
@@ -129,6 +154,25 @@ impl SuiteResult {
             total += query.hot.cpu?;
         }
         Some(total)
+    }
+
+    /// How much slower the slowest query is than the fastest, over the hot medians.
+    ///
+    /// The number that says whether this column is about the queries at all. Six queries that all
+    /// take the same time are six measurements of whatever they have in common, and what they have
+    /// in common in this harness is a process start.
+    ///
+    /// `None` when there are fewer than two queries to spread, or when the fastest was too fast for
+    /// the clock, because a ratio against zero is not a ratio.
+    #[must_use]
+    pub fn shape_spread(&self) -> Option<f64> {
+        if self.queries.len() < 2 {
+            return None;
+        }
+        let medians = self.queries.iter().map(|q| q.runs.hot.median_of().as_secs_f64());
+        let slowest = medians.clone().fold(0.0_f64, f64::max);
+        let fastest = medians.fold(f64::INFINITY, f64::min);
+        if fastest <= 0.0 { None } else { Some(slowest / fastest) }
     }
 
     /// The widest spread any query showed, as a fraction of its own median.
@@ -191,6 +235,26 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
     if !result.suite.comparable {
         reasons.push(format!("the {} suite is not comparable to any board", result.suite.name));
     }
+    // A peak that is missing everywhere is missing for one reason, and printing that reason once
+    // per query would bury the reasons that really are per query underneath forty copies of it.
+    // The tuned ClickHouse server row is the case: the timer wraps a client and the work happens in
+    // a server it did not start, so no query in that column has a peak and none of them ever will
+    // until it is measured a different way.
+    let peaks = result.queries.iter().filter(|q| !q.peak().measured()).count();
+    if peaks > 0 && peaks == result.queries.len() {
+        reasons.push(format!(
+            "no query has a peak resident set, and rule six wants one. {}",
+            result.peak()
+        ));
+    }
+
+    if let Some(spread) = result.shape_spread().filter(|s| *s < FLAT) {
+        reasons.push(format!(
+            "every query here ran within {spread:.2}x of every other one, so most of what was \
+             timed is whatever they have in common rather than the queries"
+        ));
+    }
+
     for query in &result.queries {
         if !query.runs.hot.publishable() {
             reasons.push(format!(
@@ -199,7 +263,7 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
                 query.runs.hot.runs()
             ));
         }
-        if !query.peak().measured() {
+        if !query.peak().measured() && peaks != result.queries.len() {
             reasons
                 .push(format!("{} has no peak resident set, and rule six wants one", query.name));
         }
@@ -278,6 +342,7 @@ pub fn run(
         version: engine.version().to_owned(),
         loaded,
         queries: results,
+        keeps_state: engine.keeps_state(),
     })
 }
 
@@ -413,8 +478,21 @@ pub fn table(result: &SuiteResult) -> String {
         }
     }
     line(&mut out, "");
-    line(&mut out, "Hot here means page cache warm and not buffer pool warm, because every run is");
-    line(&mut out, "a fresh process so that no query's number depends on the one before it.");
+    if result.keeps_state {
+        line(&mut out, "Hot here means this engine's own caches are warm, because it is a server");
+        line(
+            &mut out,
+            "that stayed up across the whole suite. That is the stronger kind of hot and",
+        );
+        line(&mut out, "it is not the kind the other rows were measured with, so a ratio against");
+        line(&mut out, "them is a ratio between two different quantities.");
+    } else {
+        line(
+            &mut out,
+            "Hot here means page cache warm and not buffer pool warm, because every run is",
+        );
+        line(&mut out, "a fresh process so that no query's number depends on the one before it.");
+    }
     out
 }
 
@@ -523,6 +601,27 @@ impl Comparison {
                         result.engine,
                         spread * 100.0,
                         NOISY * 100.0
+                    )
+                })
+            })
+            .collect()
+    }
+
+    /// Every engine whose queries all came back at about the same speed.
+    ///
+    /// Reported next to the spread and separately from it, because a flat column and a wide column
+    /// are two different faults and only one of them announces itself. See [`FLAT`].
+    #[must_use]
+    pub fn flattened(&self) -> Vec<String> {
+        self.results
+            .iter()
+            .filter_map(|result| {
+                let spread = result.shape_spread()?;
+                (spread < FLAT).then(|| {
+                    format!(
+                        "{} ran every query within {spread:.2}x of every other one, and this suite \
+                         spreads over 6x on an engine it is measuring",
+                        result.engine
                     )
                 })
             })
@@ -655,6 +754,26 @@ pub fn comparison(compared: &Comparison) -> String {
         line(&mut out, "");
     }
 
+    let flattened = compared.flattened();
+    if !flattened.is_empty() {
+        line(&mut out, "These ran every query at about the same speed:");
+        for who in &flattened {
+            line(&mut out, &format!("  {who}"));
+        }
+        line(
+            &mut out,
+            "A column that flat is not a column about the queries. Whatever every query",
+        );
+        line(&mut out, "in it has in common is larger than the difference between a count and a");
+        line(
+            &mut out,
+            "self join, and in this harness the thing they have in common is the process",
+        );
+        line(&mut out, "that gets started to ask. Read those numbers as an upper bound on the");
+        line(&mut out, "engine and not as a measurement of it.");
+        line(&mut out, "");
+    }
+
     let disagreements = compared.disagreements();
     if disagreements.is_empty() && compared.results.len() > 1 {
         line(
@@ -668,9 +787,28 @@ pub fn comparison(compared: &Comparison) -> String {
     for line_of in &disagreements {
         line(&mut out, &format!("Answers differ, so this is not a comparison: {line_of}"));
     }
-    line(&mut out, "");
-    line(&mut out, "Hot here means page cache warm and not buffer pool warm, because every run is");
-    line(&mut out, "a fresh process so that no query's number depends on the one before it.");
+    // Two kinds of hot in one table, said once with the names in it rather than as a footnote on
+    // the rows it applies to. A reader scanning the ratio row is comparing a number taken with an
+    // engine's own caches warm against numbers taken with only the page cache warm, and that is a
+    // comparison between two different quantities however carefully each half was measured.
+    let warm: Vec<&str> =
+        compared.results.iter().filter(|r| r.keeps_state).map(|r| r.engine.as_str()).collect();
+    if warm.is_empty() {
+        line(
+            &mut out,
+            "Hot here means page cache warm and not buffer pool warm, because every run is",
+        );
+        line(&mut out, "a fresh process so that no query's number depends on the one before it.");
+    } else {
+        line(&mut out, "Hot here means page cache warm and not buffer pool warm for every row but");
+        line(
+            &mut out,
+            &format!("{}, which stayed up across the whole suite with", warm.join(", ")),
+        );
+        line(&mut out, "its own caches warm. That is the stronger kind of hot, so the ratio row");
+        line(&mut out, "against that column is a ratio between two different quantities and the");
+        line(&mut out, "column is not publishable on its own terms either.");
+    }
     out
 }
 
@@ -684,7 +822,7 @@ pub fn comparison(compared: &Comparison) -> String {
 /// A constant because the blank line that separates the two halves of the table is placed by
 /// counting back from the end, and a table where somebody added a row and the blank line landed in
 /// the middle of the totals is a table nobody trusts.
-const SUMMARY_ROWS: usize = 9;
+const SUMMARY_ROWS: usize = 10;
 
 fn grid(compared: &Comparison) -> String {
     let reference = &compared.results[0];
@@ -712,6 +850,12 @@ fn grid(compared: &Comparison) -> String {
     // number it belongs to is a spread that gets read as its own fact rather than as a caveat.
     rows.push(summary("worst IQR", compared, |r| {
         r.worst_iqr().map_or_else(|| "n/a".to_owned(), |r| format!("{:.1}%", r * 100.0))
+    }));
+    // And the shape spread under that, because the two are read together. A column that is steady
+    // and flat is steadily measuring something other than the queries, and a reader who has just
+    // taken the IQR as good news is the reader who most needs the next line.
+    rows.push(summary("shape spread", compared, |r| {
+        r.shape_spread().map_or_else(|| "n/a".to_owned(), |s| format!("{s:.2}x"))
     }));
     rows.push(summary("total cold", compared, |r| show(r.cold_total())));
     rows.push(summary("hot cpu", compared, |r| {
@@ -793,8 +937,8 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        Abstention, Comparison, QueryResult, SuiteResult, comparison, middle, publishable, spread,
-        table, together, worst,
+        Abstention, Comparison, FLAT, QueryResult, SuiteResult, comparison, middle, publishable,
+        spread, table, together, worst,
     };
     use crate::engine::Loaded;
     use crate::measure::{Distribution, Runs};
@@ -826,6 +970,7 @@ mod tests {
                 hot: cost(peak, Some(0)),
                 answer: "10000000".to_owned(),
             }],
+            keeps_state: false,
         }
     }
 
@@ -837,6 +982,27 @@ mod tests {
         result.version = "1.0".to_owned();
         result.queries[0].runs.hot = Distribution::median(vec![Duration::from_millis(millis); 5]);
         result.queries[0].answer = answer.to_owned();
+        result
+    }
+
+    /// A result with one query per hot median, for the tests about the shape of a column.
+    ///
+    /// The medians are what the flatness rule reads and nothing else about these queries matters to
+    /// it, so everything else is copied from the one query the base result has.
+    fn shaped(name: &str, medians: &[u64]) -> SuiteResult {
+        let mut result = result(Peak::Bytes(1024), 5);
+        result.engine = name.to_owned();
+        let template = result.queries[0].clone();
+        result.queries = medians
+            .iter()
+            .enumerate()
+            .map(|(i, &millis)| {
+                let mut query = template.clone();
+                query.name = format!("q{}", i + 1);
+                query.runs.hot = Distribution::median(vec![Duration::from_millis(millis); 5]);
+                query
+            })
+            .collect();
         result
     }
 
@@ -857,8 +1023,80 @@ mod tests {
 
     #[test]
     fn a_missing_peak_is_its_own_reason_and_names_the_query() {
-        let reasons = publishable(&result(Peak::Unavailable("no timer".to_owned()), 5));
-        assert!(reasons.iter().any(|r| r.contains("q1") && r.contains("peak")), "{reasons:?}");
+        let mut one = result(Peak::Bytes(1024), 5);
+        let mut lost = one.queries[0].clone();
+        lost.name = "q2".to_owned();
+        lost.cold = cost(Peak::Unavailable("no timer".to_owned()), Some(4096));
+        lost.hot = cost(Peak::Unavailable("no timer".to_owned()), Some(0));
+        one.queries.push(lost);
+        let reasons = publishable(&one);
+        assert!(reasons.iter().any(|r| r.contains("q2") && r.contains("peak")), "{reasons:?}");
+        assert!(!reasons.iter().any(|r| r.contains("q1") && r.contains("peak")), "{reasons:?}");
+    }
+
+    #[test]
+    fn a_peak_that_is_missing_everywhere_is_said_once_and_not_once_per_query() {
+        // The tuned ClickHouse server column, where the timer wraps a client and the work happens
+        // in a server it did not start. Forty three ClickBench queries would otherwise produce
+        // forty three copies of one sentence, and the reasons that really are per query would be
+        // somewhere in the middle of them.
+        let reasons = publishable(&result(Peak::Unavailable("not the server".to_owned()), 5));
+        let about_peaks: Vec<&String> = reasons.iter().filter(|r| r.contains("peak")).collect();
+        assert_eq!(about_peaks.len(), 1, "{reasons:?}");
+        assert!(about_peaks[0].contains("not the server"), "{about_peaks:?}");
+        assert!(!about_peaks[0].contains("q1"), "{about_peaks:?}");
+    }
+
+    #[test]
+    fn a_count_and_a_self_join_that_cost_the_same_mean_neither_of_them_was_measured() {
+        // The tuned ClickHouse server column as it actually came back on server3: q1 count 241ms,
+        // q2 234ms, q3 247ms, q4 248ms, q5 268ms, q6 self join 357ms. Those six queries do not cost
+        // the same amount of work over ten million rows, so the number they share is larger than
+        // the work, and here it is `clickhouse client` starting up.
+        let flat = shaped("clickhouse-server", &[241, 234, 247, 248, 268, 357]);
+        let spread = flat.shape_spread().unwrap();
+        assert!(spread < FLAT, "{spread}");
+        let reasons = publishable(&flat);
+        let about_shape: Vec<&String> =
+            reasons.iter().filter(|r| r.contains("every query")).collect();
+        assert_eq!(about_shape.len(), 1, "{reasons:?}");
+        // The sentence was once assembled with a line continuation that leaked its own indentation
+        // into the middle of it, which is the sort of thing nobody notices until it is published.
+        assert!(!about_shape[0].contains("  "), "{:?}", about_shape[0]);
+    }
+
+    #[test]
+    fn an_engine_that_answers_a_count_faster_than_a_join_is_left_alone() {
+        // DuckDB over the same six queries, which spread over 6.55x. That is what a column that is
+        // measuring the queries looks like and the rule has to stay quiet about it.
+        let wide = shaped("duckdb", &[9, 22, 31, 40, 44, 59]);
+        assert!(wide.shape_spread().unwrap() > FLAT, "{:?}", wide.shape_spread());
+        assert!(compared(vec![wide.clone()], vec![]).flattened().is_empty());
+        assert!(!publishable(&wide).iter().any(|r| r.contains("every query")), "{wide:?}");
+    }
+
+    #[test]
+    fn one_query_has_nothing_to_spread_against_and_says_so_rather_than_claiming_it_is_flat() {
+        assert!(result(Peak::Bytes(1024), 5).shape_spread().is_none());
+    }
+
+    #[test]
+    fn a_query_too_fast_for_the_clock_gives_no_ratio_rather_than_an_infinite_one() {
+        assert!(shaped("polars", &[0, 40]).shape_spread().is_none());
+    }
+
+    #[test]
+    fn the_cross_engine_report_names_the_flat_columns_and_says_what_flat_means() {
+        let text = comparison(&compared(
+            vec![
+                shaped("duckdb", &[9, 22, 31, 40, 44, 59]),
+                shaped("clickhouse-server", &[241, 234, 247, 248, 268, 357]),
+            ],
+            vec![],
+        ));
+        assert!(text.contains("clickhouse-server ran every query within"), "{text}");
+        assert!(!text.contains("duckdb ran every query within"), "{text}");
+        assert!(text.contains("upper bound on the"), "{text}");
     }
 
     #[test]
