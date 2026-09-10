@@ -85,6 +85,12 @@ jobs:
       # record that only works on Linux is one that quietly stops being taken on the Windows box.
       - name: the machine record reads
         run: cargo run -q -- machine
+      # The committed runs still parse and still render. This is the one check that reads a file a
+      # person edited by hand, since a run is stored on a server and committed from a laptop, and a
+      # ledger that stopped parsing would be noticed on the day somebody went looking for what a
+      # layer bought rather than on the commit that broke it.
+      - name: the ledger reads its committed runs
+        run: cargo run -q -- ledger
       # The whole measurement path, on a runner whose timings mean nothing. What is being checked
       # is that it produces a table, not what is in it.
       #
