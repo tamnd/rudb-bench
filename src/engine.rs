@@ -270,8 +270,10 @@ impl Duckdb {
     /// Run statements against the database, under the timer.
     fn exec(&self, statements: &[&str]) -> Result<Ran, BenchError> {
         let mut command = self.runner.command(&self.binary);
-        // CSV with no header, which is what every engine here is asked for, so that four answers
-        // can be compared without four output parsers. See [`crate::answer`].
+        // CSV with no header, which is what three of the four engines here are asked for so that
+        // their answers can be compared without a parser each. The comparison itself reads numbers
+        // out of whatever text comes back, which is what lets the fourth one print a bordered table
+        // for a reason of its own. See [`crate::answer`] and the note on the datafusion run.
         command.arg("-batch").arg("-csv").arg("-noheader").arg(&self.database);
         for statement in statements {
             command.arg("-c").arg(statement);
@@ -510,7 +512,21 @@ impl Engine for Datafusion {
         let mut command = self.runner.command(&self.binary);
         // Quiet, because without it every result is followed by a line saying how many rows were
         // fetched and how long it took, and those digits land in the answer comparison as data.
-        command.arg("-q").arg("--format").arg("csv");
+        //
+        // The table format rather than csv, which is the odd one out among the four engines here
+        // and is not a preference. `datafusion-cli` 55.0.0 truncates its streaming output formats.
+        // `SELECT i FROM generate_series(1,100000)` prints 16384 rows under `--format csv` and the
+        // same 16384 under `--format nd-json`, which is two batches at the default batch size, and
+        // an unordered `GROUP BY` over sixteen partitions prints a different number of its 64
+        // groups on every run. Under `--format table` with the row cap lifted the same queries
+        // print all of it, every time, because that path collects the batches before it prints
+        // instead of printing as they arrive. The answer comparison reads numbers out of the text
+        // and does not care about the borders, so this costs nothing except an explanation.
+        //
+        // This is the answer check earning its place on the first day it existed. Without it the
+        // datafusion column would have been a fast wrong answer on two of the six smoke queries
+        // and nothing would have said so.
+        command.arg("-q").arg("--format").arg("table").arg("--maxrows").arg("inf");
         for statement in &self.ddl {
             command.arg("-c").arg(statement);
         }

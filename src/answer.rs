@@ -9,10 +9,12 @@
 //! ## Why numbers and not text
 //!
 //! Because the text is four different things. DuckDB draws a box, ClickHouse writes tab separated,
-//! DataFusion writes its own table, and Polars prints a data frame with a shape line on top. All
-//! four are asked for CSV here, which removes most of that, but not all of it: one writes `6.8e6`
-//! where another writes `6800000.0` and a third writes `6800000`, and a column of doubles summed in
-//! a different order differs in the last bit or two.
+//! DataFusion writes its own table, and Polars prints a data frame with a shape line on top. Three
+//! of the four are asked for CSV here, which removes most of that, but not all of it: one writes
+//! `6.8e6` where another writes `6800000.0` and a third writes `6800000`, and a column of doubles
+//! summed in a different order differs in the last bit or two. The fourth prints a bordered table,
+//! because its CSV writer drops rows, and a comparison that reads numbers out of the text rather
+//! than fields out of a format is what makes that a footnote instead of a blocker.
 //!
 //! So what is compared is the multiset of numbers in the output, parsed, sorted and compared with a
 //! relative tolerance. Sorted because two engines grouping the same data may emit the groups in
@@ -171,6 +173,20 @@ mod tests {
     #[test]
     fn two_engines_that_grouped_in_different_orders_still_agree() {
         assert!(same("tag-1,10\ntag-2,20", "tag-2,20\ntag-1,10"));
+    }
+
+    #[test]
+    fn a_bordered_table_says_the_same_thing_as_the_csv_of_it() {
+        // This is why the datafusion column may print a table while the other three print CSV.
+        // The borders carry no digits, the header carries no digits, and `count(*)` is not a
+        // number with a star in it.
+        let table = "+--------+----------+\n\
+                     | tag    | count(*) |\n\
+                     +--------+----------+\n\
+                     | tag-1  | 10       |\n\
+                     | tag-2  | 20       |\n\
+                     +--------+----------+";
+        assert!(same("tag-1,10\ntag-2,20", table));
     }
 
     #[test]
