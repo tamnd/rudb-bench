@@ -1,0 +1,22 @@
+/target
+**/*.rs.bk
+
+# Datasets and results. Enormous, machine specific, and regenerable from the loaders.
+/data
+/results
+/hits.parquet
+*.duckdb
+*.duckdb.wal
+*.rudb
+*.rudb-wal
+*.tbl
+*.csv.gz
+perf.data
+perf.data.old
+flamegraph.svg
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
