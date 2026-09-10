@@ -179,6 +179,32 @@ pub fn find(name: &str) -> Option<&'static Suite> {
     SUITES.iter().find(|s| s.name == name)
 }
 
+/// The `ORDER BY` a tuned ClickHouse table gets, which is the whole reason the tuned row exists.
+///
+/// A MergeTree sorting key is not a hint. It decides the physical order of the parts and it decides
+/// which granules a `WHERE` can skip without reading them, and a ClickHouse measured without one is
+/// not the ClickHouse anybody deploys. So the tuned server row gets the key and the `clickhouse
+/// local` row does not, and they are two rows rather than one because they are two systems.
+///
+/// The ClickBench key is not ours. It is the one in the official `create.sql` in the ClickBench
+/// repository, copied exactly, because a ClickBench number measured against a key we picked is a
+/// number about our tuning rather than about ClickHouse. The `smoke` key is ours, since `smoke` is
+/// not a benchmark and has no official anything, and it is chosen the way the ClickBench one is
+/// chosen: the column a query puts a range predicate on goes first, so that `k < 100` reads the
+/// granules that can contain it and skips the rest.
+///
+/// Everything else gets `tuple()`, which is no sorting key at all. That is a refusal rather than a
+/// default. Inventing a key for a suite nobody has settled the shape of would put a number in a
+/// table whose tuning nobody had reviewed.
+#[must_use]
+pub fn sorting_key(suite: &str, table: &str) -> &'static str {
+    match (suite, table) {
+        ("clickbench", "hits") => "(CounterID, EventDate, UserID, EventTime, WatchID)",
+        ("smoke", "smoke") => "(k, tag)",
+        _ => "tuple()",
+    }
+}
+
 /// The queries of a suite, where this harness has them.
 #[must_use]
 pub fn queries(name: &str) -> Option<&'static [Query]> {
@@ -190,7 +216,7 @@ pub fn queries(name: &str) -> Option<&'static [Query]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{SMOKE, SUITES, find, queries};
+    use super::{SMOKE, SUITES, find, queries, sorting_key};
 
     #[test]
     fn the_only_suite_with_queries_in_it_is_the_one_that_runs() {
@@ -252,6 +278,35 @@ mod tests {
     #[test]
     fn a_name_nobody_defined_is_none_rather_than_a_default() {
         assert!(find("clickbench-but-only-the-fast-ones").is_none());
+    }
+
+    #[test]
+    fn a_suite_nobody_has_settled_gets_no_sorting_key_rather_than_an_invented_one() {
+        assert_eq!(sorting_key("tpch", "lineitem"), "tuple()");
+        assert_eq!(sorting_key("h2o", "x"), "tuple()");
+        // Including the right suite and the wrong table, which is the shape a typo takes.
+        assert_eq!(sorting_key("clickbench", "hit"), "tuple()");
+    }
+
+    #[test]
+    fn the_clickbench_key_is_the_one_out_of_the_official_create_sql() {
+        // Copied from the ClickBench repository rather than chosen. Changing this changes what a
+        // ClickBench number means, so it should be a diff somebody has to justify.
+        assert_eq!(
+            sorting_key("clickbench", "hits"),
+            "(CounterID, EventDate, UserID, EventTime, WatchID)"
+        );
+    }
+
+    #[test]
+    fn the_smoke_key_leads_with_the_column_a_query_puts_a_range_on() {
+        // q2 is `WHERE k < 100`, which is the only predicate in the suite a sorting key can help,
+        // so a key that did not start with k would be a key that does nothing and a tuned row that
+        // was not tuned.
+        let key = sorting_key("smoke", "smoke");
+        assert!(key.starts_with("(k"), "{key}");
+        let filtering = SMOKE.iter().find(|q| q.name == "q2").unwrap();
+        assert!(filtering.sql.contains("k <"), "{}", filtering.sql);
     }
 
     #[test]

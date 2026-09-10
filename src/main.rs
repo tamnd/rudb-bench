@@ -22,11 +22,13 @@
 
 use std::process::ExitCode;
 
-use rudb_bench::engine::{BenchError, ClickhouseLocal, Datafusion, Duckdb, Engine, Polars, Rudb};
+use rudb_bench::engine::{
+    BenchError, ClickhouseLocal, ClickhouseServer, Datafusion, Duckdb, Engine, Polars, Rudb,
+};
 use rudb_bench::machine;
 use rudb_bench::regress::{self, FACTOR, Watch};
 use rudb_bench::report::{Abstention, comparison, table};
-use rudb_bench::suite::{SUITES, queries};
+use rudb_bench::suite::{SUITES, Suite, queries};
 use rudb_bench::{CLICKBENCH_C6A_4XLARGE, FLEET, REPORTING_MACHINE, Role, target_seconds};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -287,7 +289,7 @@ fn run(plan: &Plan) -> ExitCode {
     };
 
     let scratch = scratch();
-    let (mut engines, missing) = discover(&scratch);
+    let (mut engines, missing) = discover(&scratch, suite);
 
     // The data before the engines, because every engine gets the same files and the first thing a
     // reader of a result asks is which files those were.
@@ -375,7 +377,17 @@ fn record(compared: &rudb_bench::report::Comparison) -> ExitCode {
 /// DuckDB first, because it is the reference column of the comparison and the ratio row is stated
 /// against it. The order after that is the order section 15.3 names them in, and it is fixed rather
 /// than discovery order so that two runs a week apart produce the same table.
-fn discover(scratch: &std::path::Path) -> (Vec<Box<dyn Engine>>, Vec<Abstention>) {
+///
+/// The one exception to that order is the tuned ClickHouse server, which goes last among the
+/// engines that measure anything. It is the only engine here that leaves a process running after
+/// its own load, and half a gigabyte of resident ClickHouse next to a DuckDB being timed is
+/// somebody else's memory and somebody else's page cache in a column that claims to be DuckDB's.
+/// Since the comparison runs one engine to completion before starting the next, putting it last
+/// means it comes up after everything it could disturb has already been measured.
+fn discover(
+    scratch: &std::path::Path,
+    suite: &'static Suite,
+) -> (Vec<Box<dyn Engine>>, Vec<Abstention>) {
     let mut engines: Vec<Box<dyn Engine>> = Vec::new();
     let mut missing = Vec::new();
 
@@ -394,6 +406,10 @@ fn discover(scratch: &std::path::Path) -> (Vec<Box<dyn Engine>>, Vec<Abstention>
     match Polars::discover(scratch) {
         Ok(engine) => engines.push(Box::new(engine)),
         Err(e) => missing.push(gap("polars", &e)),
+    }
+    match ClickhouseServer::discover(scratch, suite) {
+        Ok(engine) => engines.push(Box::new(engine)),
+        Err(e) => missing.push(gap("clickhouse-server", &e)),
     }
 
     // rudb is always in the list, because an engine that is missing from a comparison because it
@@ -446,7 +462,8 @@ fn help() {
     println!("  -V, --version print the version and exit");
     println!();
     println!("  RUDB_BENCH_DUCKDB       the DuckDB binary, which is the reference column");
-    println!("  RUDB_BENCH_CLICKHOUSE   the ClickHouse binary, driven as `clickhouse local`");
+    println!("  RUDB_BENCH_CLICKHOUSE   the ClickHouse binary, driven both as `local` and as a");
+    println!("                          real server with a sorting key, which are two rows");
     println!("  RUDB_BENCH_DATAFUSION   the datafusion-cli binary");
     println!("  RUDB_BENCH_PYTHON       a python3 with polars installed");
     println!("  RUDB_BENCH_RUDB         the rudb binary, when there is one worth running");
