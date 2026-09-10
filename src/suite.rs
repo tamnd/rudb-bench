@@ -17,6 +17,17 @@ pub struct Suite {
     pub name: &'static str,
     /// How many queries it has.
     pub queries: usize,
+    /// The tables the queries name, which are also the Parquet files under [`directory`].
+    ///
+    /// Empty for a suite whose data layout has not been settled yet, which is most of them. An
+    /// empty list is a refusal to run rather than a run over no data, because a suite that
+    /// cheerfully ran with nothing loaded would produce six very fast queries and a table that
+    /// looked like a result.
+    ///
+    /// [`directory`]: Suite::directory
+    pub tables: &'static [&'static str],
+    /// Where under the data root those files live, relative, and empty for the root itself.
+    pub directory: &'static str,
     /// What has to be true before it runs.
     pub needs: &'static str,
     /// Whether a number out of it is comparable to a public board.
@@ -31,6 +42,8 @@ pub const SUITES: &[Suite] = &[
     Suite {
         name: "smoke",
         queries: SMOKE.len(),
+        tables: &["smoke"],
+        directory: "",
         needs: "nothing, it generates its own data",
         comparable: false,
         note: "Not a benchmark. Ten million rows of generated integers and strings, and six \
@@ -42,6 +55,8 @@ pub const SUITES: &[Suite] = &[
     Suite {
         name: "clickbench",
         queries: 43,
+        tables: &["hits"],
+        directory: "",
         needs: "hits at 99,997,497 rows, about 70 GB as TSV",
         comparable: true,
         note: "The board this project's headline claim is stated against. Run to the official \
@@ -53,6 +68,10 @@ pub const SUITES: &[Suite] = &[
     Suite {
         name: "tpch",
         queries: 22,
+        tables: &[
+            "lineitem", "orders", "customer", "part", "partsupp", "supplier", "nation", "region",
+        ],
+        directory: "tpch100",
         needs: "dbgen at SF10, SF100 and SF1000",
         comparable: true,
         note: "The three scales are three different measurements. SF10 fits in cache on a large \
@@ -64,6 +83,8 @@ pub const SUITES: &[Suite] = &[
     Suite {
         name: "tpcds",
         queries: 99,
+        tables: &[],
+        directory: "tpcds100",
         needs: "dsdgen at SF100",
         comparable: true,
         note: "All 99, including the ones that are unpleasant. The suite that punishes a narrow \
@@ -73,6 +94,8 @@ pub const SUITES: &[Suite] = &[
     Suite {
         name: "job",
         queries: 113,
+        tables: &[],
+        directory: "job",
         needs: "the IMDb dataset",
         comparable: true,
         note: "Where Robust Predicate Transfer either works or does not. Reported with the \
@@ -83,6 +106,8 @@ pub const SUITES: &[Suite] = &[
     Suite {
         name: "h2o",
         queries: 15,
+        tables: &[],
+        directory: "h2o",
         needs: "the h2o.ai generator",
         comparable: true,
         note: "Group by and join, fast to run and widely quoted, which makes it the best \
@@ -92,6 +117,8 @@ pub const SUITES: &[Suite] = &[
     Suite {
         name: "micro",
         queries: 0,
+        tables: &[],
+        directory: "",
         needs: "an engine to look inside",
         comparable: false,
         note: "Per encoding decode throughput, per kernel throughput, hash table insert and probe \
@@ -113,21 +140,13 @@ pub struct Query {
     pub shape: &'static str,
 }
 
-/// The statements that build the smoke dataset.
-///
-/// Ten million rows is chosen so that the load is a second or two and a scan is tens of
-/// milliseconds, which is far enough above a process spawn to be measuring the engine and far
-/// enough below a coffee break to run on every commit. The string column is deliberately
-/// low cardinality, because a dictionary is the first thing any of these engines does with one and
-/// a smoke test that never exercises a dictionary is not exercising much.
-pub const SMOKE_LOAD: &[&str] = &["CREATE TABLE smoke AS
-       SELECT i AS id,
-              (i * 2654435761) % 1000 AS k,
-              (i % 97) / 7.0 AS v,
-              'tag-' || ((i * 48271) % 64)::VARCHAR AS tag
-       FROM range(10000000) t(i)"];
-
 /// The smoke queries.
+///
+/// Written in the intersection of four dialects rather than in DuckDB's, because they are run
+/// against four engines unmodified and rule three says the same SQL or the comparison is not one.
+/// That costs two things. Ordering is by an alias rather than by an ordinal, because a positional
+/// `ORDER BY 2` is not portable. Nothing casts, because every dialect spells a cast differently, so
+/// the types come out of the Parquet file and the file is the same file for everybody.
 pub const SMOKE: &[Query] = &[
     Query { name: "q1", sql: "SELECT count(*) FROM smoke", shape: "count" },
     Query { name: "q2", sql: "SELECT sum(v) FROM smoke WHERE k < 100", shape: "filter and sum" },
@@ -138,7 +157,7 @@ pub const SMOKE: &[Query] = &[
     },
     Query {
         name: "q4",
-        sql: "SELECT k, sum(v) FROM smoke GROUP BY k ORDER BY 2 DESC LIMIT 10",
+        sql: "SELECT k, sum(v) AS total FROM smoke GROUP BY k ORDER BY total DESC LIMIT 10",
         shape: "group by and top k",
     },
     Query {
@@ -198,6 +217,35 @@ mod tests {
         for suite in SUITES {
             assert!(!suite.needs.is_empty(), "{} does not say what it needs", suite.name);
             assert!(suite.note.len() > 120, "{} needs a real note", suite.name);
+        }
+    }
+
+    #[test]
+    fn a_suite_that_has_queries_says_what_they_read() {
+        for suite in SUITES {
+            if queries(suite.name).is_some() {
+                assert!(!suite.tables.is_empty(), "{} has queries and no tables", suite.name);
+            }
+        }
+    }
+
+    #[test]
+    fn the_queries_only_name_tables_the_suite_declared() {
+        // A query naming a table nobody loads is an error at run time in four different engines
+        // with four different messages, and this is the cheap place to catch it.
+        let smoke = find("smoke").unwrap();
+        for query in SMOKE {
+            for table in smoke.tables {
+                assert!(query.sql.contains(table), "{} does not read {table}", query.name);
+            }
+        }
+    }
+
+    #[test]
+    fn nothing_in_the_smoke_queries_is_written_in_one_dialect_only() {
+        for query in SMOKE {
+            assert!(!query.sql.contains("::"), "{} casts the DuckDB way", query.name);
+            assert!(!query.sql.contains("ORDER BY 2"), "{} orders positionally", query.name);
         }
     }
 

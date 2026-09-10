@@ -15,6 +15,7 @@
 
 use std::time::Duration;
 
+use crate::data::Table;
 use crate::engine::{BenchError, Engine, Loaded};
 use crate::measure::{Distribution, Runs, show};
 use crate::memory::{Cost, Peak};
@@ -33,6 +34,12 @@ pub struct QueryResult {
     pub cold: Cost,
     /// The hot runs together: the worst peak, the median CPU and the median bytes read.
     pub hot: Cost,
+    /// What the engine answered, kept so that two engines answering differently is visible.
+    ///
+    /// From the cold run, which is the same answer as every other run unless something is very
+    /// wrong, and taking it from the first one means the comparison holds even when a later run
+    /// fails and the suite stops.
+    pub answer: String,
 }
 
 impl QueryResult {
@@ -175,19 +182,29 @@ pub fn run(
     engine: &mut dyn Engine,
     suite: &'static Suite,
     queries: &[Query],
-    load: &[&str],
+    tables: &[Table],
     hot: usize,
 ) -> Result<SuiteResult, BenchError> {
-    if !engine.can_run() {
-        return Err(BenchError::new(format!("{} cannot run a query yet", engine.name())));
+    let ability = engine.can_run(suite);
+    if let Some(why) = ability.why() {
+        return Err(BenchError::new(format!(
+            "{} is not running {}: {why}",
+            engine.name(),
+            suite.name
+        )));
     }
-    let loaded = engine.load(load)?;
+    let loaded = engine.load(tables)?;
 
     let mut results = Vec::with_capacity(queries.len());
     for query in queries {
         let mut costs: Vec<Cost> = Vec::with_capacity(hot + 1);
+        let mut answer = String::new();
         let runs = Runs::collect(hot, || {
-            costs.push(engine.run(query.sql)?);
+            let ran = engine.run(query.sql)?;
+            if answer.is_empty() {
+                answer = ran.answer;
+            }
+            costs.push(ran.cost);
             Ok::<(), BenchError>(())
         })?;
         // The first entry is the cold run, by the order `Runs::collect` calls the closure in.
@@ -198,6 +215,7 @@ pub fn run(
             runs,
             cold: cold.clone(),
             hot: together(rest),
+            answer,
         });
     }
 
@@ -271,6 +289,7 @@ pub fn table(result: &SuiteResult) -> String {
             crate::memory::bytes(result.loaded.on_disk)
         ),
     );
+    line(&mut out, &format!("on disk  is {}", result.loaded.on_disk_is));
     line(&mut out, "");
     // The header goes through the same format string as the rows, because a header written out by
     // hand is a header that drifts by one space the first time a column gets wider, and a column
@@ -380,6 +399,276 @@ fn read_cell(read: Option<u64>) -> String {
     }
 }
 
+/// An engine that did not produce a row, and why not.
+///
+/// A missing row is information. An engine that has not been built, an engine that cannot read the
+/// format, and an engine that crashed halfway through the fourth query are three different states
+/// and a blank space in a table is none of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Abstention {
+    /// The engine, as it names itself.
+    pub engine: String,
+    /// Its version, where it has one.
+    pub version: String,
+    /// The sentence that goes where its numbers would have been.
+    pub why: String,
+}
+
+/// One suite, run on every engine that could run it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Comparison {
+    /// The suite that ran.
+    pub suite: &'static Suite,
+    /// What the source Parquet takes, which every engine's on disk number is read against.
+    pub source_bytes: u64,
+    /// The engines that produced numbers, in the order they were given.
+    pub results: Vec<SuiteResult>,
+    /// The engines that did not, and why.
+    pub skipped: Vec<Abstention>,
+}
+
+impl Comparison {
+    /// Every disagreement about an answer, per query.
+    ///
+    /// The first engine is the reference. A benchmark comparing engines that do not agree about
+    /// what the answer is is comparing how fast they are wrong, so this runs on every result and
+    /// the sentences it produces sit under the table rather than in a log nobody reads.
+    #[must_use]
+    pub fn disagreements(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        let Some(reference) = self.results.first() else { return out };
+        for (at, query) in reference.queries.iter().enumerate() {
+            let answers: Vec<(String, String)> = self
+                .results
+                .iter()
+                .filter_map(|r| r.queries.get(at).map(|q| (r.engine.clone(), q.answer.clone())))
+                .collect();
+            for line in crate::answer::disagreements(&answers) {
+                out.push(format!("{}: {line}", query.name));
+            }
+        }
+        out
+    }
+}
+
+/// Run one suite on every engine, keeping the ones that cannot as abstentions rather than as
+/// failures.
+///
+/// One engine being broken does not stop the others, because the afternoon somebody is comparing
+/// four engines is not the afternoon to find out that a missing `datafusion-cli` means no numbers
+/// at all. What it must not do is hide it, so every one of them ends up in the report either as a
+/// row or as a sentence.
+pub fn compare(
+    engines: &mut [Box<dyn Engine>],
+    suite: &'static Suite,
+    queries: &[Query],
+    tables: &[Table],
+    hot: usize,
+) -> Comparison {
+    let mut results = Vec::new();
+    let mut skipped = Vec::new();
+
+    for engine in engines.iter_mut() {
+        let ability = engine.can_run(suite);
+        if let Some(why) = ability.why() {
+            skipped.push(Abstention {
+                engine: engine.name().to_owned(),
+                version: engine.version().to_owned(),
+                why: why.to_owned(),
+            });
+            continue;
+        }
+        match run(engine.as_mut(), suite, queries, tables, hot) {
+            Ok(result) => results.push(result),
+            Err(e) => skipped.push(Abstention {
+                engine: engine.name().to_owned(),
+                version: engine.version().to_owned(),
+                why: e.to_string(),
+            }),
+        }
+    }
+
+    Comparison { suite, source_bytes: tables.iter().map(|t| t.bytes).sum(), results, skipped }
+}
+
+/// The cross engine table: one column per engine, one row per query, and the supporting rows.
+///
+/// The first engine is the reference for the ratio row. That is DuckDB by construction, because
+/// the compatibility claim is against DuckDB and so is the performance claim, and a table whose
+/// reference column moved depending on what happened to be installed would not be comparable to
+/// last week's.
+#[must_use]
+pub fn comparison(compared: &Comparison) -> String {
+    let mut out = String::new();
+    let line = |out: &mut String, text: &str| {
+        out.push_str(text.trim_end());
+        out.push('\n');
+    };
+
+    line(&mut out, &format!("suite    {}", compared.suite.name));
+    line(
+        &mut out,
+        &format!(
+            "data     {} of Parquet in {} table{}",
+            crate::memory::bytes(compared.source_bytes),
+            compared.suite.tables.len(),
+            if compared.suite.tables.len() == 1 { "" } else { "s" }
+        ),
+    );
+    for result in &compared.results {
+        line(&mut out, &format!("engine   {} {}", result.engine, result.version));
+    }
+    line(&mut out, "");
+
+    if compared.results.is_empty() {
+        line(&mut out, "No engine produced a number.");
+    } else {
+        line(&mut out, &grid(compared));
+    }
+
+    for skip in &compared.skipped {
+        line(&mut out, &format!("{} {} did not run: {}", skip.engine, skip.version, skip.why));
+    }
+    if !compared.skipped.is_empty() {
+        line(&mut out, "");
+    }
+
+    let reading: Vec<&str> = compared
+        .results
+        .iter()
+        .filter(|r| !r.loaded.converted)
+        .map(|r| r.engine.as_str())
+        .collect();
+    if !reading.is_empty() {
+        line(
+            &mut out,
+            &format!(
+                "Reading the Parquet directly rather than a format of its own: {}.",
+                reading.join(", ")
+            ),
+        );
+        line(
+            &mut out,
+            "That is an empty load column and a decode inside every query, in the column",
+        );
+        line(&mut out, "being compared, which the other engines paid for once at load time.");
+        line(&mut out, "");
+    }
+
+    let disagreements = compared.disagreements();
+    if disagreements.is_empty() && compared.results.len() > 1 {
+        line(
+            &mut out,
+            &format!(
+                "All {} engines agreed on every answer, to the last significant digit of a double.",
+                compared.results.len()
+            ),
+        );
+    }
+    for line_of in &disagreements {
+        line(&mut out, &format!("Answers differ, so this is not a comparison: {line_of}"));
+    }
+    line(&mut out, "");
+    line(&mut out, "Hot here means page cache warm and not buffer pool warm, because every run is");
+    line(&mut out, "a fresh process so that no query's number depends on the one before it.");
+    out
+}
+
+/// The body of the cross engine table, sized to whatever is actually in it.
+///
+/// Column widths come from the contents rather than from a constant, because the number of engines
+/// is not known here and a fixed width table with five engines in it wraps, and a wrapped table is
+/// read as two tables.
+/// How many rows under the queries are summaries rather than queries.
+///
+/// A constant because the blank line that separates the two halves of the table is placed by
+/// counting back from the end, and a table where somebody added a row and the blank line landed in
+/// the middle of the totals is a table nobody trusts.
+const SUMMARY_ROWS: usize = 8;
+
+fn grid(compared: &Comparison) -> String {
+    let reference = &compared.results[0];
+    let mut header = vec!["query".to_owned(), "shape".to_owned()];
+    for result in &compared.results {
+        header.push(result.engine.clone());
+    }
+
+    let mut rows = vec![header];
+    for (at, query) in reference.queries.iter().enumerate() {
+        let mut row = vec![query.name.clone(), query.shape.clone()];
+        for result in &compared.results {
+            row.push(
+                result
+                    .queries
+                    .get(at)
+                    .map_or_else(|| "did not run".to_owned(), |q| show(q.runs.hot.headline())),
+            );
+        }
+        rows.push(row);
+    }
+
+    rows.push(summary("total hot", compared, |r| show(r.hot_total())));
+    rows.push(summary("total cold", compared, |r| show(r.cold_total())));
+    rows.push(summary("hot cpu", compared, |r| {
+        r.hot_cpu().map_or_else(|| "not read".to_owned(), show)
+    }));
+    rows.push(summary("peak RSS", compared, |r| peak_cell(&r.peak())));
+    rows.push(summary("load", compared, |r| show(r.loaded.took)));
+    rows.push(summary("on disk", compared, |r| crate::memory::bytes(r.loaded.on_disk)));
+    rows.push(summary("storage", compared, |r| {
+        if r.loaded.converted { "own format".to_owned() } else { "the Parquet".to_owned() }
+    }));
+    // The ratio last, because it is the one number a reader takes away, and because it means
+    // nothing without the six rows above it that say what was measured.
+    let base = reference.hot_total().as_secs_f64();
+    rows.push(summary(&format!("vs {}", reference.engine), compared, move |r| {
+        if base <= 0.0 {
+            return "n/a".to_owned();
+        }
+        format!("{:.2}x", r.hot_total().as_secs_f64() / base)
+    }));
+
+    let mut widths = vec![0usize; rows[0].len()];
+    for row in &rows {
+        for (at, cell) in row.iter().enumerate() {
+            widths[at] = widths[at].max(cell.chars().count());
+        }
+    }
+
+    let mut out = String::new();
+    for (at, row) in rows.iter().enumerate() {
+        let mut line = String::new();
+        for (column, cell) in row.iter().enumerate() {
+            if column > 0 {
+                line.push_str("  ");
+            }
+            let width = widths[column];
+            if column < 2 {
+                line.push_str(&format!("{cell:<width$}"));
+            } else {
+                line.push_str(&format!("{cell:>width$}"));
+            }
+        }
+        out.push_str(line.trim_end());
+        out.push('\n');
+        // A blank line between the queries and the totals, because the totals are a different kind
+        // of row and a reader scanning down a column should not add one of them into a sum.
+        if at == rows.len() - SUMMARY_ROWS - 1 {
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// One supporting row of the cross engine table.
+fn summary(name: &str, compared: &Comparison, of: impl Fn(&SuiteResult) -> String) -> Vec<String> {
+    let mut row = vec![name.to_owned(), String::new()];
+    for result in &compared.results {
+        row.push(of(result));
+    }
+    row
+}
+
 /// A distribution printed the long way, for the diagnostic output.
 #[must_use]
 pub fn spread(d: &Distribution) -> String {
@@ -398,7 +687,10 @@ pub fn spread(d: &Distribution) -> String {
 mod tests {
     use std::time::Duration;
 
-    use super::{QueryResult, SuiteResult, middle, publishable, spread, table, together, worst};
+    use super::{
+        Abstention, Comparison, QueryResult, SuiteResult, comparison, middle, publishable, spread,
+        table, together, worst,
+    };
     use crate::engine::Loaded;
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
@@ -417,6 +709,8 @@ mod tests {
             loaded: Loaded {
                 took: Duration::from_secs(1),
                 on_disk: 1024 * 1024,
+                on_disk_is: "its own database file".to_owned(),
+                converted: true,
                 cpu: Some(Duration::from_secs(3)),
             },
             queries: vec![QueryResult {
@@ -425,7 +719,28 @@ mod tests {
                 runs: Runs { cold: Duration::from_millis(40), hot: Distribution::median(samples) },
                 cold: cost(peak.clone(), Some(4096)),
                 hot: cost(peak, Some(0)),
+                answer: "10000000".to_owned(),
             }],
+        }
+    }
+
+    /// The same result with a different name, a different speed and a different answer, for the
+    /// comparison tests.
+    fn rival(name: &str, millis: u64, answer: &str) -> SuiteResult {
+        let mut result = result(Peak::Bytes(1024), 5);
+        result.engine = name.to_owned();
+        result.version = "1.0".to_owned();
+        result.queries[0].runs.hot = Distribution::median(vec![Duration::from_millis(millis); 5]);
+        result.queries[0].answer = answer.to_owned();
+        result
+    }
+
+    fn compared(results: Vec<SuiteResult>, skipped: Vec<Abstention>) -> Comparison {
+        Comparison {
+            suite: find("smoke").unwrap(),
+            source_bytes: 92 * 1024 * 1024,
+            results,
+            skipped,
         }
     }
 
@@ -526,6 +841,96 @@ mod tests {
         let peaks =
             vec![Peak::Bytes(10), Peak::Unavailable("the timer died".to_owned()), Peak::Bytes(30)];
         assert!(!worst(&peaks).measured());
+    }
+
+    #[test]
+    fn the_comparison_puts_every_engine_in_one_column_each_and_ratios_against_the_first() {
+        let text = comparison(&compared(
+            vec![result(Peak::Bytes(1024), 5), rival("clickhouse-local", 5, "10000000")],
+            vec![],
+        ));
+        assert!(text.contains("duckdb"), "{text}");
+        assert!(text.contains("clickhouse-local"), "{text}");
+        assert!(text.contains("vs duckdb"), "{text}");
+        // Five milliseconds against ten is half the time, and the reference column is 1.00x.
+        assert!(text.contains("1.00x"), "{text}");
+        assert!(text.contains("0.50x"), "{text}");
+        assert!(text.contains("92.00 MiB of Parquet"), "{text}");
+    }
+
+    #[test]
+    fn an_engine_reading_the_parquet_is_marked_as_reading_the_parquet() {
+        let mut polars = rival("polars", 5, "10000000");
+        polars.loaded.converted = false;
+        polars.loaded.on_disk_is = "the source Parquet".to_owned();
+        let text = comparison(&compared(vec![result(Peak::Bytes(1024), 5), polars], vec![]));
+        assert!(text.contains("storage"), "{text}");
+        assert!(text.contains("own format"), "{text}");
+        assert!(text.contains("the Parquet"), "{text}");
+        assert!(text.contains("Reading the Parquet directly"), "{text}");
+    }
+
+    #[test]
+    fn nothing_is_said_about_parquet_when_every_engine_converted() {
+        let text = comparison(&compared(
+            vec![result(Peak::Bytes(1024), 5), rival("clickhouse-local", 5, "10000000")],
+            vec![],
+        ));
+        assert!(!text.contains("Reading the Parquet directly"), "{text}");
+    }
+
+    #[test]
+    fn the_blank_line_lands_between_the_queries_and_the_totals() {
+        let text = comparison(&compared(vec![result(Peak::Bytes(1024), 5)], vec![]));
+        let lines: Vec<&str> = text.lines().collect();
+        let at = lines.iter().position(|l| l.starts_with("total hot")).expect("a totals row");
+        assert!(lines[at - 1].is_empty(), "the totals should be separated\n{text}");
+        assert!(lines[at - 2].starts_with("q1"), "the queries should be above\n{text}");
+    }
+
+    #[test]
+    fn an_engine_that_could_not_run_is_a_sentence_and_not_a_gap() {
+        let text = comparison(&compared(
+            vec![result(Peak::Bytes(1024), 5)],
+            vec![Abstention {
+                engine: "rudb".to_owned(),
+                version: "0.1.0".to_owned(),
+                why: "no path from a file into a chunk yet".to_owned(),
+            }],
+        ));
+        assert!(text.contains("rudb 0.1.0 did not run"), "{text}");
+        assert!(text.contains("into a chunk yet"), "{text}");
+    }
+
+    #[test]
+    fn two_engines_that_disagree_about_the_answer_are_not_a_comparison() {
+        let text = comparison(&compared(
+            vec![result(Peak::Bytes(1024), 5), rival("polars", 5, "9999999")],
+            vec![],
+        ));
+        assert!(text.contains("Answers differ"), "{text}");
+        assert!(text.contains("q1"), "{text}");
+    }
+
+    #[test]
+    fn engines_that_agree_are_said_to_agree_rather_than_being_left_silent() {
+        let text = comparison(&compared(
+            vec![result(Peak::Bytes(1024), 5), rival("polars", 5, "10000000")],
+            vec![],
+        ));
+        assert!(text.contains("agreed on every answer"), "{text}");
+    }
+
+    #[test]
+    fn a_comparison_with_nothing_in_it_says_so_rather_than_printing_an_empty_table() {
+        let text = comparison(&compared(vec![], vec![]));
+        assert!(text.contains("No engine produced a number"), "{text}");
+    }
+
+    #[test]
+    fn the_table_says_what_the_on_disk_number_is_a_size_of() {
+        let text = table(&result(Peak::Bytes(1024), 5));
+        assert!(text.contains("its own database file"), "{text}");
     }
 
     #[test]

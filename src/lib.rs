@@ -24,6 +24,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod answer;
+pub mod data;
 pub mod engine;
 pub mod fleet;
 pub mod machine;

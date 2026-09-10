@@ -1,9 +1,13 @@
 //! The harness command line.
 //!
-//! `run` works against a real DuckDB on the smoke suite, which is the suite that exists so the
-//! measurement path is exercised on every commit rather than on the day somebody needs a number.
-//! The suites that matter need data that has to be downloaded or generated first, and they say so
-//! by name rather than failing with an error about a missing file.
+//! `run` works against every engine on the machine on the smoke suite, which is the suite that
+//! exists so the measurement path is exercised on every commit rather than on the day somebody
+//! needs a number. The suites that matter need data that has to be downloaded or generated first,
+//! and they say so by name rather than failing with an error about a missing file.
+//!
+//! An engine that is not installed is a line saying so rather than an error, because the machine
+//! that has all five is the exception. What is not allowed is a table that quietly has one fewer
+//! column than the one before it.
 //!
 //! The subcommand names come from `spec/15-rudb-bench.md` and the nightly job in the rudb
 //! repository calls them by name, so they are a decision rather than an afterthought.
@@ -12,10 +16,10 @@
 
 use std::process::ExitCode;
 
-use rudb_bench::engine::{Duckdb, Engine, Rudb};
+use rudb_bench::engine::{BenchError, ClickhouseLocal, Datafusion, Duckdb, Engine, Polars, Rudb};
 use rudb_bench::machine;
-use rudb_bench::report::table;
-use rudb_bench::suite::{SMOKE_LOAD, SUITES, queries};
+use rudb_bench::report::{Abstention, comparison, table};
+use rudb_bench::suite::{SUITES, queries};
 use rudb_bench::{CLICKBENCH_C6A_4XLARGE, FLEET, REPORTING_MACHINE, Role, target_seconds};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -176,32 +180,73 @@ fn run(name: &str) -> ExitCode {
     };
 
     let scratch = scratch();
-    let mut duckdb = match Duckdb::discover(&scratch) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("rudb-bench: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
-    println!("Measured against {}", duckdb.binary().display());
-    println!();
+    let (mut engines, missing) = discover(&scratch);
 
-    match rudb_bench::report::run(&mut duckdb, suite, queries, SMOKE_LOAD, 5) {
-        Ok(result) => print!("{}", table(&result)),
+    // The data before the engines, because every engine gets the same files and the first thing a
+    // reader of a result asks is which files those were.
+    let dataset = match rudb_bench::data::prepare(suite, &scratch) {
+        Ok(dataset) => dataset,
         Err(e) => {
             eprintln!("rudb-bench: {e}");
             let _ = std::fs::remove_dir_all(&scratch);
             return ExitCode::FAILURE;
         }
+    };
+    for file in &dataset.tables {
+        println!("{:<10}  {}", file.name, file.path.display());
     }
-    let _ = std::fs::remove_dir_all(&scratch);
-
-    // rudb is in the table by being named here rather than by being left out. When it can run, the
-    // loop above takes two engines and this paragraph goes away.
-    let rudb = Rudb;
     println!();
-    println!("{} ({}) did not run: no executor yet, per M0 and M1", rudb.name(), rudb.version());
-    ExitCode::SUCCESS
+
+    let mut compared =
+        rudb_bench::report::compare(&mut engines, suite, queries, &dataset.tables, 5);
+    compared.skipped.extend(missing);
+
+    for result in &compared.results {
+        print!("{}", table(result));
+        println!();
+    }
+    print!("{}", comparison(&compared));
+
+    let _ = std::fs::remove_dir_all(&scratch);
+    if compared.results.is_empty() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+}
+
+/// Every engine on this machine, and a sentence for every one that is not.
+///
+/// DuckDB first, because it is the reference column of the comparison and the ratio row is stated
+/// against it. The order after that is the order section 15.3 names them in, and it is fixed rather
+/// than discovery order so that two runs a week apart produce the same table.
+fn discover(scratch: &std::path::Path) -> (Vec<Box<dyn Engine>>, Vec<Abstention>) {
+    let mut engines: Vec<Box<dyn Engine>> = Vec::new();
+    let mut missing = Vec::new();
+
+    match Duckdb::discover(scratch) {
+        Ok(engine) => engines.push(Box::new(engine)),
+        Err(e) => missing.push(gap("duckdb", &e)),
+    }
+    match ClickhouseLocal::discover(scratch) {
+        Ok(engine) => engines.push(Box::new(engine)),
+        Err(e) => missing.push(gap("clickhouse-local", &e)),
+    }
+    match Datafusion::discover(scratch) {
+        Ok(engine) => engines.push(Box::new(engine)),
+        Err(e) => missing.push(gap("datafusion", &e)),
+    }
+    match Polars::discover(scratch) {
+        Ok(engine) => engines.push(Box::new(engine)),
+        Err(e) => missing.push(gap("polars", &e)),
+    }
+
+    // rudb is always in the list, because an engine that is missing from a comparison because it
+    // could not have been built is a different thing from one that abstains, and only one of those
+    // is where this project actually is.
+    engines.push(Box::new(Rudb::discover(scratch)));
+    (engines, missing)
+}
+
+/// An engine that is not on this machine, as a line of the report.
+fn gap(what: &str, why: &BenchError) -> Abstention {
+    Abstention { engine: what.to_owned(), version: "not found".to_owned(), why: why.to_string() }
 }
 
 /// Where a run puts its data.
@@ -226,13 +271,18 @@ fn help() {
     println!("  fleet         print the development machines and what a number from each is worth");
     println!("  suites        print the suites and what each of them needs before it can run");
     println!("  machine       record the machine, the frequency policy and the mount options");
-    println!("  run [suite]   run a suite and print the per-query table, defaults to smoke");
+    println!("  run [suite]   run a suite on every engine here and compare, defaults to smoke");
     println!("  load          load a suite's data into each engine and time it");
     println!("  report        write the published status page from the last run");
     println!("  -V, --version print the version and exit");
     println!();
-    println!("  RUDB_BENCH_DUCKDB    the DuckDB binary to measure against");
-    println!("  RUDB_BENCH_SCRATCH   where a run puts its data");
+    println!("  RUDB_BENCH_DUCKDB       the DuckDB binary, which is the reference column");
+    println!("  RUDB_BENCH_CLICKHOUSE   the ClickHouse binary, driven as `clickhouse local`");
+    println!("  RUDB_BENCH_DATAFUSION   the datafusion-cli binary");
+    println!("  RUDB_BENCH_PYTHON       a python3 with polars installed");
+    println!("  RUDB_BENCH_RUDB         the rudb binary, when there is one worth running");
+    println!("  RUDB_BENCH_DATA         where the corpora live, default ~/rudb-data");
+    println!("  RUDB_BENCH_SCRATCH      where a run puts its data");
     println!();
     println!("`run` works on the smoke suite, which generates its own data and measures nothing");
     println!("anybody should quote. The suites that matter need a download or a generator and");
