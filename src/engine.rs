@@ -47,7 +47,7 @@ use std::time::{Duration, Instant};
 
 use crate::data::{Table, output, size_of_tree};
 use crate::memory::{Cost, Timer};
-use crate::suite::{Suite, sorting_key};
+use crate::suite::{Suite, columns, sorting_key};
 
 /// Something went wrong with the apparatus, as opposed to a query being slow.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -359,6 +359,8 @@ pub struct ClickhouseLocal {
     version: String,
     data: PathBuf,
     runner: Runner,
+    /// Which suite is running, so the table can be created with that suite's published schema.
+    suite: &'static str,
 }
 
 impl ClickhouseLocal {
@@ -367,7 +369,7 @@ impl ClickhouseLocal {
     /// # Errors
     ///
     /// When the binary is missing or does not answer a version query.
-    pub fn discover(scratch: &Path) -> Result<Self, BenchError> {
+    pub fn discover(scratch: &Path, suite: &'static Suite) -> Result<Self, BenchError> {
         let binary = std::env::var_os("RUDB_BENCH_CLICKHOUSE")
             .map_or_else(|| on_path("clickhouse"), PathBuf::from);
         let version = version_of(
@@ -381,6 +383,7 @@ impl ClickhouseLocal {
             version,
             data: scratch.join("clickhouse"),
             runner: Runner::new(scratch, "clickhouse"),
+            suite: suite.name,
         })
     }
 
@@ -436,14 +439,32 @@ impl Engine for ClickhouseLocal {
         for table in tables {
             // ORDER BY tuple() means no sorting key, which is the honest default for a comparison
             // where nobody else was given one either. ClickBench's own create.sql picks a sorting
-            // key and that belongs to the ClickBench row, where every engine gets the tuning its
-            // published result was measured with.
-            let ran = self.exec(&format!(
-                "CREATE TABLE {} ENGINE = MergeTree ORDER BY tuple() AS SELECT * FROM file('{}', \
-                 Parquet)",
-                table.name,
-                table.path.display()
-            ))?;
+            // key and that belongs to the tuned server row, which is the one row here that gets it.
+            //
+            // The column types are a different question and this row does get those, because an
+            // inferred schema is a wrong schema rather than an untuned one. See `suite::HITS`.
+            let ran = match columns(self.suite, &table.name) {
+                Some(schema) => {
+                    let create = format!(
+                        "CREATE TABLE {} ({schema}) ENGINE = MergeTree ORDER BY tuple()",
+                        table.name
+                    );
+                    let insert = format!(
+                        "INSERT INTO {} SELECT * FROM file('{}', Parquet)",
+                        table.name,
+                        table.path.display()
+                    );
+                    let made = self.exec(&create)?;
+                    cpu = add(cpu, made.cost.cpu);
+                    self.exec(&insert)?
+                }
+                None => self.exec(&format!(
+                    "CREATE TABLE {} ENGINE = MergeTree ORDER BY tuple() AS SELECT * FROM \
+                     file('{}', Parquet)",
+                    table.name,
+                    table.path.display()
+                ))?,
+            };
             cpu = add(cpu, ran.cost.cpu);
         }
         let took = start.elapsed();
@@ -697,7 +718,17 @@ impl Engine for ClickhouseServer {
         let start = Instant::now();
         let mut keys = Vec::with_capacity(tables.len());
         for table in tables {
-            let columns = self.columns_of(&table.path)?;
+            // The published schema when the suite has one, and inference when it does not. A
+            // column ClickHouse inferred out of Parquet comes back Nullable, which costs a null
+            // map and turns several things off, and it is not what the official create.sql says.
+            let described;
+            let columns = match columns(self.suite, &table.name) {
+                Some(schema) => schema,
+                None => {
+                    described = self.columns_of(&table.path)?;
+                    &described
+                }
+            };
             let key = sorting_key(self.suite, &table.name);
             keys.push(format!("{} by {key}", table.name));
             self.exec(&format!(

@@ -133,7 +133,8 @@ fn every_engine_on_this_machine_gets_the_same_file_and_answers_the_same_thing() 
     let tables = small(&duckdb, &at);
 
     let mut engines: Vec<Box<dyn Engine>> = vec![Box::new(duckdb)];
-    if let Ok(engine) = ClickhouseLocal::discover(&at) {
+    let smoke = find("smoke").expect("smoke is a suite");
+    if let Ok(engine) = ClickhouseLocal::discover(&at, smoke) {
         engines.push(Box::new(engine));
     }
     if let Ok(engine) = Datafusion::discover(&at) {

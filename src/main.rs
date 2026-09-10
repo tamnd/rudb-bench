@@ -461,7 +461,7 @@ fn discover(
         Ok(engine) => engines.push(Box::new(engine)),
         Err(e) => missing.push(gap("duckdb", &e)),
     }
-    match ClickhouseLocal::discover(scratch) {
+    match ClickhouseLocal::discover(scratch, suite) {
         Ok(engine) => engines.push(Box::new(engine)),
         Err(e) => missing.push(gap("clickhouse-local", &e)),
     }
