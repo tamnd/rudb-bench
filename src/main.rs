@@ -11,6 +11,12 @@
 //!
 //! The subcommand names come from `spec/15-rudb-bench.md` and the nightly job in the rudb
 //! repository calls them by name, so they are a decision rather than an afterthought.
+//!
+//! `run` also carries the regression gate, in [`rudb_bench::regress`]. `--check` is what CI runs
+//! and `--record` is what puts a run into the committed file. They are flags on `run` rather than
+//! subcommands of their own because the gate compares a run that just happened, and a `check`
+//! subcommand that secretly ran the suite first would be a command whose name hid the expensive
+//! half of what it does.
 
 #![forbid(unsafe_code)]
 
@@ -18,6 +24,7 @@ use std::process::ExitCode;
 
 use rudb_bench::engine::{BenchError, ClickhouseLocal, Datafusion, Duckdb, Engine, Polars, Rudb};
 use rudb_bench::machine;
+use rudb_bench::regress::{self, FACTOR, Watch};
 use rudb_bench::report::{Abstention, comparison, table};
 use rudb_bench::suite::{SUITES, queries};
 use rudb_bench::{CLICKBENCH_C6A_4XLARGE, FLEET, REPORTING_MACHINE, Role, target_seconds};
@@ -47,7 +54,13 @@ fn main() -> ExitCode {
             machine_record();
             ExitCode::SUCCESS
         }
-        Some("run") => run(args.get(1).map_or("smoke", String::as_str)),
+        Some("run") => match plan(&args[1..]) {
+            Ok(plan) => run(&plan),
+            Err(e) => {
+                eprintln!("rudb-bench: {e}");
+                ExitCode::FAILURE
+            }
+        },
         Some("load" | "report") => {
             eprintln!("rudb-bench: not built yet, see spec/15-rudb-bench.md in tamnd/rudb");
             ExitCode::FAILURE
@@ -166,8 +179,102 @@ fn machine_record() {
     println!("not assumed, because the assumption that fails silently is the frequency policy.");
 }
 
+/// What `run` does with the committed records afterwards.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Gate {
+    /// Print the table and stop, which is what a person asking for numbers wants.
+    Nothing,
+    /// Compare against the records and fail on a regression.
+    Check(Watch),
+    /// Replace the records for the engines that ran here.
+    Record,
+}
+
+impl Gate {
+    /// How many hot runs this job wants.
+    ///
+    /// Five for a person asking for a table, which is the floor rule two sets and the number that
+    /// gets an answer back in a minute. Fifteen for anything that writes or reads a committed
+    /// record, because the interquartile range of five samples is the gap between the second and
+    /// the fourth of them, and that is a crude estimate of a spread rather than a measurement of
+    /// one. On `smoke`, where a query is under a second, five samples put every engine over the ten
+    /// percent line on an idle machine, which would make a gate built on the spread useless before
+    /// it ever caught anything. More samples cost seconds and buy the difference between a gate and
+    /// a decoration.
+    const fn runs(self) -> usize {
+        match self {
+            Self::Nothing => 5,
+            Self::Check(_) | Self::Record => 15,
+        }
+    }
+}
+
+/// What a `run` invocation asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Plan {
+    /// The suite.
+    suite: String,
+    /// What to do with the committed records afterwards.
+    gate: Gate,
+    /// How many hot runs per query.
+    runs: usize,
+}
+
+/// Read the arguments after `run`.
+///
+/// Written out rather than reached for a parser, because the whole argument surface of this program
+/// is one positional and four flags, and an unknown flag has to be an error rather than a suite name
+/// with two dashes in front of it. The three job flags are spelled differently instead of being one
+/// flag with a value: `--check` answers whether something got twice as slow and is safe anywhere,
+/// `--check-drift` answers by how much and is only meaningful on the machine the record came from,
+/// and somebody who types the wrong one gets the wrong question answered rather than a warning.
+fn plan(args: &[String]) -> Result<Plan, String> {
+    let mut suite = None;
+    let mut gate = Gate::Nothing;
+    let mut runs = None;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        let wanted = match arg.as_str() {
+            "--check" => Gate::Check(Watch::Ci),
+            "--check-drift" => Gate::Check(Watch::Scheduled),
+            "--record" => Gate::Record,
+            "--runs" => {
+                let given = rest.next().ok_or("--runs wants a number after it")?;
+                let n: usize =
+                    given.parse().map_err(|e| format!("--runs {given} is not a number, {e}"))?;
+                if n < 5 {
+                    return Err(format!(
+                        "--runs {n} is under the five that reporting rule two requires"
+                    ));
+                }
+                runs = Some(n);
+                continue;
+            }
+            other if other.starts_with("--") => {
+                return Err(format!("unknown option {other}, try `rudb-bench --help`"));
+            }
+            other => {
+                suite = Some(other.to_owned());
+                continue;
+            }
+        };
+        if gate != Gate::Nothing && gate != wanted {
+            return Err("--check, --check-drift and --record are three different jobs, so run \
+                        one of them at a time"
+                .to_owned());
+        }
+        gate = wanted;
+    }
+    Ok(Plan {
+        suite: suite.unwrap_or_else(|| "smoke".to_owned()),
+        gate,
+        runs: runs.unwrap_or_else(|| gate.runs()),
+    })
+}
+
 /// Run a suite against every engine that can run it, and print the table.
-fn run(name: &str) -> ExitCode {
+fn run(plan: &Plan) -> ExitCode {
+    let name = plan.suite.as_str();
     let Some(suite) = rudb_bench::suite::find(name) else {
         eprintln!("rudb-bench: no suite called {name}");
         eprintln!("rudb-bench: try `rudb-bench suites`");
@@ -198,7 +305,7 @@ fn run(name: &str) -> ExitCode {
     println!();
 
     let mut compared =
-        rudb_bench::report::compare(&mut engines, suite, queries, &dataset.tables, 5);
+        rudb_bench::report::compare(&mut engines, suite, queries, &dataset.tables, plan.runs);
     compared.skipped.extend(missing);
 
     for result in &compared.results {
@@ -208,7 +315,59 @@ fn run(name: &str) -> ExitCode {
     print!("{}", comparison(&compared));
 
     let _ = std::fs::remove_dir_all(&scratch);
-    if compared.results.is_empty() { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+    if compared.results.is_empty() {
+        return ExitCode::FAILURE;
+    }
+    match plan.gate {
+        Gate::Nothing => ExitCode::SUCCESS,
+        Gate::Check(watch) => check(&compared, watch),
+        Gate::Record => record(&compared),
+    }
+}
+
+/// Compare what just ran against the committed records.
+fn check(compared: &rudb_bench::report::Comparison, watch: Watch) -> ExitCode {
+    let at = regress::path(compared.suite.name);
+    let records = match regress::read(&at) {
+        Ok(records) => records,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let here = machine::name_here();
+    let verdicts = regress::check_all(&records, compared, &here, watch);
+    println!("{}", at.display());
+    print!("{}", regress::report(&verdicts, watch, records.len()));
+    // A machine with no record passes. The alternative is a gate that cannot be introduced without
+    // being introduced on every machine at once, and the sentence above says how to make it a gate
+    // here, which is the part that stops it being a hole nobody notices.
+    if verdicts.iter().any(regress::Verdict::failed) {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// Write what just ran into the committed records.
+fn record(compared: &rudb_bench::report::Comparison) -> ExitCode {
+    let at = regress::path(compared.suite.name);
+    let here = machine::name_here();
+    let today = regress::today();
+    let taken: Vec<regress::Record> =
+        compared.results.iter().map(|r| regress::Record::of(r, &here, &today)).collect();
+    if let Err(e) = regress::write(&at, &taken) {
+        eprintln!("rudb-bench: {e}");
+        return ExitCode::FAILURE;
+    }
+    println!("{}", at.display());
+    for record in &taken {
+        println!("  {}", regress::describe_record(record));
+    }
+    println!();
+    println!("Read the diff before committing it. A record taken on a machine somebody else was");
+    println!("using is a record that raises the bar the gate has to clear, quietly and forever.");
+    ExitCode::SUCCESS
 }
 
 /// Every engine on this machine, and a sentence for every one that is not.
@@ -272,6 +431,16 @@ fn help() {
     println!("  suites        print the suites and what each of them needs before it can run");
     println!("  machine       record the machine, the frequency policy and the mount options");
     println!("  run [suite]   run a suite on every engine here and compare, defaults to smoke");
+    println!(
+        "    --check         fail when a query got {FACTOR:.0}x slower and left its recorded range"
+    );
+    println!(
+        "    --check-drift   the same at {:.0}%, and only on the machine the record came from",
+        (regress::DRIFT - 1.0) * 100.0
+    );
+    println!("    --record        replace the committed records for the engines that ran here");
+    println!("    --runs n        hot runs per query, five at least, default five and fifteen");
+    println!("                    for anything that reads or writes a record");
     println!("  load          load a suite's data into each engine and time it");
     println!("  report        write the published status page from the last run");
     println!("  -V, --version print the version and exit");
@@ -283,9 +452,76 @@ fn help() {
     println!("  RUDB_BENCH_RUDB         the rudb binary, when there is one worth running");
     println!("  RUDB_BENCH_DATA         where the corpora live, default ~/rudb-data");
     println!("  RUDB_BENCH_SCRATCH      where a run puts its data");
+    println!("  RUDB_BENCH_MACHINE      what to call this machine in a committed record");
+    println!("  RUDB_BENCH_BASELINE     the records file, default baselines/<suite>.txt");
     println!();
     println!("`run` works on the smoke suite, which generates its own data and measures nothing");
     println!("anybody should quote. The suites that matter need a download or a generator and");
     println!("`suites` says which. The design is spec/15-rudb-bench.md in");
     println!("https://github.com/tamnd/rudb.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Gate, plan};
+    use rudb_bench::regress::Watch;
+
+    fn args(line: &str) -> Vec<String> {
+        line.split_whitespace().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn no_arguments_at_all_is_the_smoke_suite_and_no_gate() {
+        let got = plan(&[]).expect("nothing is a valid thing to ask for");
+        assert_eq!(got.suite, "smoke");
+        assert_eq!(got.gate, Gate::Nothing);
+        assert_eq!(got.runs, 5);
+    }
+
+    #[test]
+    fn a_gate_takes_more_samples_than_a_person_looking_at_a_table_does() {
+        // The reason this is not one number: five samples put every engine on this suite over the
+        // ten percent line on an idle server, so a gate built on the spread at five samples would
+        // report noise on every run and catch nothing.
+        assert_eq!(plan(&args("smoke --check")).unwrap().runs, 15);
+        assert_eq!(plan(&args("smoke --record")).unwrap().runs, 15);
+        assert_eq!(plan(&args("smoke")).unwrap().runs, 5);
+    }
+
+    #[test]
+    fn the_two_checks_are_two_different_questions_and_are_spelled_differently() {
+        assert_eq!(plan(&args("smoke --check")).unwrap().gate, Gate::Check(Watch::Ci));
+        assert_eq!(plan(&args("smoke --check-drift")).unwrap().gate, Gate::Check(Watch::Scheduled));
+    }
+
+    #[test]
+    fn the_number_after_runs_is_not_mistaken_for_the_suite() {
+        // The bug this is written against: a positional suite name and a flag that takes a value,
+        // where the naive read of "the first argument without dashes" makes 15 the suite.
+        let got = plan(&args("--runs 15 tpch")).expect("a flag with a value and a positional");
+        assert_eq!(got.suite, "tpch");
+        assert_eq!(got.runs, 15);
+    }
+
+    #[test]
+    fn fewer_than_five_runs_is_refused_by_name() {
+        let e = plan(&args("smoke --runs 3")).unwrap_err();
+        assert!(e.contains("rule two"), "{e}");
+        assert!(plan(&args("smoke --runs")).is_err());
+        assert!(plan(&args("smoke --runs many")).is_err());
+    }
+
+    #[test]
+    fn two_jobs_at_once_is_refused_rather_than_silently_being_the_last_one() {
+        let e = plan(&args("smoke --record --check")).unwrap_err();
+        assert!(e.contains("one of them at a time"), "{e}");
+        // The same one twice is fine, because it is not ambiguous.
+        assert!(plan(&args("smoke --check --check")).is_ok());
+    }
+
+    #[test]
+    fn an_unknown_flag_is_an_error_and_not_a_suite_with_dashes_on_it() {
+        let e = plan(&args("smoke --fast")).unwrap_err();
+        assert!(e.contains("--fast"), "{e}");
+    }
 }
