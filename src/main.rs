@@ -25,6 +25,7 @@ use std::process::ExitCode;
 use rudb_bench::engine::{
     BenchError, ClickhouseLocal, ClickhouseServer, Datafusion, Duckdb, Engine, Polars, Rudb,
 };
+use rudb_bench::ledger;
 use rudb_bench::machine;
 use rudb_bench::regress::{self, FACTOR, Watch};
 use rudb_bench::report::{Abstention, comparison, table};
@@ -56,6 +57,7 @@ fn main() -> ExitCode {
             machine_record();
             ExitCode::SUCCESS
         }
+        Some("ledger") => ledger(),
         Some("run") => match plan(&args[1..]) {
             Ok(plan) => run(&plan),
             Err(e) => {
@@ -220,6 +222,12 @@ struct Plan {
     gate: Gate,
     /// How many hot runs per query.
     runs: usize,
+    /// The layer to store this run under in the attribution ledger, when it closes one.
+    ///
+    /// Separate from [`Gate`] because it is a separate question. `--record` moves the bar the
+    /// regression gate compares against, and `--store` adds a row to the history of what each layer
+    /// bought. A run that closes a layer usually wants both and neither implies the other.
+    store: Option<String>,
 }
 
 /// Read the arguments after `run`.
@@ -234,6 +242,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     let mut suite = None;
     let mut gate = Gate::Nothing;
     let mut runs = None;
+    let mut store = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let wanted = match arg.as_str() {
@@ -250,6 +259,18 @@ fn plan(args: &[String]) -> Result<Plan, String> {
                     ));
                 }
                 runs = Some(n);
+                continue;
+            }
+            "--store" => {
+                let given = rest.next().ok_or(
+                    "--store wants the layer this run closes after it, such as `--store 2a`",
+                )?;
+                if given.starts_with("--") {
+                    return Err(format!(
+                        "--store wants a layer name after it and got {given}, which is a flag"
+                    ));
+                }
+                store = Some(given.clone());
                 continue;
             }
             other if other.starts_with("--") => {
@@ -271,6 +292,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
         suite: suite.unwrap_or_else(|| "smoke".to_owned()),
         gate,
         runs: runs.unwrap_or_else(|| gate.runs()),
+        store,
     })
 }
 
@@ -319,6 +341,14 @@ fn run(plan: &Plan) -> ExitCode {
     let _ = std::fs::remove_dir_all(&scratch);
     if compared.results.is_empty() {
         return ExitCode::FAILURE;
+    }
+    // Before the gate, so that a run which closes a layer and fails its own regression check still
+    // leaves the row behind. The ledger is a history and the afternoon something got slower is
+    // exactly the afternoon a history is worth having.
+    if let Some(layer) = plan.store.as_deref() {
+        if store(&compared, layer) == ExitCode::FAILURE {
+            return ExitCode::FAILURE;
+        }
     }
     match plan.gate {
         Gate::Nothing => ExitCode::SUCCESS,
@@ -369,6 +399,42 @@ fn record(compared: &rudb_bench::report::Comparison) -> ExitCode {
     println!();
     println!("Read the diff before committing it. A record taken on a machine somebody else was");
     println!("using is a record that raises the bar the gate has to clear, quietly and forever.");
+    ExitCode::SUCCESS
+}
+
+/// Add what just ran to the committed runs, as the row that closes a layer.
+fn store(compared: &rudb_bench::report::Comparison, layer: &str) -> ExitCode {
+    let at = ledger::path(compared.suite.name);
+    let run = ledger::Stored::of(
+        compared,
+        &machine::name_here(),
+        layer,
+        &ledger::commit_here(),
+        &regress::today(),
+    );
+    if let Err(e) = ledger::write(&at, &run) {
+        eprintln!("rudb-bench: {e}");
+        return ExitCode::FAILURE;
+    }
+    println!("{}", at.display());
+    println!("  stored as the run closing {layer} on {}", run.machine);
+    println!();
+    ExitCode::SUCCESS
+}
+
+/// Print the attribution ledger over every suite that has stored runs.
+fn ledger() -> ExitCode {
+    let mut stored = Vec::new();
+    for suite in SUITES {
+        match ledger::read(&ledger::path(suite.name)) {
+            Ok(runs) => stored.extend(runs),
+            Err(e) => {
+                eprintln!("rudb-bench: {e}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    print!("{}", ledger::report(&ledger::rows(&stored)));
     ExitCode::SUCCESS
 }
 
@@ -455,8 +521,10 @@ fn help() {
         (regress::DRIFT - 1.0) * 100.0
     );
     println!("    --record        replace the committed records for the engines that ran here");
+    println!("    --store <layer> add this run to the ledger as the row that closes a layer");
     println!("    --runs n        hot runs per query, five at least, default five and fifteen");
     println!("                    for anything that reads or writes a record");
+    println!("  ledger        print what each layer bought, from the committed runs");
     println!("  load          load a suite's data into each engine and time it");
     println!("  report        write the published status page from the last run");
     println!("  -V, --version print the version and exit");

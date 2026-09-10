@@ -87,6 +87,32 @@ A query that swung wider than ten percent on the day is reported and never faile
 
 So the gate prints how many queries it actually compared on every run, and says plainly that a run which compared none of them should be read as a red rather than a green. The fix is not a bigger threshold. It is to stop timing `execve`, which is the in-process measurement path at sub-milestone 2b.
 
+### The attribution ledger
+
+Section 2.8 of the engine specification asks for a series rather than a table. Each layer of the engine closes with a row, the row carries the before and the after on total time, CPU seconds, peak resident and bytes read on the same machine, and the release notes are written from it. The argument for it is that a release note claiming the hash table made joins faster and unable to point at a row is a release note that is guessing.
+
+`rudb-bench run smoke --store "2a the baseline"` appends what just ran to `runs/smoke.txt`, which is committed, and `rudb-bench ledger` renders it. Nothing in the ledger is written by hand, because a hand maintained ledger is one that acquires a good number nobody can reproduce. The first row is in:
+
+```
+$ rudb-bench ledger
+[2a the baseline] smoke on server3
+closed by harness 598e065 on 2026-09-10
+against nothing, this is where the series starts on this suite and machine
+
+engine                        hot      hot cpu     peak RSS         read         load      on disk
+duckdb                  766.122ms       2.110s   125.62 MiB          0 B       1.458s    92.01 MiB
+clickhouse-local           4.445s      13.000s   379.86 MiB          0 B       1.957s    49.49 MiB
+datafusion              951.643ms       2.140s   172.48 MiB          0 B      0.000us    10.41 MiB
+polars                     3.007s       5.570s   190.71 MiB          0 B      0.000us    10.41 MiB
+clickhouse-server          1.896s     not read     not read     not read       6.678s    50.44 MiB
+```
+
+rudb is not in it, because rudb cannot run a query yet, and the harness says not built did not run rather than printing a blank. That is what the first row of a series looks like and it is worth committing anyway: every later row is a ratio against something, and this is the something.
+
+Later rows print the change under each number. What matters more than the change is the line above it: when a rival's version moved between two rows the ledger names it and says that a ratio across that boundary is a ratio between two different comparisons. That is the failure this file exists to catch, which is a layer taking the credit for DuckDB shipping a release in the middle of it.
+
+`runs/<suite>.txt` and `baselines/<suite>.txt` look alike and are not interchangeable. A baseline record is per query and holds three quartiles, because the gate asks whether one query got twice as slow. A run is per engine and holds totals, because the ledger asks what a layer bought across a suite. Records are replaced when they are retaken and runs never are, because a history that overwrites itself is a table.
+
 ## The reporting rules
 
 These apply to the README, release notes, the dashboard, any talk, any post, and any conversation. They are in the engine's specification in full and this is the short version.
