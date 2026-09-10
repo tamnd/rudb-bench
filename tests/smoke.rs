@@ -56,7 +56,7 @@ fn small(duckdb: &Duckdb, at: &std::path::Path) -> Vec<Table> {
 #[test]
 fn the_whole_measurement_path_produces_a_table_a_person_can_read() {
     let at = scratch("path");
-    let Ok(mut duckdb) = Duckdb::discover(&at) else {
+    let Ok(mut duckdb) = Duckdb::discover(&at, find("smoke").unwrap()) else {
         eprintln!("skipping, no DuckDB on this machine");
         return;
     };
@@ -87,7 +87,7 @@ fn the_whole_measurement_path_produces_a_table_a_person_can_read() {
 #[test]
 fn a_number_measured_here_can_never_be_published() {
     let at = scratch("publish");
-    let Ok(mut duckdb) = Duckdb::discover(&at) else {
+    let Ok(mut duckdb) = Duckdb::discover(&at, find("smoke").unwrap()) else {
         eprintln!("skipping, no DuckDB on this machine");
         return;
     };
@@ -109,7 +109,7 @@ fn a_number_measured_here_can_never_be_published() {
 #[test]
 fn a_query_that_does_not_run_stops_the_suite_rather_than_scoring_zero() {
     let at = scratch("bad");
-    let Ok(mut duckdb) = Duckdb::discover(&at) else {
+    let Ok(mut duckdb) = Duckdb::discover(&at, find("smoke").unwrap()) else {
         eprintln!("skipping, no DuckDB on this machine");
         return;
     };
@@ -126,7 +126,7 @@ fn a_query_that_does_not_run_stops_the_suite_rather_than_scoring_zero() {
 #[test]
 fn every_engine_on_this_machine_gets_the_same_file_and_answers_the_same_thing() {
     let at = scratch("compare");
-    let Ok(duckdb) = Duckdb::discover(&at) else {
+    let Ok(duckdb) = Duckdb::discover(&at, find("smoke").unwrap()) else {
         eprintln!("skipping, no DuckDB on this machine");
         return;
     };
@@ -137,10 +137,10 @@ fn every_engine_on_this_machine_gets_the_same_file_and_answers_the_same_thing() 
     if let Ok(engine) = ClickhouseLocal::discover(&at, smoke) {
         engines.push(Box::new(engine));
     }
-    if let Ok(engine) = Datafusion::discover(&at) {
+    if let Ok(engine) = Datafusion::discover(&at, smoke) {
         engines.push(Box::new(engine));
     }
-    if let Ok(engine) = Polars::discover(&at) {
+    if let Ok(engine) = Polars::discover(&at, smoke) {
         engines.push(Box::new(engine));
     }
     engines.push(Box::new(Rudb::discover(&at)));

@@ -47,7 +47,7 @@ use std::time::{Duration, Instant};
 
 use crate::data::{Table, output, size_of_tree};
 use crate::memory::{Cost, Timer};
-use crate::suite::{Suite, columns, sorting_key};
+use crate::suite::{Fixup, Loading, Suite, loading, sorting_key};
 
 /// Something went wrong with the apparatus, as opposed to a query being slow.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -258,6 +258,8 @@ pub struct Duckdb {
     version: String,
     database: PathBuf,
     runner: Runner,
+    /// Which suite is running, so the table can be built the way this engine's own entry builds it.
+    suite: &'static str,
 }
 
 impl Duckdb {
@@ -270,7 +272,7 @@ impl Duckdb {
     /// # Errors
     ///
     /// When the binary is missing or does not answer `--version`.
-    pub fn discover(scratch: &Path) -> Result<Self, BenchError> {
+    pub fn discover(scratch: &Path, suite: &'static Suite) -> Result<Self, BenchError> {
         let binary =
             std::env::var_os("RUDB_BENCH_DUCKDB").map_or_else(|| on_path("duckdb"), PathBuf::from);
         let version = version_of(&binary, &["--version"], "RUDB_BENCH_DUCKDB")?;
@@ -280,6 +282,7 @@ impl Duckdb {
             version,
             database: scratch.join("bench.duckdb"),
             runner: Runner::new(scratch, "duckdb"),
+            suite: suite.name,
         })
     }
 
@@ -335,16 +338,34 @@ impl Engine for Duckdb {
 
     fn load(&mut self, tables: &[Table]) -> Result<Loaded, BenchError> {
         let _ = std::fs::remove_file(&self.database);
-        let statements: Vec<String> = tables
-            .iter()
-            .map(|t| {
-                format!(
+        // The engine's own entry when the board publishes one, and a plain CTAS when it does not.
+        // The plain CTAS is right for a suite nobody published a schema for and wrong for
+        // ClickBench, where it leaves EventTime an integer and q19's extract(minute FROM EventTime)
+        // has nothing to resolve against. That is not a hypothetical: it is how the first full
+        // ClickBench run on gamingpc-wsl produced no DuckDB column at all.
+        let mut statements: Vec<String> = Vec::with_capacity(tables.len() * 2);
+        for t in tables {
+            match loading(self.suite, "duckdb", &t.name) {
+                Some(Loading {
+                    columns: Some(schema),
+                    fixup: Fixup::Select(select),
+                    options,
+                    ..
+                }) => {
+                    statements.push(format!("CREATE TABLE {} ({schema})", t.name));
+                    statements.push(format!(
+                        "INSERT INTO {} SELECT {select} FROM read_parquet('{}', {options})",
+                        t.name,
+                        t.path.display()
+                    ));
+                }
+                _ => statements.push(format!(
                     "CREATE TABLE {} AS SELECT * FROM read_parquet('{}')",
                     t.name,
                     t.path.display()
-                )
-            })
-            .collect();
+                )),
+            }
+        }
         let refs: Vec<&str> = statements.iter().map(String::as_str).collect();
 
         let start = Instant::now();
@@ -479,7 +500,7 @@ impl Engine for ClickhouseLocal {
             //
             // The column types are a different question and this row does get those, because an
             // inferred schema is a wrong schema rather than an untuned one. See `suite::HITS`.
-            let ran = match columns(self.suite, &table.name) {
+            let ran = match loading(self.suite, self.name(), &table.name).and_then(|l| l.columns) {
                 Some(schema) => {
                     let create = format!(
                         "CREATE TABLE {} ({schema}) ENGINE = MergeTree ORDER BY tuple()",
@@ -765,13 +786,14 @@ impl Engine for ClickhouseServer {
             // column ClickHouse inferred out of Parquet comes back Nullable, which costs a null
             // map and turns several things off, and it is not what the official create.sql says.
             let described;
-            let columns = match columns(self.suite, &table.name) {
-                Some(schema) => schema,
-                None => {
-                    described = self.columns_of(&table.path)?;
-                    &described
-                }
-            };
+            let columns =
+                match loading(self.suite, self.name(), &table.name).and_then(|l| l.columns) {
+                    Some(schema) => schema,
+                    None => {
+                        described = self.columns_of(&table.path)?;
+                        &described
+                    }
+                };
             let key = sorting_key(self.suite, &table.name);
             keys.push(format!("{} by {key}", table.name));
             self.exec(&format!(
@@ -971,6 +993,9 @@ pub struct Datafusion {
     ddl: Vec<String>,
     source_bytes: u64,
     runner: Runner,
+    /// Which suite is running, so the table can be declared the way this engine's own entry
+    /// declares it.
+    suite: &'static str,
 }
 
 impl Datafusion {
@@ -979,7 +1004,7 @@ impl Datafusion {
     /// # Errors
     ///
     /// When the binary is missing or does not answer `--version`.
-    pub fn discover(scratch: &Path) -> Result<Self, BenchError> {
+    pub fn discover(scratch: &Path, suite: &'static Suite) -> Result<Self, BenchError> {
         let binary = std::env::var_os("RUDB_BENCH_DATAFUSION")
             .map_or_else(|| on_path("datafusion-cli"), PathBuf::from);
         let version = version_of(&binary, &["--version"], "RUDB_BENCH_DATAFUSION")?;
@@ -990,6 +1015,7 @@ impl Datafusion {
             ddl: Vec::new(),
             source_bytes: 0,
             runner: Runner::new(scratch, "datafusion"),
+            suite: suite.name,
         })
     }
 }
@@ -1011,16 +1037,32 @@ impl Engine for Datafusion {
         // Nothing is converted, so nothing is timed. The table definitions are kept and replayed in
         // front of every query, because `datafusion-cli` has no catalog that outlives a process and
         // this harness starts a fresh one per run on purpose.
-        self.ddl = tables
-            .iter()
-            .map(|t| {
-                format!(
+        self.ddl = Vec::with_capacity(tables.len() * 2);
+        for t in tables {
+            // The entry's own reader options and its own view, when the board publishes them. On
+            // ClickBench that is `binary_as_string`, without which every string column arrives as
+            // Binary and the queries that compare one against a literal produce nothing at all,
+            // which is exactly the empty datafusion column the first full run produced.
+            match loading(self.suite, "datafusion", &t.name) {
+                Some(Loading { fixup: Fixup::View(view), options, .. }) => {
+                    let raw = format!("{}_raw", t.name);
+                    self.ddl.push(format!(
+                        "CREATE EXTERNAL TABLE {raw} STORED AS PARQUET LOCATION '{}' {options}",
+                        t.path.display()
+                    ));
+                    self.ddl.push(format!(
+                        "CREATE VIEW {} AS {}",
+                        t.name,
+                        view.replace("{raw}", &raw)
+                    ));
+                }
+                _ => self.ddl.push(format!(
                     "CREATE EXTERNAL TABLE {} STORED AS PARQUET LOCATION '{}'",
                     t.name,
                     t.path.display()
-                )
-            })
-            .collect();
+                )),
+            }
+        }
         self.source_bytes = tables.iter().map(|t| t.bytes).sum();
         Ok(Loaded {
             took: Duration::ZERO,
@@ -1084,6 +1126,8 @@ pub struct Polars {
     tables: Vec<Table>,
     runner: Runner,
     script: PathBuf,
+    /// Which suite is running, so the scan can be built the way this engine's own entry builds it.
+    suite: &'static str,
 }
 
 impl Polars {
@@ -1092,7 +1136,7 @@ impl Polars {
     /// # Errors
     ///
     /// When there is no Python, or when the Python there is cannot import Polars.
-    pub fn discover(scratch: &Path) -> Result<Self, BenchError> {
+    pub fn discover(scratch: &Path, suite: &'static Suite) -> Result<Self, BenchError> {
         let python =
             std::env::var_os("RUDB_BENCH_PYTHON").map_or_else(|| on_path("python3"), PathBuf::from);
         let version = version_of(
@@ -1111,6 +1155,7 @@ impl Polars {
             tables: Vec::new(),
             runner: Runner::new(scratch, "polars"),
             script: scratch.join("polars-run.py"),
+            suite: suite.name,
         })
     }
 }
@@ -1125,9 +1170,13 @@ import polars as pl
 
 sql = sys.argv[1]
 ctx = pl.SQLContext()
-for pair in sys.argv[2:]:
-    name, path = pair.split("=", 1)
-    ctx.register(name, pl.scan_parquet(path))
+for triple in sys.argv[2:]:
+    name, rest = triple.split("=", 1)
+    path, columns = rest.split("\n", 1)
+    frame = pl.scan_parquet(path)
+    if columns:
+        frame = frame.with_columns(eval(columns))
+    ctx.register(name, frame)
 ctx.execute(sql).sink_csv(
     sys.stdout,
     include_header=False,
@@ -1167,7 +1216,15 @@ impl Engine for Polars {
         let mut command = self.runner.command(&self.python);
         command.arg(&self.script).arg(sql);
         for table in &self.tables {
-            command.arg(format!("{}={}", table.name, table.path.display()));
+            // Name, path and the scan expressions, in one argument, separated by a newline that
+            // cannot occur in any of the three. A separate argument per part would work equally
+            // well and would make the argument list stop being one thing per table, which is the
+            // property that makes a failing run reproducible by hand from the log.
+            let columns = match loading(self.suite, "polars", &table.name) {
+                Some(Loading { fixup: Fixup::Columns(text), .. }) => text,
+                _ => "",
+            };
+            command.arg(format!("{}={}\n{columns}", table.name, table.path.display()));
         }
         self.runner.go(command, "polars")
     }
@@ -1321,7 +1378,7 @@ mod tests {
     #[test]
     fn a_duckdb_on_this_machine_loads_a_parquet_and_runs_and_reports_a_size() {
         let scratch = scratch("duck");
-        let Ok(mut duckdb) = Duckdb::discover(&scratch) else {
+        let Ok(mut duckdb) = Duckdb::discover(&scratch, find("smoke").unwrap()) else {
             eprintln!("skipping, no DuckDB on this machine");
             return;
         };
@@ -1368,7 +1425,7 @@ mod tests {
     #[test]
     fn a_query_that_fails_is_an_error_and_not_a_fast_run() {
         let scratch = scratch("bad");
-        let Ok(mut duckdb) = Duckdb::discover(&scratch) else {
+        let Ok(mut duckdb) = Duckdb::discover(&scratch, find("smoke").unwrap()) else {
             eprintln!("skipping, no DuckDB on this machine");
             return;
         };
