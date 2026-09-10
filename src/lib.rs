@@ -5,15 +5,32 @@
 //! than on any technical decision in the engine. A benchmark number without its methodology is
 //! marketing.
 //!
-//! Nothing here runs a query yet. What exists is the shape of a result and the recorded baselines
-//! it will be compared against, because the baselines were computed before there was anything to
-//! flatter and that is the only time they are worth anything.
+//! rudb cannot run a query yet, so what is measured today is a real DuckDB on a small generated
+//! dataset. That is not a placeholder. Every reporting rule in section 15.1 is a property of the
+//! apparatus rather than of the engine, and every one of them is easier to build now, against an
+//! engine nobody has any stake in, than on the afternoon somebody wants a headline.
+//!
+//! The rules that are enforced rather than remembered: the median of at least five runs with the
+//! interquartile range, in [`measure`]; peak resident memory as a value that is either a number or
+//! a reason, in [`memory`]; cold separated from hot, load time and on-disk size next to every
+//! runtime result, and the whole suite including the losses, in [`report`]. A result that breaks
+//! one of them still prints. It just prints with the reason it may not be published underneath it,
+//! which today is never an empty list, because no machine this project owns is a `c6a.4xlarge`.
+//!
+//! The recorded baselines below were computed before there was anything to flatter, which is the
+//! only time a baseline is worth anything.
 //!
 //! [rudb repository]: https://github.com/tamnd/rudb
 
 #![forbid(unsafe_code)]
 
+pub mod engine;
 pub mod fleet;
+pub mod machine;
+pub mod measure;
+pub mod memory;
+pub mod report;
+pub mod suite;
 
 pub use fleet::{FLEET, Machine, REPORTING_MACHINE, Role};
 
