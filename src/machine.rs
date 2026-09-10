@@ -99,6 +99,19 @@ fn threads() -> Fact {
     Fact::unknown("threads", "neither /proc/cpuinfo nor hw.logicalcpu answered")
 }
 
+/// Hardware threads as a number, for the code that has to do arithmetic with it.
+///
+/// [`std::thread::available_parallelism`] rather than the `/proc/cpuinfo` count above, because it
+/// takes the affinity mask and the cgroup quota into account and those are the ceiling that
+/// actually applies. The two disagree inside a container, and inside a container the smaller one is
+/// right. One when the system will not say, which makes the CPU plausibility check strict rather
+/// than absent, and a strict check that fires is easier to notice than a check that quietly did
+/// not run.
+#[must_use]
+pub fn threads_here() -> usize {
+    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
+}
+
 /// Installed memory.
 fn memory() -> Fact {
     if let Some(line) = field_in_file("/proc/meminfo", "MemTotal") {

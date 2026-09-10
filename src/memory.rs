@@ -1,4 +1,4 @@
-//! Peak resident memory, which reporting rule six says goes next to every runtime result.
+//! What a run cost besides wall clock: peak resident memory, CPU seconds and bytes read.
 //!
 //! A query that is fast because it used 30 GB is not fast, it is expensive, and axis 4 of
 //! `spec/02-the-goal.md` makes the resource claim first class rather than a footnote. So the type a
@@ -6,6 +6,13 @@
 //! there is no number, and a result whose peak is a reason is not publishable. That way an engine
 //! measured on a machine where the peak could not be read produces a table that says so instead of
 //! a table with a blank column somebody fills in from memory later.
+//!
+//! CPU seconds and bytes read are in a [`Cost`] next to it, for two different reasons. CPU seconds
+//! is the number that says whether a win is an engine or a thread count, and on a fleet where one
+//! machine has four cores and another has eight it is the only cross machine number in the table
+//! that means anything. Bytes read is the number that says whether hot was actually hot. It is
+//! block layer reads, so a run the page cache served reads zero, and a hot run that did not read
+//! zero is a hot run that was not warm.
 //!
 //! ## How it is read
 //!
@@ -18,12 +25,22 @@
 //! kibibytes. BSD wants `-l` and reports bytes. Both are parsed, chosen by which line actually
 //! appeared, rather than by deciding from `cfg!(target_os)` what should have appeared.
 //!
-//! For this process, `/proc/self/status` on Linux and nothing anywhere else. The alternative
-//! everywhere else is `getrusage` through `libc`, and neither a dependency nor an `unsafe` block is
-//! worth it for a number this crate reports as absent honestly.
+//! ## Why not `getrusage`
+//!
+//! `spec/engine/13-measurement.md` asks for `getrusage` with `RUSAGE_CHILDREN` as the source and
+//! `/usr/bin/time` as the cross check. This is the other way round, and the reason is that this
+//! crate has no dependencies and `getrusage` needs either `libc` or an `unsafe` block declaring the
+//! symbol by hand, for a number `/usr/bin/time` already reads out of the same field of the same
+//! struct. The cross check that is left is a bound rather than a second reading:
+//! [`Cost::implausible`] says so when CPU seconds exceed wall clock times the thread count, which
+//! is the shape a misparsed unit takes. On Windows there is no `/usr/bin/time` and the honest
+//! answer is a reason, which is what a missing timer produces everywhere else too.
+//!
+//! For this process, `/proc/self/status` on Linux and nothing anywhere else.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 /// Peak resident memory, or why there is not a number.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,6 +74,43 @@ impl std::fmt::Display for Peak {
             Self::Bytes(n) => write!(f, "{}", bytes(*n)),
             Self::Unavailable(why) => write!(f, "not measured, {why}"),
         }
+    }
+}
+
+/// What one run cost, other than the wall clock the caller timed.
+///
+/// Three fields with three different absence stories, which is why they are not one `Option`. The
+/// peak carries its own reason because rule six blocks publication without it. CPU seconds and
+/// bytes read are plain options, because a machine without a timer has neither and saying the same
+/// sentence three times in one table row helps nobody.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cost {
+    /// High water mark of resident set size.
+    pub peak: Peak,
+    /// User plus system time, over the process and everything it waited for.
+    pub cpu: Option<Duration>,
+    /// Bytes read at the block layer, which is zero when the page cache served the read.
+    pub read: Option<u64>,
+}
+
+impl Cost {
+    /// Nothing was measured, and this is why.
+    #[must_use]
+    pub fn unavailable(why: impl Into<String>) -> Self {
+        Self { peak: Peak::Unavailable(why.into()), cpu: None, read: None }
+    }
+
+    /// Whether the CPU number is impossible on a machine with this many threads.
+    ///
+    /// The bound is generous on purpose. Wall clock times threads is the ceiling, and a run that
+    /// exceeds it has a parsing bug rather than a fast engine, because no scheduler hands out more
+    /// CPU seconds than it has. Half a second of slack covers the timer's own start up, which is
+    /// charged to the child on both flavours.
+    #[must_use]
+    pub fn implausible(&self, wall: Duration, threads: usize) -> bool {
+        #[expect(clippy::cast_precision_loss, reason = "a thread count, not a measurement")]
+        let ceiling = wall.as_secs_f64() * threads as f64 + 0.5;
+        self.cpu.is_some_and(|cpu| cpu.as_secs_f64() > ceiling)
     }
 }
 
@@ -118,13 +172,10 @@ impl Timer {
 
     /// Read back what the timer wrote.
     #[must_use]
-    pub fn read(report: &Path) -> Peak {
+    pub fn read(report: &Path) -> Cost {
         match std::fs::read_to_string(report) {
-            Ok(text) => parse(&text).map_or_else(
-                || Peak::Unavailable("the timer report had no peak in it".to_owned()),
-                Peak::Bytes,
-            ),
-            Err(e) => Peak::Unavailable(format!("cannot read the timer report: {e}")),
+            Ok(text) => parse(&text),
+            Err(e) => Cost::unavailable(format!("cannot read the timer report: {e}")),
         }
     }
 }
@@ -132,28 +183,80 @@ impl Timer {
 /// Whether `/usr/bin/time` accepts a flag, decided by running it on something that always works.
 fn probe(binary: &Path, flag: &str) -> bool {
     Command::new(binary).arg(flag).arg("/usr/bin/true").output().is_ok_and(|out| {
-        out.status.success() && parse(&String::from_utf8_lossy(&out.stderr)).is_some()
+        out.status.success() && parse(&String::from_utf8_lossy(&out.stderr)).peak.measured()
     })
 }
 
-/// Pull the peak out of a `time` report, whichever flavour wrote it.
+/// Pull the peak, the CPU seconds and the blocks read out of a `time` report, whichever flavour
+/// wrote it.
 ///
-/// GNU writes `Maximum resident set size (kbytes): 12345` and means kibibytes. BSD writes
-/// `12345678  maximum resident set size` and means bytes. The unit comes from which line matched
-/// rather than from the platform, because a GNU `time` installed on a Mac is a thing that happens
-/// and reporting its kibibytes as bytes would understate the peak by a factor of 1024.
-fn parse(text: &str) -> Option<u64> {
+/// GNU writes one field per line with a name in front of the number. BSD writes `real user sys` on
+/// one line and then one field per line with the name behind the number. Both are parsed by what
+/// actually appeared rather than by what `cfg!(target_os)` says should have appeared, because a GNU
+/// `time` installed on a Mac is a thing that happens.
+///
+/// The units differ the same way. GNU's peak is kibibytes and BSD's is bytes, and reading one as
+/// the other is out by a factor of 1024. Both count reads in 512 byte blocks, which is the kernel's
+/// unit for `ru_inblock` and not a choice either of them made.
+fn parse(text: &str) -> Cost {
+    const BLOCK: u64 = 512;
+    let mut peak = None;
+    let mut user = None;
+    let mut system = None;
+    let mut blocks = None;
+
     for line in text.lines() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("Maximum resident set size (kbytes):") {
-            return rest.trim().parse::<u64>().ok().map(|kib| kib * 1024);
-        }
-        if line.ends_with("maximum resident set size") {
-            let number = line.split_whitespace().next()?;
-            return number.parse::<u64>().ok();
+            peak = rest.trim().parse::<u64>().ok().map(|kib| kib * 1024);
+        } else if let Some(rest) = line.strip_prefix("User time (seconds):") {
+            user = seconds(rest);
+        } else if let Some(rest) = line.strip_prefix("System time (seconds):") {
+            system = seconds(rest);
+        } else if let Some(rest) = line.strip_prefix("File system inputs:") {
+            blocks = rest.trim().parse::<u64>().ok();
+        } else if line.ends_with("maximum resident set size") {
+            peak = leading(line);
+        } else if line.ends_with("block input operations") {
+            blocks = leading(line);
+        } else if line.contains(" real ") && line.contains(" user ") {
+            // BSD puts all three on one line as `0.01 real 0.00 user 0.00 sys`, so the number in
+            // front of each name is the one that belongs to it.
+            let words: Vec<&str> = line.split_whitespace().collect();
+            for pair in words.windows(2) {
+                match pair[1] {
+                    "user" => user = seconds(pair[0]),
+                    "sys" => system = seconds(pair[0]),
+                    _ => {}
+                }
+            }
         }
     }
-    None
+
+    // Either half of the CPU total on its own would be a number that looks like CPU seconds and is
+    // not, so a report with only one of them has none.
+    let cpu = match (user, system) {
+        (Some(u), Some(s)) => Some(u + s),
+        _ => None,
+    };
+    Cost {
+        peak: peak.map_or_else(
+            || Peak::Unavailable("the timer report had no peak in it".to_owned()),
+            Peak::Bytes,
+        ),
+        cpu,
+        read: blocks.map(|n| n * BLOCK),
+    }
+}
+
+/// A count of seconds written as a decimal, as both flavours write one.
+fn seconds(text: &str) -> Option<Duration> {
+    Duration::try_from_secs_f64(text.trim().parse::<f64>().ok()?).ok()
+}
+
+/// The number at the front of a BSD style line.
+fn leading(line: &str) -> Option<u64> {
+    line.split_whitespace().next()?.parse::<u64>().ok()
 }
 
 /// This process's own high water mark, where the system will say.
@@ -198,23 +301,68 @@ pub fn bytes(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Peak, Timer, bytes, own_peak, parse};
+    use std::time::Duration;
+
+    use super::{Cost, Peak, Timer, bytes, own_peak, parse};
+
+    const GNU: &str = "\tCommand being timed: \"duckdb\"
+\tUser time (seconds): 3.25
+\tSystem time (seconds): 0.75
+\tPercent of CPU this job got: 380%
+\tMaximum resident set size (kbytes): 2048
+\tFile system inputs: 4096
+\tFile system outputs: 0
+";
+
+    const BSD: &str = "        1.20 real         0.90 user         0.10 sys
+             1245184  maximum resident set size
+                 128  block input operations
+";
 
     #[test]
-    fn a_gnu_report_is_kibibytes() {
-        let text = "\tCommand being timed: \"true\"\n\tMaximum resident set size (kbytes): 2048\n";
-        assert_eq!(parse(text), Some(2048 * 1024));
+    fn a_gnu_report_is_kibibytes_and_its_cpu_is_user_plus_system() {
+        let cost = parse(GNU);
+        assert_eq!(cost.peak, Peak::Bytes(2048 * 1024));
+        assert_eq!(cost.cpu, Some(Duration::from_millis(4000)));
+        assert_eq!(cost.read, Some(4096 * 512));
     }
 
     #[test]
-    fn a_bsd_report_is_bytes() {
-        let text = "        0.00 real         0.00 user\n     1245184  maximum resident set size\n";
-        assert_eq!(parse(text), Some(1_245_184));
+    fn a_bsd_report_is_bytes_and_its_three_numbers_are_on_one_line() {
+        let cost = parse(BSD);
+        assert_eq!(cost.peak, Peak::Bytes(1_245_184));
+        assert_eq!(cost.cpu, Some(Duration::from_millis(1000)));
+        assert_eq!(cost.read, Some(128 * 512));
     }
 
     #[test]
-    fn a_report_with_no_peak_in_it_is_none_rather_than_zero() {
-        assert_eq!(parse("        0.00 real         0.00 user\n"), None);
+    fn a_report_with_no_peak_in_it_is_a_reason_rather_than_zero() {
+        let cost = parse("        0.00 real         0.00 user         0.00 sys\n");
+        assert!(!cost.peak.measured());
+        assert_eq!(cost.read, None);
+    }
+
+    #[test]
+    fn half_a_cpu_total_is_no_cpu_total() {
+        // A report with user and no system would otherwise print a number that looks like CPU
+        // seconds, is smaller than the real one, and has nothing marking it as partial.
+        let cost = parse("\tUser time (seconds): 3.25\n\tMaximum resident set size (kbytes): 8\n");
+        assert_eq!(cost.cpu, None);
+        assert!(cost.peak.measured());
+    }
+
+    #[test]
+    fn a_hot_run_that_read_from_the_disk_is_visible_as_a_number_that_is_not_zero() {
+        assert_eq!(parse(BSD).read, Some(65536));
+        assert_eq!(parse("             0  block input operations\n").read, Some(0));
+    }
+
+    #[test]
+    fn more_cpu_seconds_than_the_machine_has_is_a_parsing_bug_and_says_so() {
+        let cost =
+            Cost { peak: Peak::Bytes(1), cpu: Some(Duration::from_secs(100)), read: Some(0) };
+        assert!(cost.implausible(Duration::from_secs(1), 8));
+        assert!(!cost.implausible(Duration::from_secs(20), 8));
     }
 
     #[test]
