@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use crate::memory::{Peak, Timer};
+use crate::memory::{Cost, Timer};
 
 /// Something went wrong with the apparatus, as opposed to a query being slow.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +55,13 @@ pub struct Loaded {
     pub took: Duration,
     /// What it takes on disk afterwards, in bytes.
     pub on_disk: u64,
+    /// CPU seconds the load spent, where the machine will say.
+    ///
+    /// Separate from the wall clock because a load is the most parallel thing any of these engines
+    /// does, and on a fleet of four, six and eight core machines the wall clock of a load says as
+    /// much about the machine as about the engine. M1 measured rudb encoding at 5 MB/s of values a
+    /// core, and that is a sentence about CPU seconds that a wall clock cannot make.
+    pub cpu: Option<Duration>,
 }
 
 /// An engine a suite can be run against.
@@ -78,7 +85,7 @@ pub trait Engine {
     /// When the engine could not be started or a statement failed.
     fn load(&mut self, statements: &[&str]) -> Result<Loaded, BenchError>;
 
-    /// Run one query once, and say what it cost in memory.
+    /// Run one query once, and say what it cost besides time.
     ///
     /// The timing is the caller's, taken around this call, because the caller is the one that knows
     /// whether this run is the cold one.
@@ -86,7 +93,7 @@ pub trait Engine {
     /// # Errors
     ///
     /// When the engine could not be started or the query failed.
-    fn run(&mut self, sql: &str) -> Result<Peak, BenchError>;
+    fn run(&mut self, sql: &str) -> Result<Cost, BenchError>;
 }
 
 /// A real DuckDB, driven as a subprocess.
@@ -136,9 +143,17 @@ impl Duckdb {
         &self.binary
     }
 
-    /// Run statements in one process and say nothing about how long it took.
-    fn exec(&self, statements: &[&str]) -> Result<(), BenchError> {
-        let mut command = Command::new(&self.binary);
+    /// Run statements in one process, under the timer, and say what they cost.
+    ///
+    /// Under the timer even during a load, because the CPU seconds a load spends are the number
+    /// that separates an engine that is slow from an engine that is single threaded, and those are
+    /// different problems with different fixes.
+    fn exec(&self, statements: &[&str]) -> Result<Cost, BenchError> {
+        let report = self.scratch.join("load-time.txt");
+        let mut command = match &self.timer {
+            Ok(timer) => timer.wrap(&self.binary, &report),
+            Err(_) => Command::new(&self.binary),
+        };
         command.arg("-batch").arg(&self.database);
         for statement in statements {
             command.arg("-c").arg(statement);
@@ -146,11 +161,13 @@ impl Duckdb {
         let out = command
             .output()
             .map_err(|e| BenchError::new(format!("cannot run {}: {e}", self.binary.display())))?;
-        if out.status.success() {
-            Ok(())
-        } else {
-            Err(BenchError::new(String::from_utf8_lossy(&out.stderr).trim().to_owned()))
+        if !out.status.success() {
+            return Err(BenchError::new(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
         }
+        Ok(match &self.timer {
+            Ok(_) => Timer::read(&report),
+            Err(why) => Cost::unavailable(why.clone()),
+        })
     }
 }
 
@@ -173,21 +190,21 @@ impl Engine for Duckdb {
         let _ = std::fs::remove_file(&self.database);
 
         let start = Instant::now();
-        self.exec(statements)?;
+        let build = self.exec(statements)?;
         // CHECKPOINT before the clock stops, because a load that left the write ahead log to be
         // replayed later is a load whose cost has been moved into the first query. Rule five puts
         // load time next to every runtime result precisely so that trade shows up, and it cannot
         // show up if the load stops timing before the data is durable.
-        self.exec(&["CHECKPOINT"])?;
+        let checkpoint = self.exec(&["CHECKPOINT"])?;
         let took = start.elapsed();
 
         let on_disk = std::fs::metadata(&self.database).map(|m| m.len()).map_err(|e| {
             BenchError::new(format!("cannot size {}: {e}", self.database.display()))
         })?;
-        Ok(Loaded { took, on_disk })
+        Ok(Loaded { took, on_disk, cpu: add(build.cpu, checkpoint.cpu) })
     }
 
-    fn run(&mut self, sql: &str) -> Result<Peak, BenchError> {
+    fn run(&mut self, sql: &str) -> Result<Cost, BenchError> {
         let report = self.scratch.join("time.txt");
         let mut command = match &self.timer {
             Ok(timer) => timer.wrap(&self.binary, &report),
@@ -203,8 +220,20 @@ impl Engine for Duckdb {
         }
         Ok(match &self.timer {
             Ok(_) => Timer::read(&report),
-            Err(why) => Peak::Unavailable(why.clone()),
+            Err(why) => Cost::unavailable(why.clone()),
         })
+    }
+}
+
+/// Two CPU totals added, where both of them are numbers.
+///
+/// A load is more than one process here and its CPU seconds are the sum, but a sum that treated a
+/// missing half as zero would under report by however much that half cost, which is the direction
+/// that flatters. So one missing half makes the whole thing missing.
+fn add(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a + b),
+        _ => None,
     }
 }
 
@@ -229,7 +258,7 @@ impl Engine for Rudb {
         Err(BenchError::new("rudb has no storage layer yet, see M1 in spec/17-milestones.md"))
     }
 
-    fn run(&mut self, _sql: &str) -> Result<Peak, BenchError> {
+    fn run(&mut self, _sql: &str) -> Result<Cost, BenchError> {
         Err(BenchError::new("rudb has no executor yet, see M0 and M1 in spec/17-milestones.md"))
     }
 }
@@ -277,10 +306,13 @@ mod tests {
         assert!(loaded.on_disk > 0, "a loaded database takes space");
         assert!(loaded.took.as_nanos() > 0);
 
-        let peak = duckdb.run("SELECT count(*) FROM t").expect("counting should work");
+        let cost = duckdb.run("SELECT count(*) FROM t").expect("counting should work");
         // Either a number or a reason. On a machine with a /usr/bin/time it is a number, and
         // asserting that here would make the test a fact about the runner rather than the harness.
-        assert!(peak.measured() || peak.bytes().is_none());
+        assert!(cost.peak.measured() || cost.peak.bytes().is_none());
+        if let Some(cpu) = cost.cpu {
+            assert!(cpu.as_secs_f64() < 600.0, "counting a hundred thousand rows took {cpu:?}");
+        }
 
         let _ = std::fs::remove_dir_all(&scratch);
     }

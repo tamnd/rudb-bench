@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use crate::engine::{BenchError, Engine, Loaded};
 use crate::measure::{Distribution, Runs, show};
-use crate::memory::Peak;
+use crate::memory::{Cost, Peak};
 use crate::suite::{Query, Suite};
 
 /// What one query cost.
@@ -29,8 +29,25 @@ pub struct QueryResult {
     pub shape: String,
     /// The cold run and the hot distribution.
     pub runs: Runs,
-    /// The largest peak resident set any of the runs reached.
-    pub peak: Peak,
+    /// What the cold run cost besides time, which is where the bytes read number is worth reading.
+    pub cold: Cost,
+    /// The hot runs together: the worst peak, the median CPU and the median bytes read.
+    pub hot: Cost,
+}
+
+impl QueryResult {
+    /// The largest peak resident set any run of this query reached.
+    ///
+    /// Over cold and hot together, because rule six is about what the query costs and a peak that
+    /// only happened on the first run is still a peak the machine had to have.
+    #[must_use]
+    pub fn peak(&self) -> Peak {
+        match (self.cold.peak.bytes(), self.hot.peak.bytes()) {
+            (Some(cold), Some(hot)) => Peak::Bytes(cold.max(hot)),
+            _ if self.cold.peak.measured() => self.hot.peak.clone(),
+            _ => self.cold.peak.clone(),
+        }
+    }
 }
 
 /// What a whole suite cost on one engine.
@@ -66,9 +83,9 @@ impl SuiteResult {
     pub fn peak(&self) -> Peak {
         let mut worst = 0u64;
         for query in &self.queries {
-            match query.peak.bytes() {
+            match query.peak().bytes() {
                 Some(n) => worst = worst.max(n),
-                None => return query.peak.clone(),
+                None => return query.peak(),
             }
         }
         if self.queries.is_empty() {
@@ -76,6 +93,34 @@ impl SuiteResult {
         } else {
             Peak::Bytes(worst)
         }
+    }
+
+    /// CPU seconds over the hot run of every query, when every one of them reported it.
+    ///
+    /// The hot run and not the cold one, so that it pairs with [`Self::hot_total`]. The two
+    /// together are the ratio that says how many cores the engine actually used, which is the
+    /// question a wall clock on a four core machine and a wall clock on an eight core machine
+    /// cannot be compared without.
+    #[must_use]
+    pub fn hot_cpu(&self) -> Option<Duration> {
+        let mut total = Duration::ZERO;
+        for query in &self.queries {
+            total += query.hot.cpu?;
+        }
+        Some(total)
+    }
+
+    /// Bytes read at the block layer over the hot run of every query.
+    ///
+    /// Expected to be zero on a machine with enough memory for the dataset, and the reason it is in
+    /// the table is that when it is not zero the hot number is not a hot number.
+    #[must_use]
+    pub fn hot_read(&self) -> Option<u64> {
+        let mut total = 0;
+        for query in &self.queries {
+            total += query.hot.read?;
+        }
+        Some(total)
     }
 }
 
@@ -105,9 +150,16 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
                 query.runs.hot.runs()
             ));
         }
-        if !query.peak.measured() {
+        if !query.peak().measured() {
             reasons
                 .push(format!("{} has no peak resident set, and rule six wants one", query.name));
+        }
+        if query.hot.implausible(query.runs.hot.headline(), crate::machine::threads_here()) {
+            reasons.push(format!(
+                "{} reports more CPU seconds than this machine could have given it, which is a \
+                 measurement fault and not a result",
+                query.name
+            ));
         }
     }
     reasons
@@ -133,16 +185,19 @@ pub fn run(
 
     let mut results = Vec::with_capacity(queries.len());
     for query in queries {
-        let mut peaks: Vec<Peak> = Vec::with_capacity(hot + 1);
+        let mut costs: Vec<Cost> = Vec::with_capacity(hot + 1);
         let runs = Runs::collect(hot, || {
-            peaks.push(engine.run(query.sql)?);
+            costs.push(engine.run(query.sql)?);
             Ok::<(), BenchError>(())
         })?;
+        // The first entry is the cold run, by the order `Runs::collect` calls the closure in.
+        let (cold, rest) = costs.split_first().ok_or_else(|| BenchError::new("nothing ran"))?;
         results.push(QueryResult {
             name: query.name.to_owned(),
             shape: query.shape.to_owned(),
             runs,
-            peak: worst(&peaks),
+            cold: cold.clone(),
+            hot: together(rest),
         });
     }
 
@@ -155,6 +210,21 @@ pub fn run(
     })
 }
 
+/// A set of runs of one query as one cost.
+///
+/// Three fields and three different summaries, because they answer three different questions. The
+/// peak is the worst, because the machine had to have it. The CPU is the median, so that it pairs
+/// with the median wall clock next to it in the table rather than being a total of a different set
+/// of runs. The bytes read is the median for the same reason, and because the question it answers
+/// is whether a typical hot run touched the disk, which a total over five runs would blur.
+fn together(costs: &[Cost]) -> Cost {
+    Cost {
+        peak: worst(&costs.iter().map(|c| c.peak.clone()).collect::<Vec<_>>()),
+        cpu: middle(costs.iter().map(|c| c.cpu).collect()),
+        read: middle(costs.iter().map(|c| c.read).collect()),
+    }
+}
+
 /// The largest peak over a set of runs, or the first reason there is not one.
 fn worst(peaks: &[Peak]) -> Peak {
     let mut largest = None;
@@ -165,6 +235,20 @@ fn worst(peaks: &[Peak]) -> Peak {
         }
     }
     largest.map_or_else(|| Peak::Unavailable("nothing ran".to_owned()), Peak::Bytes)
+}
+
+/// The median of a set of measurements, and nothing at all when one of them is missing.
+///
+/// One missing sample makes the whole thing missing rather than making the median a median of the
+/// rest, because a column that silently changes what it is a median of between rows is worse than
+/// a column with a gap in it.
+fn middle<T: Copy + Ord>(values: Vec<Option<T>>) -> Option<T> {
+    let mut got: Vec<T> = Vec::with_capacity(values.len());
+    for value in values {
+        got.push(value?);
+    }
+    got.sort_unstable();
+    got.get(got.len() / 2).copied()
 }
 
 /// Render the per-query table and everything that has to be read next to it.
@@ -181,32 +265,37 @@ pub fn table(result: &SuiteResult) -> String {
     line(
         &mut out,
         &format!(
-            "load     {} to build, {} on disk",
+            "load     {} to build, {} of CPU, {} on disk",
             show(result.loaded.took),
+            result.loaded.cpu.map_or_else(|| "no reading".to_owned(), show),
             crate::memory::bytes(result.loaded.on_disk)
         ),
     );
     line(&mut out, "");
+    // The header goes through the same format string as the rows, because a header written out by
+    // hand is a header that drifts by one space the first time a column gets wider, and a column
+    // that has drifted by one space is read as the column next to it.
     line(
         &mut out,
-        "query  shape                     cold        hot median         IQR   peak RSS",
+        &row("query", "shape", "cold", "hot median", "IQR", "hot cpu", "peak RSS", "cold read"),
     );
     for query in &result.queries {
         let spread = query
             .runs
             .hot
             .relative_iqr()
-            .map_or_else(|| "  n/a".to_owned(), |r| format!("{:.1}%", r * 100.0));
+            .map_or_else(|| "n/a".to_owned(), |r| format!("{:.1}%", r * 100.0));
         line(
             &mut out,
-            &format!(
-                "{:<5}  {:<22}  {:>9}  {:>11}  {:>10}  {:>9}",
-                query.name,
-                query.shape,
-                show(query.runs.cold),
-                show(query.runs.hot.headline()),
-                spread,
-                peak_cell(&query.peak),
+            &row(
+                &query.name,
+                &query.shape,
+                &show(query.runs.cold),
+                &show(query.runs.hot.headline()),
+                &spread,
+                &query.hot.cpu.map_or_else(|| "not read".to_owned(), show),
+                &peak_cell(&query.peak()),
+                &read_cell(query.cold.read),
             ),
         );
     }
@@ -220,7 +309,25 @@ pub fn table(result: &SuiteResult) -> String {
             result.queries.len()
         ),
     );
+    line(
+        &mut out,
+        &format!(
+            "cpu      {} over the hot runs",
+            result.hot_cpu().map_or_else(|| "not read".to_owned(), show)
+        ),
+    );
     line(&mut out, &format!("peak     {}", result.peak()));
+    if let Some(read) = result.hot_read() {
+        if read > 0 {
+            line(
+                &mut out,
+                &format!(
+                    "read     {} at the block layer during the hot runs, so hot was not warm",
+                    crate::memory::bytes(read)
+                ),
+            );
+        }
+    }
     line(&mut out, "");
 
     let reasons = publishable(result);
@@ -239,9 +346,38 @@ pub fn table(result: &SuiteResult) -> String {
     out
 }
 
+/// One line of the per query table, header included.
+#[expect(clippy::too_many_arguments, reason = "eight columns, and they are the eight columns")]
+fn row(
+    name: &str,
+    shape: &str,
+    cold: &str,
+    hot: &str,
+    iqr: &str,
+    cpu: &str,
+    peak: &str,
+    read: &str,
+) -> String {
+    format!(
+        "{name:<5}  {shape:<22}  {cold:>10}  {hot:>10}  {iqr:>7}  {cpu:>9}  {peak:>10}  {read:>10}"
+    )
+}
+
 /// One peak, or the short form of why there is not one, for a table cell.
 fn peak_cell(peak: &Peak) -> String {
     peak.bytes().map_or_else(|| "not read".to_owned(), crate::memory::bytes)
+}
+
+/// Bytes read, where a zero is a result and not a gap.
+///
+/// Zero is the expected answer for a hot run and it is the whole reason the column is there, so it
+/// prints as `none` rather than as `0 B`, which reads like a missing number in a column of sizes.
+fn read_cell(read: Option<u64>) -> String {
+    match read {
+        Some(0) => "none".to_owned(),
+        Some(n) => crate::memory::bytes(n),
+        None => "not read".to_owned(),
+    }
 }
 
 /// A distribution printed the long way, for the diagnostic output.
@@ -262,11 +398,15 @@ pub fn spread(d: &Distribution) -> String {
 mod tests {
     use std::time::Duration;
 
-    use super::{QueryResult, SuiteResult, publishable, spread, table, worst};
+    use super::{QueryResult, SuiteResult, middle, publishable, spread, table, together, worst};
     use crate::engine::Loaded;
     use crate::measure::{Distribution, Runs};
-    use crate::memory::Peak;
+    use crate::memory::{Cost, Peak};
     use crate::suite::find;
+
+    fn cost(peak: Peak, read: Option<u64>) -> Cost {
+        Cost { peak, cpu: Some(Duration::from_millis(30)), read }
+    }
 
     fn result(peak: Peak, hot: usize) -> SuiteResult {
         let samples = vec![Duration::from_millis(10); hot];
@@ -274,12 +414,17 @@ mod tests {
             suite: find("smoke").unwrap(),
             engine: "duckdb".to_owned(),
             version: "v1.5.5".to_owned(),
-            loaded: Loaded { took: Duration::from_secs(1), on_disk: 1024 * 1024 },
+            loaded: Loaded {
+                took: Duration::from_secs(1),
+                on_disk: 1024 * 1024,
+                cpu: Some(Duration::from_secs(3)),
+            },
             queries: vec![QueryResult {
                 name: "q1".to_owned(),
                 shape: "count".to_owned(),
                 runs: Runs { cold: Duration::from_millis(40), hot: Distribution::median(samples) },
-                peak,
+                cold: cost(peak.clone(), Some(4096)),
+                hot: cost(peak, Some(0)),
             }],
         }
     }
@@ -317,6 +462,57 @@ mod tests {
         assert!(text.contains("2.00 MiB"), "{text}");
         assert!(text.contains("not a publishable number"), "{text}");
         assert!(text.contains("page cache warm"), "{text}");
+    }
+
+    #[test]
+    fn the_table_carries_the_cpu_and_what_the_cold_run_read() {
+        let text = table(&result(Peak::Bytes(2 * 1024 * 1024), 5));
+        assert!(text.contains("hot cpu"), "{text}");
+        assert!(text.contains("cold read"), "{text}");
+        assert!(text.contains("4.00 KiB"), "{text}");
+        assert!(text.contains("3.000s of CPU"), "{text}");
+    }
+
+    #[test]
+    fn a_hot_run_that_touched_the_disk_says_so_under_the_table() {
+        let mut result = result(Peak::Bytes(1024), 5);
+        result.queries[0].hot.read = Some(8 * 1024 * 1024);
+        let text = table(&result);
+        assert!(text.contains("hot was not warm"), "{text}");
+    }
+
+    #[test]
+    fn a_hot_run_that_read_nothing_says_nothing() {
+        let text = table(&result(Peak::Bytes(1024), 5));
+        assert!(!text.contains("hot was not warm"), "{text}");
+    }
+
+    #[test]
+    fn a_cpu_number_the_machine_could_not_have_given_blocks_publication() {
+        let mut result = result(Peak::Bytes(1024), 5);
+        // Ten seconds of CPU out of a ten millisecond query, which no machine has.
+        result.queries[0].hot.cpu = Some(Duration::from_secs(10));
+        let reasons = publishable(&result);
+        assert!(reasons.iter().any(|r| r.contains("more CPU seconds")), "{reasons:?}");
+    }
+
+    #[test]
+    fn the_hot_summary_takes_the_worst_peak_and_the_median_of_the_rest() {
+        let runs = vec![
+            Cost { peak: Peak::Bytes(10), cpu: Some(Duration::from_secs(1)), read: Some(0) },
+            Cost { peak: Peak::Bytes(90), cpu: Some(Duration::from_secs(3)), read: Some(512) },
+            Cost { peak: Peak::Bytes(30), cpu: Some(Duration::from_secs(2)), read: Some(0) },
+        ];
+        let got = together(&runs);
+        assert_eq!(got.peak, Peak::Bytes(90));
+        assert_eq!(got.cpu, Some(Duration::from_secs(2)));
+        assert_eq!(got.read, Some(0));
+    }
+
+    #[test]
+    fn one_run_without_a_number_makes_the_median_missing_rather_than_shorter() {
+        assert_eq!(middle(vec![Some(1), None, Some(3)]), None);
+        assert_eq!(middle(vec![Some(3), Some(1), Some(2)]), Some(2));
     }
 
     #[test]
