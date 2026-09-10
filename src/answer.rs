@@ -55,6 +55,44 @@ fn close(a: f64, b: f64) -> bool {
     (a - b).abs() <= TOLERANCE * scale
 }
 
+/// A bordered table without its header, or the text unchanged when it is not one.
+///
+/// The header used to be harmless. The test below it says the borders carry no digits and neither
+/// does `count(*)`, which was true of every column name in the smoke suite and is not true of
+/// ClickBench. DataFusion names an unaliased expression after the expression, so
+/// `SUM(ResolutionWidth + 1)` comes back as the column `sum(hits.ResolutionWidth + Int64(1))`, with
+/// a sixty four in it and a one. q30 is ninety of those, so its header carries a hundred and
+/// seventy eight numbers on top of the ninety in the answer, and the run reported DataFusion
+/// returning 268 numbers against DuckDB's 90 and called it a disagreement. It was the harness
+/// reading the column names as data.
+///
+/// Only the header goes. The trailing border and the row separators carry no digits, and dropping
+/// everything down to the second border line is a rule that does not have to know what a cell looks
+/// like.
+fn body(text: &str) -> &str {
+    let border = |line: &str| {
+        let line = line.trim_end();
+        line.starts_with('+') && line.ends_with('+') && line.chars().all(|c| c == '+' || c == '-')
+    };
+    let start = text.len() - text.trim_start().len();
+    let table = &text[start..];
+    if !border(table.lines().next().unwrap_or("")) {
+        return text;
+    }
+    let mut seen = 0;
+    let mut at = 0;
+    for line in table.split_inclusive('\n') {
+        at += line.len();
+        if border(line) {
+            seen += 1;
+            if seen == 2 {
+                return &table[at..];
+            }
+        }
+    }
+    text
+}
+
 /// Every number in a block of output, in the order it appears.
 ///
 /// Written as a scanner rather than as a split on punctuation, because the two things that break a
@@ -62,7 +100,7 @@ fn close(a: f64, b: f64) -> bool {
 /// not three, and a comma between fields, so that a CSV row is not one very long number.
 #[must_use]
 pub fn numbers(text: &str) -> Vec<f64> {
-    let chars: Vec<char> = text.chars().collect();
+    let chars: Vec<char> = body(text).chars().collect();
     let mut found = Vec::new();
     let mut at = 0;
 
@@ -187,6 +225,28 @@ mod tests {
                      | tag-2  | 20       |\n\
                      +--------+----------+";
         assert!(same("tag-1,10\ntag-2,20", table));
+    }
+
+    #[test]
+    fn a_column_name_with_a_number_in_it_is_a_name_and_not_an_answer() {
+        // What q30 of ClickBench looks like out of datafusion-cli, cut down to three columns. The
+        // header alone carries six numbers, two per aliasless sum, and reading them as data is how
+        // the first full run reported 268 numbers against 90.
+        let table = "+--------+-------------------+-------------------+\n\
+                     | sum(x) | sum(x + Int64(1)) | sum(x + Int64(2)) |\n\
+                     +--------+-------------------+-------------------+\n\
+                     | 5      | 6                 | 7                 |\n\
+                     +--------+-------------------+-------------------+";
+        assert_eq!(numbers(table), vec![5.0, 6.0, 7.0]);
+        assert!(same("5,6,7", table));
+    }
+
+    #[test]
+    fn text_that_is_not_a_table_keeps_its_first_line() {
+        // The rule is only allowed to fire on a bordered table, because every other engine here
+        // writes headerless CSV and dropping two lines of that would drop two rows of the answer.
+        assert_eq!(numbers("1,2\n3,4"), vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(numbers("+1,2\n3,4"), vec![1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]

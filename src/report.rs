@@ -622,6 +622,12 @@ impl Comparison {
         let mut out = Vec::new();
         let Some(reference) = self.results.first() else { return out };
         for query in &reference.queries {
+            // A query whose answer the data does not determine is not evidence either way, and
+            // reporting it as a disagreement every run is how the whole check gets ignored. It is
+            // still named under the table, with the reason, by `undetermined` below.
+            if crate::suite::unsettled(self.suite.name, &query.name).is_some() {
+                continue;
+            }
             // By name, because a column can be short a query and lining two columns up by position
             // would compare one engine's q29 against another's q30 and report a disagreement that
             // is really an off by one in this loop.
@@ -632,6 +638,32 @@ impl Comparison {
                 .collect();
             for line in crate::answer::disagreements(&answers) {
                 out.push(format!("{}: {line}", query.name));
+            }
+        }
+        out
+    }
+
+    /// The queries where the engines answered differently and the data does not say which is right.
+    ///
+    /// Named rather than dropped. A reader who counts twenty six checked queries out of forty three
+    /// is owed the other seventeen and the reason for each, because the alternative is a report that
+    /// says every engine agreed while quietly not looking at a third of the suite.
+    #[must_use]
+    pub fn undetermined(&self) -> Vec<(String, &'static str)> {
+        let mut out = Vec::new();
+        let Some(reference) = self.results.first() else { return out };
+        for query in &reference.queries {
+            let Some(why) = crate::suite::unsettled(self.suite.name, &query.name) else { continue };
+            // Only when they actually differed. A tie that every engine happened to break the same
+            // way this time is a query that was checked, and saying otherwise would understate what
+            // the run did.
+            let answers: Vec<(String, String)> = self
+                .results
+                .iter()
+                .filter_map(|r| r.find(&query.name).map(|q| (r.engine.clone(), q.answer.clone())))
+                .collect();
+            if !crate::answer::disagreements(&answers).is_empty() {
+                out.push((query.name.clone(), why));
             }
         }
         out
@@ -861,17 +893,39 @@ pub fn comparison(compared: &Comparison) -> String {
     }
 
     let disagreements = compared.disagreements();
+    let undetermined = compared.undetermined();
     if disagreements.is_empty() && compared.results.len() > 1 {
+        let total = compared.results.first().map_or(0, |r| r.queries.len());
+        let checked = total - undetermined.len();
         line(
             &mut out,
             &format!(
-                "All {} engines agreed on every answer, to the last significant digit of a double.",
+                "All {} engines agreed on every answer the data settles, which is {checked} of \
+                 {total} queries, to the last significant digit of a double.",
                 compared.results.len()
             ),
         );
     }
     for line_of in &disagreements {
         line(&mut out, &format!("Answers differ, so this is not a comparison: {line_of}"));
+    }
+    // The other seventeen. Under the disagreements rather than above them, because a real
+    // disagreement is the thing to read first and this list is the reason the rest of the suite is
+    // quiet.
+    if !undetermined.is_empty() {
+        line(&mut out, "");
+        line(&mut out, "These were answered differently and the data does not say which is right:");
+        for (name, why) in &undetermined {
+            line(&mut out, &format!("  {name}: {why}."));
+        }
+        line(
+            &mut out,
+            "So they are not checked, and a wrong answer from any engine on one of them",
+        );
+        line(
+            &mut out,
+            "would go unnoticed here. Every other query in the suite is checked in full.",
+        );
     }
     // Two kinds of hot in one table, said once with the names in it rather than as a footnote on
     // the rows it applies to. A reader scanning the ratio row is comparing a number taken with an
@@ -1412,7 +1466,26 @@ mod tests {
             vec![result(Peak::Bytes(1024), 5), rival("polars", 5, "10000000")],
             vec![],
         ));
-        assert!(text.contains("agreed on every answer"), "{text}");
+        assert!(
+            text.contains("agreed on every answer the data settles, which is 1 of 1"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn a_query_the_data_does_not_settle_is_named_rather_than_reported_as_a_wrong_answer() {
+        // The suite in these fixtures is smoke, which has no unsettled queries by design, so this
+        // builds the clickbench case directly out of the two functions that decide it rather than
+        // out of a comparison. The seventeen names are the load bearing part: every one of them has
+        // to be a query that exists, or the skip is a typo that silently switches a check off.
+        let defined = crate::suite::queries("clickbench").expect("clickbench has queries");
+        for (name, why) in crate::suite::CLICKBENCH_UNSETTLED {
+            assert!(defined.iter().any(|q| q.name == *name), "{name} is not a clickbench query");
+            assert!(why.len() > 50, "{name} needs a reason a reader can check, not a label");
+        }
+        assert!(crate::suite::unsettled("clickbench", "q18").is_some());
+        assert!(crate::suite::unsettled("clickbench", "q1").is_none());
+        assert!(crate::suite::unsettled("smoke", "q18").is_none(), "smoke checks everything");
     }
 
     #[test]
