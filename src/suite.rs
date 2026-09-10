@@ -1530,6 +1530,91 @@ pub fn loading(suite: &str, engine: &str, table: &str) -> Option<Loading> {
     }
 }
 
+/// The ClickBench queries whose answer is not determined by the data, and what is loose about them.
+///
+/// The first full ClickBench run produced forty eight lines of the form "answers differ, so this is
+/// not a comparison", across seventeen of the forty three queries, and none of them was a wrong
+/// answer. Fourteen are the same sentence written fourteen times: a `LIMIT 10` over a `GROUP BY`
+/// with an `ORDER BY COUNT(*) DESC` and nothing after it, where thousands of groups have the same
+/// count and which ten come back is whichever ten that engine's hash table reached first. Two more
+/// are floating point, and one is a timezone. A checker that reports all of them every run is a
+/// checker somebody stops reading, which is the exact failure the top of `answer.rs` warns about, so
+/// the ones that cannot be checked are named here with the reason and the rest stay loud.
+///
+/// This is a weakening and it is worth being blunt about how much. A query in this table cannot
+/// catch rudb returning ten wrong rows, because the whole point is that ten different rows are
+/// allowed. What it can still catch is a column that came back empty, a filter that dropped
+/// everything, or a count that is off by an order of magnitude, since the numbers still have to be
+/// there and the shape of the answer is still compared everywhere else in the suite. Twenty six of
+/// the forty three queries are still checked to the last bit of a double.
+pub const CLICKBENCH_UNSETTLED: &[(&str, &str)] = &[
+    (
+        "q4",
+        "AVG(UserID) over a hundred million bigints near 10^18, where the order the partial sums \
+         are added in moves the result further than the one part in a billion this harness calls \
+         the same number",
+    ),
+    (
+        "q16",
+        "ORDER BY COUNT(*) DESC LIMIT 10 over user IDs, where the tenth place is a tie between \
+         many users with the same count and the engine picks",
+    ),
+    ("q17", "ORDER BY COUNT(*) DESC LIMIT 10 with ties at the cut, as q16"),
+    (
+        "q18",
+        "LIMIT 10 with no ORDER BY at all, so the ten rows are whichever ten the group by handed \
+         back first and the query did not ask for any particular ten",
+    ),
+    ("q19", "ORDER BY COUNT(*) DESC LIMIT 10 with ties at the cut, as q16"),
+    (
+        "q24",
+        "ORDER BY EventTime LIMIT 10, and EventTime has one second resolution over a corpus with \
+         millions of rows a second, so the tenth row is a tie",
+    ),
+    (
+        "q29",
+        "ORDER BY an AVG of a length DESC LIMIT 25, which is both a tie at the cut and a double \
+         computed in a different order by each engine",
+    ),
+    ("q31", "ORDER BY COUNT(*) DESC LIMIT 10 with ties at the cut, as q16"),
+    ("q32", "ORDER BY COUNT(*) DESC LIMIT 10 with ties at the cut, as q16"),
+    (
+        "q33",
+        "ORDER BY COUNT(*) DESC LIMIT 10 over WatchID and ClientIP unfiltered, where almost every \
+         group has a count of one and the ten that come back are arbitrary",
+    ),
+    ("q35", "ORDER BY COUNT(*) DESC LIMIT 10 with ties at the cut, as q16"),
+    ("q36", "ORDER BY COUNT(*) DESC LIMIT 10 with ties at the cut, as q16"),
+    (
+        "q39",
+        "ORDER BY PageViews DESC LIMIT 10 OFFSET 1000, which is a tie at the cut a thousand rows \
+         deeper in, where the counts are smaller and the ties are denser",
+    ),
+    ("q40", "ORDER BY PageViews DESC LIMIT 10 OFFSET 1000 with ties at the cut, as q39"),
+    ("q41", "ORDER BY PageViews DESC LIMIT 10 OFFSET 100 with ties at the cut, as q39"),
+    ("q42", "ORDER BY PageViews DESC LIMIT 10 OFFSET 10000 with ties at the cut, as q39"),
+    (
+        "q43",
+        "DATE_TRUNC on a timestamp, and ClickHouse renders a DateTime in the machine's timezone \
+         where DuckDB renders a TIMESTAMP in none, so the same epoch second prints seven hours \
+         apart on gamingpc-wsl and two hours apart on server3",
+    ),
+];
+
+/// Why this query's answer cannot be checked against another engine's, when it cannot.
+///
+/// Only ClickBench has entries. The smoke suite was written so that every query has a total order
+/// and its answers are checked to the last bit, which is the standard, and ClickBench is the one
+/// that had to be given up on because it is somebody else's query set and rule three says it is run
+/// as written or not at all.
+#[must_use]
+pub fn unsettled(suite: &str, query: &str) -> Option<&'static str> {
+    if suite != "clickbench" {
+        return None;
+    }
+    CLICKBENCH_UNSETTLED.iter().find(|(name, _)| *name == query).map(|(_, why)| *why)
+}
+
 /// The queries of a suite, where this harness has them.
 #[must_use]
 pub fn queries(name: &str) -> Option<&'static [Query]> {

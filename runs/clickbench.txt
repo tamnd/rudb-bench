@@ -1,0 +1,71 @@
+# Committed benchmark runs, read by `rudb-bench ledger`.
+#
+# One block per run, holding what each engine totalled over a whole suite. Written by
+# `rudb-bench run <suite> --store <layer>` and rendered into the attribution ledger of section 2.8
+# of spec/engine/02-baseline.md in tamnd/rudb, which is the document that says what each layer of
+# the engine bought.
+#
+# This is not baselines/<suite>.txt and the two are not interchangeable. A baseline record is per
+# query and holds three quartiles, because the regression gate asks whether one query got twice as
+# slow. A run here is per engine and holds totals, because the ledger asks what a layer bought
+# across a suite. Records get replaced when they are retaken and runs never do, because a history
+# that overwrites itself is a table.
+#
+# Times are microseconds and sizes are bytes, both as integers, and a measure the machine would not
+# give is a single dash rather than a zero. The commit is this harness's commit, since the harness
+# is what ran, and rudb's own version is in its engine block like every other engine's.
+#
+# These are regression numbers from machines this project owns. Reporting rule seven still applies
+# and nothing here is comparable to anybody's board.
+
+[run]
+suite     clickbench
+machine   gamingpc-wsl
+layer     2a the baseline
+commit    8c8ca0b
+recorded  2026-09-10
+[engine]
+name      duckdb
+version   v1.5.5 (Variegata) d8cdaa33fd
+hot       25931885
+cpu       313590000
+peak      11622649856
+read      0
+load      57865096
+disk      26791129088
+[engine]
+name      clickhouse-local
+version   26.9.1.1162
+hot       25619048
+cpu       393530000
+peak      8204365824
+read      0
+load      36493246
+disk      10402559228
+[engine]
+name      datafusion
+version   datafusion-cli 55.0.0
+hot       23716047
+cpu       555330000
+peak      11631538176
+read      38293504
+load      0
+disk      14779976446
+[engine]
+name      polars
+version   1.44.2 in sink mode
+hot       25947175
+cpu       507320000
+peak      18297335808
+read      0
+load      0
+disk      14779976446
+[engine]
+name      clickhouse-server
+version   26.9.1.1162
+hot       10329313
+cpu       -
+peak      -
+read      -
+load      206791318
+disk      9413720603

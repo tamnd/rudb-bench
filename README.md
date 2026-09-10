@@ -10,7 +10,7 @@ The design is [`spec/15-rudb-bench.md`](https://github.com/tamnd/rudb/blob/main/
 
 ## Status
 
-Early, and running. rudb cannot run a query yet, so what gets measured today is a real DuckDB on a small generated dataset. That is not a placeholder. Every reporting rule below is a property of the apparatus rather than of the engine, and every one of them is easier to build now, against an engine nobody here has a stake in, than on the afternoon somebody wants a headline.
+Early, and running. rudb cannot run a query yet, so what gets measured today is five rivals against each other: DuckDB, ClickHouse twice, DataFusion and Polars, on a generated smoke dataset and on the real ClickBench `hits`. That is not a placeholder. Every reporting rule below is a property of the apparatus rather than of the engine, and every one of them is easier to build now, against engines nobody here has a stake in, than on the afternoon somebody wants a headline.
 
 What exists is the recorded board, which was recorded before there was anything to flatter, and a measurement path that runs end to end: load, on-disk size, a cold run, five hot runs, the median and the interquartile range, peak resident memory, and a per-query table with a list of the reasons the number may not be published underneath it. Today that list is never empty.
 
@@ -66,6 +66,39 @@ That last block is the part worth looking at. A result carries the list of reaso
 `rudb-bench machine` records what has to be read next to a number: the processor, the thread count, the memory, the frequency governor, the turbo state, the filesystem under the data and its mount options, whether the page cache can actually be dropped, and which `/usr/bin/time` will be reading the peak. Anything that could not be read is marked and says why, because a field that silently defaulted is a lie that survives into a report.
 
 `rudb-bench suites` lists the seven suites from the specification with what each one needs before it can run, which is a download or a generator in every case.
+
+### The first full ClickBench, and what it says
+
+ClickBench has now run end to end on `gamingpc-wsl` against all five rivals, on the real hundred million row `hits.parquet`, with each engine loaded the way its own entry on the official board loads it. It is committed as the `2a the baseline` row of `runs/clickbench.txt` and `rudb-bench ledger` renders it.
+
+```
+engine              hot total   hot cpu   peak RSS      load    on disk   vs duckdb
+duckdb                25.932s   313.590s  10.82 GiB    57.865s  24.95 GiB     1.00x
+clickhouse-local      25.619s   393.530s   7.64 GiB    36.493s   9.69 GiB     1.32x
+datafusion            23.716s   555.330s  10.83 GiB   no load   13.76 GiB     1.21x
+polars                25.947s   507.320s  17.04 GiB   no load   13.76 GiB     1.48x
+clickhouse-server     10.329s  not read   not read   206.791s    8.77 GiB     0.53x
+```
+
+The ratio column is over the thirty nine queries every column ran, not over the totals, which is why DataFusion's total is the smallest on the page and its ratio is still 1.21x. DuckDB's q29 alone is 7.293s of its 25.932s, and q29 is one of the four Polars cannot express, so the shared set is the set where DuckDB is not carrying its single worst query.
+
+Four things have to travel with that table or it is worth nothing. The machine is not a `c6a.4xlarge` and nothing here is comparable to the recorded board. The `clickhouse-server` row is the only one whose engine stayed up across the whole suite, so its hot is buffer pool warm where every other row's hot is only page cache warm, and a ratio against it is a ratio between two different quantities. DataFusion and Polars have no storage format, so their empty load column is a decode inside every query rather than a decode they avoided, and their on disk figure is the source Parquet. And four engines each blew past the ten percent spread rule on at least one query, worst of all DuckDB at 31.1 percent on q27, which is a 65ms query where most of what was timed is starting a process.
+
+What it is useful for is the shape rather than the ranking. Three of the five engines land within nine percent of each other on total hot time, which is close enough that the ordering between them on this machine is noise. The one that does not is `clickhouse-server`, at 10.329s, and the difference between it and `clickhouse-local` at 25.619s is not the engine, since it is the same binary and the same version. It is the sorting key and a process that stayed up. That is a 2.48x gap between two runs of one engine over one dataset, which is a larger effect than anything separating the four engines above it, and it is the single most useful number this run produced for deciding what the layers of rudb should be.
+
+The target is unchanged and now has a real second reference. Ten times DuckDB's recorded board number is 2.63s. The fastest thing measured on this machine is 10.329s. The distance is not a tuning distance.
+
+### What the answer check can and cannot catch
+
+Five engines running the same forty three queries check each other for free, and the first full run turned that check into forty eight lines of disagreement across seventeen queries. None of them was a wrong answer, and finding that out is worth writing down because the obvious reading of forty eight disagreements is that something is badly broken.
+
+One of them was this harness. DataFusion prints a bordered table rather than CSV, because its CSV writer truncates streaming output at one batch, and the answer comparison reads the numbers out of whatever text an engine printed. That was safe while the column names were `count(*)`. On ClickBench, DataFusion names an unaliased expression after the expression, so `SUM(ResolutionWidth + 1)` comes back under the heading `sum(hits.ResolutionWidth + Int64(1))`, and q30 is ninety of those. Its header carries a hundred and seventy eight numbers on top of the ninety in the answer, and the run duly reported DataFusion returning 268 numbers against DuckDB's 90. The comparison now drops a bordered table's header before it reads anything, and q30 agrees.
+
+Fourteen more are one sentence written fourteen times. ClickBench is full of `GROUP BY` with `ORDER BY COUNT(*) DESC LIMIT 10` and nothing after it, and at the tenth place thousands of groups have the same count. Which ten come back is whichever ten the engine's hash table reached first, and every one of them is a correct answer to the query as written. q33 is the extreme case, grouping by `WatchID` and `ClientIP` unfiltered where almost every group has a count of one. q18 does not even have an `ORDER BY`. Rule three says the official text is run as written or the comparison is not one, so rewriting them until they were deterministic was never available.
+
+The last two are more interesting than they look. q4 is `AVG(UserID)` over a hundred million bigints near ten to the eighteenth, where the order the partial sums are added in moves the result further apart than the one part in a billion this harness calls the same number, so ClickHouse disagrees with DuckDB about an average that is not wrong on either side. q43 is a timezone. ClickHouse renders a `DateTime` in the machine's timezone and DuckDB renders a `TIMESTAMP` in none, so the same epoch second prints as `2013-06-23 22:06:40` on `gamingpc-wsl`, as `2013-06-23 17:06:40` on `server3` and as `2013-06-23 15:06:40` out of DuckDB anywhere. That is not only a comparison problem. It means the ClickHouse column's answer to q43 depends on which machine ran it, which is worth knowing before somebody writes a compatibility test against one.
+
+So seventeen of the forty three are named in `CLICKBENCH_UNSETTLED` with the reason, and they are reported under the table as answered differently with the data not saying which is right, rather than as disagreements. The cost is real and the README should say it plainly: a wrong answer from rudb on any of those seventeen would go unnoticed here. Twenty six are still checked to the last significant digit of a double, the whole smoke suite is still checked because it was written with a total order on every query, and catching a wrong q33 is a job for the differential harness in `tamnd/rudb-compat`, which can compare against one engine on data it controls, rather than for a benchmark comparing five.
 
 ### ClickBench is five query sets, not one
 
