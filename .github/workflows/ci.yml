@@ -6,6 +6,11 @@
 # never will, because a timing from a shared virtual machine is not a timing. The real runs happen
 # on the named instance types in spec/15-rudb-bench.md section 15.4.
 #
+# What CI does check is that the apparatus still works, which is a different question from what it
+# measures. The smoke suite runs here against a pinned DuckDB and the numbers it produces are
+# thrown away. A harness nobody exercised for six months is one that does not work on the morning
+# somebody needs it, and that morning is always the worst one to find out.
+#
 # Actions are pinned to a patch version rather than a major tag, so a run can be reproduced.
 
 name: ci
@@ -28,6 +33,9 @@ env:
   CARGO_INCREMENTAL: 0
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
+  # The newest released DuckDB. Written down rather than resolved to latest, because a comparison
+  # whose other side moved on its own is not a measurement.
+  DUCKDB_VERSION: v1.5.5
 
 jobs:
   quick:
@@ -52,12 +60,35 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: Swatinem/rust-cache@v2.9.2
+      - name: install duckdb
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ runner.os }}" in
+            Linux) asset=duckdb_cli-linux-amd64.zip ;;
+            macOS) asset=duckdb_cli-osx-universal.zip ;;
+            *) echo "no duckdb build wired up for ${{ runner.os }}" >&2; exit 1 ;;
+          esac
+          url=https://github.com/duckdb/duckdb/releases/download/$DUCKDB_VERSION/$asset
+          curl -fsSL --retry 3 -o duckdb.zip "$url"
+          unzip -q duckdb.zip -d "$RUNNER_TEMP/duckdb"
+          chmod +x "$RUNNER_TEMP/duckdb/duckdb"
+          echo "RUDB_BENCH_DUCKDB=$RUNNER_TEMP/duckdb/duckdb" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/duckdb/duckdb" -version
       - name: cargo test
         run: cargo test --all-features
       # The prose rules are checked by a test, so this is covered above. What is not covered above
-      # is that the command line still answers, which is the whole of what this binary does today.
+      # is that the command line still answers.
       - name: the harness reports its baselines
         run: cargo run -q -- baselines
+      # The machine record has to be readable on both platforms, because the fleet is both and a
+      # record that only works on Linux is one that quietly stops being taken on the Windows box.
+      - name: the machine record reads
+        run: cargo run -q -- machine
+      # The whole measurement path, on a runner whose timings mean nothing. What is being checked
+      # is that it produces a table, not what is in it.
+      - name: the smoke suite still measures something
+        run: cargo run -q --release -- run smoke
 
   docs:
     name: documentation

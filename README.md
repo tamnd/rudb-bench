@@ -10,7 +10,9 @@ The design is [`spec/15-rudb-bench.md`](https://github.com/tamnd/rudb/blob/main/
 
 ## Status
 
-Early. There is no engine to measure yet. What exists is the recorded board and the shape of a result, and the board was recorded before there was anything to flatter, which is the only time a baseline is worth recording.
+Early, and running. rudb cannot run a query yet, so what gets measured today is a real DuckDB on a small generated dataset. That is not a placeholder. Every reporting rule below is a property of the apparatus rather than of the engine, and every one of them is easier to build now, against an engine nobody here has a stake in, than on the afternoon somebody wants a headline.
+
+What exists is the recorded board, which was recorded before there was anything to flatter, and a measurement path that runs end to end: load, on-disk size, a cold run, five hot runs, the median and the interquartile range, peak resident memory, and a per-query table with a list of the reasons the number may not be published underneath it. Today that list is never empty.
 
 ```
 $ rudb-bench baselines
@@ -30,6 +32,40 @@ spec/02-the-goal.md is where that either closes or does not.
 ```
 
 That last pair of lines is the point of this repository existing. The target is 3.1x past the fastest CPU engine anybody has published on that machine, and the Rust and Arrow stack is currently 1.7x behind DuckDB rather than ahead of it. Any harness that makes that easy to forget is doing harm.
+
+### What runs today
+
+`rudb-bench run` measures the smoke suite, which is not one of the seven suites in the specification and is not a benchmark. It generates ten million rows of its own in a few seconds and runs six queries over them that between them touch a scan, a filter, a sum, a group by, a top k, a count distinct and a join. It exists so that the measurement path is exercised on every commit rather than on the day somebody needs a real number and finds out the apparatus rotted.
+
+```
+$ rudb-bench run
+suite    smoke
+engine   duckdb v1.5.5 (Variegata) d8cdaa33fd
+load     6.261s to build, 92.01 MiB on disk
+
+query  shape                     cold        hot median         IQR   peak RSS
+q1     count                    42.641ms     37.046ms        4.6%  19.75 MiB
+q2     filter and sum           59.964ms     57.244ms        8.2%  105.06 MiB
+q3     group by, low card       50.402ms     49.107ms       14.8%  43.34 MiB
+q4     group by and top k       78.783ms     52.696ms       13.5%  105.58 MiB
+q5     count distinct           53.982ms     58.553ms        9.5%  125.52 MiB
+q6     join and group by       145.637ms    128.908ms       12.2%  34.61 MiB
+
+total    431.410ms cold, 383.553ms hot, over 6 queries
+peak     125.52 MiB
+
+This is not a publishable number, because:
+  no machine this project owns is a c6a.4xlarge, 16 vCPU, 32 GiB, gp2, per rule seven
+  the smoke suite is not comparable to any board
+```
+
+The run above was taken on a laptop that was busy doing something else at the time, which is why the load took six seconds and the interquartile ranges are in double figures. That is the ordinary state of a developer machine and it is exactly why rule seven exists.
+
+That last block is the part worth looking at. A result carries the list of reasons it may not be published, the list is computed rather than written, and it is printed under every table. The rules are enforced in the types: a peak resident set is either a number of bytes or a sentence explaining why there is not one, a distribution built from four runs says no when asked whether it may be published, and a best of three is a different constructor from a median so a ClickBench-convention number cannot be produced by accident.
+
+`rudb-bench machine` records what has to be read next to a number: the processor, the thread count, the memory, the frequency governor, the turbo state, the filesystem under the data and its mount options, whether the page cache can actually be dropped, and which `/usr/bin/time` will be reading the peak. Anything that could not be read is marked and says why, because a field that silently defaulted is a lie that survives into a report.
+
+`rudb-bench suites` lists the seven suites from the specification with what each one needs before it can run, which is a download or a generator in every case.
 
 ## The reporting rules
 
