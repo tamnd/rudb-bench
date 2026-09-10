@@ -147,7 +147,7 @@ ClickHouse, because it is the fastest widely deployed single node analytical eng
 
 Umbra where a binary is obtainable, because it is the current leader. Where a binary is not obtainable its published board numbers are cited as published board numbers with the date, and never mixed into a table of numbers we measured.
 
-DataFusion and Polars, because they are the Rust ecosystem's answer and because being ahead of them is a floor rather than an achievement.
+DataFusion and Polars, because they are the Rust ecosystem's answer and because being ahead of them is a floor rather than an achievement. Polars is measured in `sink` mode rather than out of a collect, so the query writes its answer as it goes and never holds it in one piece. That is what the out of core comparison is about, and it is also what makes the peak resident column in that row mean the same thing it means in the others. On smoke it is worth about 14 MiB of peak and nothing outside the noise on time, because these six answers are small. On a suite whose answer does not fit it is the difference between a measurement and an out of memory.
 
 Vortex-backed DuckDB and DataFusion specifically, because they are the closest published thing to this design and their result is negative: DuckDB with Vortex measured 40.99 seconds against DuckDB's own 26.25. Tracking them is how we find out whether we have avoided their failure mode or reproduced it.
 
