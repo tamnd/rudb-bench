@@ -1376,19 +1376,156 @@ pub const HITS: &str = "WatchID BIGINT NOT NULL, JavaEnable SMALLINT NOT NULL, T
     NULL, HasGCLID SMALLINT NOT NULL, RefererHash BIGINT NOT NULL, URLHash BIGINT NOT NULL, CLID \
     INTEGER NOT NULL";
 
-/// The column definitions a table gets, when the suite has an official `create.sql` to take them
-/// from.
+/// The `hits` columns, out of the official ClickBench `duckdb/create.sql`.
 ///
-/// `None` means infer them from the Parquet, which is right for a suite whose schema nobody
-/// published and wrong for one whose schema is part of what the board measures. See [`HITS`] for
-/// what inference costs when there is a published schema and it is not used.
+/// One hundred and five of them again, and not the same hundred and five as [`HITS`]. DuckDB's own
+/// entry declares every string column nullable where ClickHouse's declares it `NOT NULL`, and that
+/// difference is theirs rather than ours. Copying each engine's own file is the only way the
+/// comparison is between the engines instead of between two schemas somebody here wrote.
 ///
-/// Unlike [`sorting_key`], this is not tuning and both ClickHouse rows get it. The sorting key is
-/// the one difference between those two rows, and it stays the only one.
+/// The reason this exists at all is `EventTime TIMESTAMP NOT NULL` and `EventDate Date NOT NULL`.
+/// In `hits.parquet` those two are integers, seconds since the epoch and days since the epoch, and
+/// a `CREATE TABLE AS SELECT` out of the file leaves them integers. Then q19 asks for
+/// `extract(minute FROM EventTime)` and DuckDB cannot resolve it, which is exactly how the first
+/// full ClickBench run on `gamingpc-wsl` ended with no DuckDB column at all.
+pub const DUCKDB_HITS: &str = "WatchID BIGINT NOT NULL, JavaEnable SMALLINT NOT NULL, Title TEXT, \
+    GoodEvent SMALLINT NOT NULL, EventTime TIMESTAMP NOT NULL, EventDate Date NOT NULL, CounterID \
+    INTEGER NOT NULL, ClientIP INTEGER NOT NULL, RegionID INTEGER NOT NULL, UserID BIGINT NOT \
+    NULL, CounterClass SMALLINT NOT NULL, OS SMALLINT NOT NULL, UserAgent SMALLINT NOT NULL, URL \
+    TEXT, Referer TEXT, IsRefresh SMALLINT NOT NULL, RefererCategoryID SMALLINT NOT NULL, \
+    RefererRegionID INTEGER NOT NULL, URLCategoryID SMALLINT NOT NULL, URLRegionID INTEGER NOT \
+    NULL, ResolutionWidth SMALLINT NOT NULL, ResolutionHeight SMALLINT NOT NULL, ResolutionDepth \
+    SMALLINT NOT NULL, FlashMajor SMALLINT NOT NULL, FlashMinor SMALLINT NOT NULL, FlashMinor2 \
+    TEXT, NetMajor SMALLINT NOT NULL, NetMinor SMALLINT NOT NULL, UserAgentMajor SMALLINT NOT \
+    NULL, UserAgentMinor VARCHAR(255) NOT NULL, CookieEnable SMALLINT NOT NULL, JavascriptEnable \
+    SMALLINT NOT NULL, IsMobile SMALLINT NOT NULL, MobilePhone SMALLINT NOT NULL, MobilePhoneModel \
+    TEXT, Params TEXT, IPNetworkID INTEGER NOT NULL, TraficSourceID SMALLINT NOT NULL, \
+    SearchEngineID SMALLINT NOT NULL, SearchPhrase TEXT, AdvEngineID SMALLINT NOT NULL, \
+    IsArtifical SMALLINT NOT NULL, WindowClientWidth SMALLINT NOT NULL, WindowClientHeight \
+    SMALLINT NOT NULL, ClientTimeZone SMALLINT NOT NULL, ClientEventTime TIMESTAMP NOT NULL, \
+    SilverlightVersion1 SMALLINT NOT NULL, SilverlightVersion2 SMALLINT NOT NULL, \
+    SilverlightVersion3 INTEGER NOT NULL, SilverlightVersion4 SMALLINT NOT NULL, PageCharset TEXT, \
+    CodeVersion INTEGER NOT NULL, IsLink SMALLINT NOT NULL, IsDownload SMALLINT NOT NULL, \
+    IsNotBounce SMALLINT NOT NULL, FUniqID BIGINT NOT NULL, OriginalURL TEXT, HID INTEGER NOT \
+    NULL, IsOldCounter SMALLINT NOT NULL, IsEvent SMALLINT NOT NULL, IsParameter SMALLINT NOT \
+    NULL, DontCountHits SMALLINT NOT NULL, WithHash SMALLINT NOT NULL, HitColor CHAR NOT NULL, \
+    LocalEventTime TIMESTAMP NOT NULL, Age SMALLINT NOT NULL, Sex SMALLINT NOT NULL, Income \
+    SMALLINT NOT NULL, Interests SMALLINT NOT NULL, Robotness SMALLINT NOT NULL, RemoteIP INTEGER \
+    NOT NULL, WindowName INTEGER NOT NULL, OpenerName INTEGER NOT NULL, HistoryLength SMALLINT NOT \
+    NULL, BrowserLanguage TEXT, BrowserCountry TEXT, SocialNetwork TEXT, SocialAction TEXT, \
+    HTTPError SMALLINT NOT NULL, SendTiming INTEGER NOT NULL, DNSTiming INTEGER NOT NULL, \
+    ConnectTiming INTEGER NOT NULL, ResponseStartTiming INTEGER NOT NULL, ResponseEndTiming \
+    INTEGER NOT NULL, FetchTiming INTEGER NOT NULL, SocialSourceNetworkID SMALLINT NOT NULL, \
+    SocialSourcePage TEXT, ParamPrice BIGINT NOT NULL, ParamOrderID TEXT, ParamCurrency TEXT, \
+    ParamCurrencyID SMALLINT NOT NULL, OpenstatServiceName TEXT, OpenstatCampaignID TEXT, \
+    OpenstatAdID TEXT, OpenstatSourceID TEXT, UTMSource TEXT, UTMMedium TEXT, UTMCampaign TEXT, \
+    UTMContent TEXT, UTMTerm TEXT, FromTag TEXT, HasGCLID SMALLINT NOT NULL, RefererHash BIGINT \
+    NOT NULL, URLHash BIGINT NOT NULL, CLID INTEGER NOT NULL";
+
+/// How an engine gets from the Parquet on disk to the table its queries expect.
+///
+/// One of these per engine per table, taken from that engine's own directory in the ClickBench
+/// repository rather than written here. The board keeps a `create.sql` per engine for the same
+/// reason it keeps a `queries.sql` per engine, which is that the engines do not agree on what the
+/// file even contains, and an engine loaded some other engine's way is an engine measured with a
+/// handicap nobody wrote down.
+///
+/// The reason it is a shape rather than a schema string is that the four entries fix the same
+/// problem four different ways, and flattening them into one would mean picking one engine's way
+/// and calling it the harness's way. See [`Fixup`].
+#[derive(Debug, Clone, Copy)]
+pub struct Loading {
+    /// The column list this engine's entry declares, when it declares one.
+    ///
+    /// `None` means the entry does not declare a schema, which for DataFusion and Polars is the
+    /// truth rather than an omission: both read the Parquet where it lies and take its schema.
+    pub columns: Option<&'static str>,
+    /// What the engine's entry does about the columns the Parquet stores in a different type than
+    /// the queries want.
+    pub fixup: Fixup,
+    /// What the Parquet reader has to be told, in this engine's own spelling, empty when nothing.
+    pub options: &'static str,
+    /// Why the entry does it this way, in a sentence a reader can check against the engine.
+    pub why: &'static str,
+}
+
+/// What an engine's own entry does about a column whose stored type is not the queried type.
+///
+/// `hits.parquet` stores `EventTime`, `ClientEventTime` and `LocalEventTime` as seconds since the
+/// epoch and `EventDate` as days since the epoch, all four as integers. Every engine's queries
+/// treat them as a timestamp and a date. So every entry on the board fixes this, and no two of
+/// them fix it the same way.
+#[derive(Debug, Clone, Copy)]
+pub enum Fixup {
+    /// Nothing to fix, because this engine's declared schema already says what the columns are and
+    /// its loader converts on the way in. ClickHouse is the only one, since `INSERT SELECT` into a
+    /// `DateTime` column out of an integer is a conversion it does without being asked.
+    None,
+    /// A projection to insert through, in this engine's SQL. DuckDB's entry does this, with a
+    /// `SELECT * REPLACE` that rewrites the four columns and leaves the other hundred and one
+    /// alone.
+    Select(&'static str),
+    /// A view over the raw external table, in this engine's SQL, with `{raw}` where the raw table
+    /// is named. DataFusion's entry does this, because its table is the Parquet itself and there
+    /// is nothing to convert on the way in.
+    View(&'static str),
+    /// Expressions added to the scan, in Python, for the engine whose entry is not SQL at all.
+    /// Polars' entry does this in the `/load` route of its own benchmark server.
+    Columns(&'static str),
+}
+
+/// How this engine loads this table for this suite, out of its own entry on the board.
+///
+/// `None` means nobody published a recipe, which is right for a suite whose schema nobody published
+/// and wrong for one whose schema is part of what the board measures. See [`HITS`] for what
+/// inference costs when there is a published schema and it is not used.
+///
+/// Unlike [`sorting_key`], none of this is tuning and both ClickHouse rows get all of it. The
+/// sorting key is the one difference between those two rows and it stays the only one.
 #[must_use]
-pub fn columns(suite: &str, table: &str) -> Option<&'static str> {
-    match (suite, table) {
-        ("clickbench", "hits") => Some(HITS),
+pub fn loading(suite: &str, engine: &str, table: &str) -> Option<Loading> {
+    if (suite, table) != ("clickbench", "hits") {
+        return None;
+    }
+    match engine {
+        "clickhouse-local" | "clickhouse-server" => Some(Loading {
+            columns: Some(HITS),
+            fixup: Fixup::None,
+            options: "",
+            why: "the declared DateTime and Date columns convert out of the integers on INSERT, so \
+                  the entry needs nothing else",
+        }),
+        "duckdb" => Some(Loading {
+            columns: Some(DUCKDB_HITS),
+            fixup: Fixup::Select(
+                "* REPLACE (make_date(EventDate) AS EventDate, epoch_ms(EventTime * 1000) AS \
+                 EventTime, epoch_ms(ClientEventTime * 1000) AS ClientEventTime, \
+                 epoch_ms(LocalEventTime * 1000) AS LocalEventTime)",
+            ),
+            options: "binary_as_string=True",
+            why: "DuckDB will not insert an integer into a TIMESTAMP column, so its entry converts \
+                  the four in the projection and reads the string columns as strings",
+        }),
+        "datafusion" => Some(Loading {
+            columns: None,
+            fixup: Fixup::View(
+                "SELECT * EXCEPT (\"EventDate\"), CAST(CAST(\"EventDate\" AS INTEGER) AS DATE) AS \
+                 \"EventDate\" FROM {raw}",
+            ),
+            options: "OPTIONS ('binary_as_string' 'true')",
+            why: "its table is the Parquet itself so there is no insert to convert on, and its \
+                  queries wrap the three timestamps in to_timestamp_seconds themselves",
+        }),
+        "polars" => Some(Loading {
+            columns: None,
+            fixup: Fixup::Columns(
+                "(pl.col(\"EventTime\") * int(1e6)).cast(pl.Datetime(time_unit=\"us\")), \
+                 pl.col(\"EventDate\").cast(pl.Date)",
+            ),
+            options: "",
+            why: "its entry is a scan rather than a load, so the two casts go on the scan in the \
+                  /load route of its own benchmark server",
+        }),
         _ => None,
     }
 }
@@ -1406,7 +1543,10 @@ pub fn queries(name: &str) -> Option<&'static [Query]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{CLICKBENCH, SMOKE, SUITES, TPCH, columns, find, queries, sorting_key};
+    use super::{
+        CLICKBENCH, DUCKDB_HITS, Fixup, HITS, SMOKE, SUITES, TPCH, find, loading, queries,
+        sorting_key,
+    };
 
     #[test]
     fn a_suite_this_harness_has_the_queries_of_says_how_many_it_has() {
@@ -1473,7 +1613,9 @@ mod tests {
 
     #[test]
     fn the_published_schema_is_used_where_there_is_one_and_inference_where_there_is_not() {
-        let hits = columns("clickbench", "hits").expect("clickbench has a create.sql");
+        let hits = loading("clickbench", "clickhouse-server", "hits")
+            .and_then(|l| l.columns)
+            .expect("clickbench has a clickhouse create.sql");
         assert_eq!(hits.matches(" NOT NULL").count(), 105, "the official file has 105 columns");
         // Copied and not translated. ClickHouse takes both spellings and only one of them is a
         // diff of nothing against the file this is supposed to be a copy of.
@@ -1484,11 +1626,66 @@ mod tests {
         for column in ["CounterID", "EventDate", "UserID", "EventTime", "WatchID"] {
             assert!(hits.contains(&format!("{column} ")), "{column} is not in the schema");
         }
-        // A suite nobody published a schema for infers one, which is right for it and would be
+        // A suite nobody published a recipe for infers one, which is right for it and would be
         // wrong for clickbench.
-        assert!(columns("smoke", "smoke").is_none());
-        assert!(columns("tpch", "lineitem").is_none());
-        assert!(columns("clickbench", "hit").is_none());
+        assert!(loading("smoke", "duckdb", "smoke").is_none());
+        assert!(loading("tpch", "duckdb", "lineitem").is_none());
+        assert!(loading("clickbench", "duckdb", "hit").is_none());
+        assert!(loading("clickbench", "rudb", "hits").is_none());
+    }
+
+    #[test]
+    fn each_engine_loads_hits_the_way_its_own_entry_on_the_board_loads_it() {
+        // The two ClickHouse rows share one entry, because there is one ClickHouse directory in
+        // the repository and the sorting key is the only thing that separates those two rows.
+        for engine in ["clickhouse-local", "clickhouse-server"] {
+            let load = loading("clickbench", engine, "hits").unwrap();
+            assert_eq!(load.columns, Some(HITS));
+            assert!(matches!(load.fixup, Fixup::None), "{engine} needs no fixup");
+        }
+
+        // DuckDB declares its own hundred and five, and they are not ClickHouse's hundred and five.
+        // Its entry leaves the string columns nullable where ClickHouse's does not, and copying
+        // each file rather than sharing one is the only way the difference stays theirs.
+        let duckdb = loading("clickbench", "duckdb", "hits").unwrap();
+        assert_eq!(duckdb.columns, Some(DUCKDB_HITS));
+        assert_ne!(duckdb.columns, Some(HITS), "the two entries are not the same file");
+        assert_eq!(DUCKDB_HITS.matches(" NOT NULL").count(), 79, "26 of the 105 are nullable");
+        assert!(duckdb.options.contains("binary_as_string"));
+
+        // The four columns the Parquet stores as integers and every entry converts. This is the
+        // assertion that would have caught the first full ClickBench run producing no DuckDB
+        // column at all, which it did because q19 asked for the minute of an integer.
+        let Fixup::Select(select) = duckdb.fixup else { panic!("duckdb inserts through a select") };
+        for column in ["EventDate", "EventTime", "ClientEventTime", "LocalEventTime"] {
+            assert!(select.contains(column), "{column} is not converted on the way in");
+        }
+
+        // DataFusion declares no schema because its table is the file, so its entry fixes the one
+        // column its queries cannot fix themselves in a view over the raw table.
+        let datafusion = loading("clickbench", "datafusion", "hits").unwrap();
+        assert!(datafusion.columns.is_none());
+        assert!(datafusion.options.contains("binary_as_string"));
+        let Fixup::View(view) = datafusion.fixup else { panic!("datafusion defines a view") };
+        assert!(view.contains("{raw}"), "the view has to name the raw table");
+        assert!(view.contains("EventDate"));
+
+        // Polars is not SQL at all, so its two casts go on the scan.
+        let polars = loading("clickbench", "polars", "hits").unwrap();
+        assert!(polars.columns.is_none());
+        let Fixup::Columns(columns) = polars.fixup else { panic!("polars casts on the scan") };
+        assert!(columns.contains("EventTime") && columns.contains("EventDate"));
+    }
+
+    #[test]
+    fn every_recipe_says_why_it_is_shaped_the_way_it_is() {
+        // A recipe that only says what it does is one nobody can check against the engine, and
+        // checking it against the engine is the entire reason these were copied rather than
+        // invented.
+        for engine in ["clickhouse-local", "clickhouse-server", "duckdb", "datafusion", "polars"] {
+            let load = loading("clickbench", engine, "hits").unwrap();
+            assert!(load.why.len() > 40, "{engine} needs a real reason");
+        }
     }
 
     #[test]

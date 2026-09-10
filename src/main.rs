@@ -458,7 +458,7 @@ fn discover(
     let mut engines: Vec<Box<dyn Engine>> = Vec::new();
     let mut missing = Vec::new();
 
-    match Duckdb::discover(scratch) {
+    match Duckdb::discover(scratch, suite) {
         Ok(engine) => engines.push(Box::new(engine)),
         Err(e) => missing.push(gap("duckdb", &e)),
     }
@@ -466,11 +466,11 @@ fn discover(
         Ok(engine) => engines.push(Box::new(engine)),
         Err(e) => missing.push(gap("clickhouse-local", &e)),
     }
-    match Datafusion::discover(scratch) {
+    match Datafusion::discover(scratch, suite) {
         Ok(engine) => engines.push(Box::new(engine)),
         Err(e) => missing.push(gap("datafusion", &e)),
     }
-    match Polars::discover(scratch) {
+    match Polars::discover(scratch, suite) {
         Ok(engine) => engines.push(Box::new(engine)),
         Err(e) => missing.push(gap("polars", &e)),
     }

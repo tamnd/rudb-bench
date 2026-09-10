@@ -117,7 +117,12 @@ fn smoke(scratch: &Path) -> Result<Dataset, BenchError> {
     let path = root.join("smoke-1.parquet");
 
     if !path.is_file() {
-        let duckdb = crate::engine::Duckdb::discover(scratch)?;
+        // The smoke suite, because that is what is being generated here and because a DuckDB
+        // carries a suite now so that it can build a table the way the board's entry for it does.
+        // Nothing on this path builds a table: `plain` runs statements against no database at all.
+        let suite = crate::suite::find("smoke")
+            .ok_or_else(|| BenchError::new("smoke is not a suite, which cannot happen"))?;
+        let duckdb = crate::engine::Duckdb::discover(scratch, suite)?;
         let sql = format!(
             "COPY ({SMOKE_ROWS}) TO '{}' (FORMAT parquet, COMPRESSION zstd)",
             path.display()
