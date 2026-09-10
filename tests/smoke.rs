@@ -21,8 +21,13 @@ use rudb_bench::report::{compare, comparison, publishable, run, table};
 use rudb_bench::suite::{Query, find};
 
 const QUERIES: &[Query] = &[
-    Query { name: "q1", sql: "SELECT count(*) FROM t", shape: "count" },
-    Query { name: "q2", sql: "SELECT k, sum(v) AS total FROM t GROUP BY k", shape: "group by" },
+    Query { name: "q1", sql: "SELECT count(*) FROM t", shape: "count", dialects: &[] },
+    Query {
+        name: "q2",
+        sql: "SELECT k, sum(v) AS total FROM t GROUP BY k",
+        shape: "group by",
+        dialects: &[],
+    },
 ];
 
 /// A scratch directory unique to the test that asked for one.
@@ -111,7 +116,7 @@ fn a_query_that_does_not_run_stops_the_suite_rather_than_scoring_zero() {
     let tables = small(&duckdb, &at);
     let suite = find("smoke").unwrap();
     let broken: &[Query] =
-        &[Query { name: "q1", sql: "SELECT nope FROM t", shape: "not a column" }];
+        &[Query { name: "q1", sql: "SELECT nope FROM t", shape: "not a column", dialects: &[] }];
     let got = run(&mut duckdb, suite, broken, &tables, 5);
     assert!(got.is_err(), "a failing query is a broken run and not a fast one");
 

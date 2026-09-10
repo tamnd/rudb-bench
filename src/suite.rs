@@ -134,10 +134,79 @@ pub const SUITES: &[Suite] = &[
 pub struct Query {
     /// What the table calls it.
     pub name: &'static str,
-    /// The SQL, which has to be accepted by every engine in the comparison unmodified.
+    /// The SQL every engine gets, unless it is named in [`Query::dialects`].
     pub sql: &'static str,
     /// What shape of work it is, so a table row can be read without reading the SQL.
     pub shape: &'static str,
+    /// The engines whose text for this query is not the default one.
+    ///
+    /// Empty for a query the whole comparison accepts unmodified, which is every query in `smoke`
+    /// and most of ClickBench. See [`Dialect`] for why this exists at all.
+    pub dialects: &'static [Dialect],
+}
+
+impl Query {
+    /// The SQL this engine gets, or nothing when it has no faithful expression of this query.
+    ///
+    /// `None` is a declaration and never a discovery. An engine that turns out at run time not to
+    /// have a function is an engine whose column would lose a query on the afternoon somebody
+    /// upgraded it, silently, and a benchmark that quietly drops queries is one whose totals move
+    /// for reasons nobody wrote down. So the gap is in the table, in a diff somebody reviewed.
+    #[must_use]
+    pub fn sql_for(&self, engine: &str) -> Option<&'static str> {
+        for dialect in self.dialects {
+            if dialect.engines.contains(&engine) {
+                return dialect.sql;
+            }
+        }
+        Some(self.sql)
+    }
+
+    /// Every engine named in this query's dialect list that has no text for it, and why.
+    #[must_use]
+    pub fn absent(&self) -> Vec<(&'static str, &'static str)> {
+        self.dialects
+            .iter()
+            .filter(|d| d.sql.is_none())
+            .flat_map(|d| d.engines.iter().map(|e| (*e, d.why)))
+            .collect()
+    }
+
+    /// Why this engine has no text for this query, when it has none.
+    #[must_use]
+    pub fn absent_for(&self, engine: &str) -> Option<&'static str> {
+        self.absent().into_iter().find(|(e, _)| *e == engine).map(|(_, why)| why)
+    }
+}
+
+/// One engine's text for a query, where the default text is not what that engine runs.
+///
+/// This exists because ClickBench is not one query set, it is five. The official repository keeps a
+/// `queries.sql` per engine and they differ: ClickHouse writes `length(URL)` where DuckDB writes
+/// `STRLEN(URL)`, because DuckDB's `length` counts characters and ClickHouse's counts bytes and the
+/// two give different answers on the same data. DataFusion quotes every identifier, because it
+/// lowercases unquoted ones and the columns in `hits` are camel case. Running our own translation
+/// instead of theirs would produce a number about our translation.
+///
+/// The `sql` being optional is the other half of it. Polars' `SQLContext` accepts thirty nine of
+/// the forty three, and the four it does not are four functions rather than four opinions. A column
+/// short a query is a fact the report has to carry, and it is a much better fact than a column that
+/// silently ran a query somebody rewrote until it worked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Dialect {
+    /// The engines this text is for, as [`crate::engine::Engine::name`] returns them.
+    ///
+    /// A list rather than one, because `clickhouse-local` and `clickhouse-server` are two rows of
+    /// one dialect and writing the same query out twice is how the two drift apart.
+    pub engines: &'static [&'static str],
+    /// The text, or nothing when this engine has no faithful expression of the query.
+    pub sql: Option<&'static str>,
+    /// Why this engine is not on the default text, in one sentence a reader can check.
+    ///
+    /// Required rather than optional. Every entry in this table takes a query away from the
+    /// comparison or changes what it means, and the reason belongs next to it and not in a commit
+    /// message somebody has to go and find.
+    pub why: &'static str,
 }
 
 /// The smoke queries.
@@ -148,28 +217,803 @@ pub struct Query {
 /// `ORDER BY 2` is not portable. Nothing casts, because every dialect spells a cast differently, so
 /// the types come out of the Parquet file and the file is the same file for everybody.
 pub const SMOKE: &[Query] = &[
-    Query { name: "q1", sql: "SELECT count(*) FROM smoke", shape: "count" },
-    Query { name: "q2", sql: "SELECT sum(v) FROM smoke WHERE k < 100", shape: "filter and sum" },
+    Query { name: "q1", sql: "SELECT count(*) FROM smoke", shape: "count", dialects: &[] },
+    Query {
+        name: "q2",
+        sql: "SELECT sum(v) FROM smoke WHERE k < 100",
+        shape: "filter and sum",
+        dialects: &[],
+    },
     Query {
         name: "q3",
         sql: "SELECT tag, count(*) FROM smoke GROUP BY tag",
         shape: "group by, low card",
+        dialects: &[],
     },
     Query {
         name: "q4",
         sql: "SELECT k, sum(v) AS total FROM smoke GROUP BY k ORDER BY total DESC LIMIT 10",
         shape: "group by and top k",
+        dialects: &[],
     },
     Query {
         name: "q5",
         sql: "SELECT count(DISTINCT tag) FROM smoke WHERE v > 5.0",
         shape: "count distinct",
+        dialects: &[],
     },
     Query {
         name: "q6",
         sql: "SELECT a.tag, count(*) FROM smoke a JOIN smoke b ON a.k = b.k \
               WHERE a.id < 100000 AND b.id < 100000 GROUP BY a.tag",
         shape: "join and group by",
+        dialects: &[],
+    },
+];
+
+/// Why DataFusion has its own text for every one of the forty three.
+///
+/// It lowercases an identifier nobody quoted, and every column in `hits` is camel case, so the
+/// official DataFusion `queries.sql` quotes all of them. This is a spelling difference and not a
+/// semantic one, and the answers match.
+const QUOTED: &str = "DataFusion lowercases an unquoted identifier and hits is camel case";
+
+/// Why DuckDB has its own text for the two queries that average a string length.
+///
+/// Not a spelling difference. `STRLEN` counts characters, `length` counts bytes, `hits` is full of
+/// percent encoded UTF-8, and the two boards therefore print different numbers for q28 and q29 on
+/// the same file. Both are right about their own engine, so both texts are here and the report is
+/// left to say the columns disagreed.
+const COUNTED: &str = "DuckDB's STRLEN counts characters and ClickHouse's length counts bytes";
+
+/// The ClickBench queries, forty three of them, as the official repository has them.
+///
+/// The default text is ClickHouse's, which is the reference set the board was built around. It is
+/// not a translation and it is not ours. Every character of it came out of
+/// `ClickHouse/ClickBench/clickhouse/queries.sql`, and each per engine override came out of that
+/// engine's own `queries.sql` in the same repository, because a ClickBench number run against SQL
+/// this project wrote is a number about this project's SQL rather than about the board.
+///
+/// Polars is the one engine with gaps. Its `SQLContext` takes thirty nine of the forty three and
+/// the four it refuses are four missing functions rather than four different opinions, so they are
+/// declared absent here instead of being rewritten until they ran. See [`Dialect`].
+///
+/// The strings are broken with a trailing backslash and never with a concatenation, so what an
+/// engine receives is one line with single spaces in it and the diff against the official file is
+/// a whitespace diff and nothing else.
+pub const CLICKBENCH: &[Query] = &[
+    Query {
+        name: "q1",
+        sql: "SELECT COUNT(*) FROM hits",
+        shape: "count",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some("SELECT COUNT(*) FROM hits"),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q2",
+        sql: "SELECT COUNT(*) FROM hits WHERE AdvEngineID <> 0",
+        shape: "filtered count",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some("SELECT COUNT(*) FROM hits WHERE \"AdvEngineID\" <> 0"),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q3",
+        sql: "SELECT SUM(AdvEngineID), COUNT(*), AVG(ResolutionWidth) FROM hits",
+        shape: "three aggregates",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT SUM(\"AdvEngineID\"), COUNT(*), AVG(\"ResolutionWidth\") FROM \
+                    hits",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q4",
+        sql: "SELECT AVG(UserID) FROM hits",
+        shape: "average",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some("SELECT AVG(\"UserID\") FROM hits"),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q5",
+        sql: "SELECT COUNT(DISTINCT UserID) FROM hits",
+        shape: "count distinct, high card",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some("SELECT COUNT(DISTINCT \"UserID\") FROM hits"),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q6",
+        sql: "SELECT COUNT(DISTINCT SearchPhrase) FROM hits",
+        shape: "count distinct, strings",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some("SELECT COUNT(DISTINCT \"SearchPhrase\") FROM hits"),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q7",
+        sql: "SELECT MIN(EventDate), MAX(EventDate) FROM hits",
+        shape: "min and max of a date",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some("SELECT MIN(\"EventDate\"), MAX(\"EventDate\") FROM hits"),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q8",
+        sql: "SELECT AdvEngineID, COUNT(*) FROM hits WHERE AdvEngineID <> 0 GROUP BY AdvEngineID \
+            ORDER BY COUNT(*) DESC",
+        shape: "group by, low card",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"AdvEngineID\", COUNT(*) FROM hits WHERE \"AdvEngineID\" <> 0 \
+                    GROUP BY \"AdvEngineID\" ORDER BY COUNT(*) DESC",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q9",
+        sql: "SELECT RegionID, COUNT(DISTINCT UserID) AS u FROM hits GROUP BY RegionID ORDER BY u \
+            DESC LIMIT 10",
+        shape: "group by and count distinct",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"RegionID\", COUNT(DISTINCT \"UserID\") AS u FROM hits GROUP BY \
+                    \"RegionID\" ORDER BY u DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q10",
+        sql: "SELECT RegionID, SUM(AdvEngineID), COUNT(*) AS c, AVG(ResolutionWidth), \
+            COUNT(DISTINCT UserID) FROM hits GROUP BY RegionID ORDER BY c DESC LIMIT 10",
+        shape: "group by, several aggregates",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"RegionID\", SUM(\"AdvEngineID\"), COUNT(*) AS c, \
+                    AVG(\"ResolutionWidth\"), COUNT(DISTINCT \"UserID\") FROM hits GROUP BY \
+                    \"RegionID\" ORDER BY c DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q11",
+        sql: "SELECT MobilePhoneModel, COUNT(DISTINCT UserID) AS u FROM hits WHERE \
+            MobilePhoneModel <> '' GROUP BY MobilePhoneModel ORDER BY u DESC LIMIT 10",
+        shape: "group by a string and count distinct",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"MobilePhoneModel\", COUNT(DISTINCT \"UserID\") AS u FROM hits \
+                    WHERE \"MobilePhoneModel\" <> '' GROUP BY \"MobilePhoneModel\" ORDER BY u \
+                    DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q12",
+        sql: "SELECT MobilePhone, MobilePhoneModel, COUNT(DISTINCT UserID) AS u FROM hits WHERE \
+            MobilePhoneModel <> '' GROUP BY MobilePhone, MobilePhoneModel ORDER BY u DESC LIMIT \
+            10",
+        shape: "group by two strings and count distinct",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"MobilePhone\", \"MobilePhoneModel\", COUNT(DISTINCT \
+                    \"UserID\") AS u FROM hits WHERE \"MobilePhoneModel\" <> '' GROUP BY \
+                    \"MobilePhone\", \"MobilePhoneModel\" ORDER BY u DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q13",
+        sql: "SELECT SearchPhrase, COUNT(*) AS c FROM hits WHERE SearchPhrase <> '' GROUP BY \
+            SearchPhrase ORDER BY c DESC LIMIT 10",
+        shape: "group by a string and top k",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"SearchPhrase\", COUNT(*) AS c FROM hits WHERE \"SearchPhrase\" \
+                    <> '' GROUP BY \"SearchPhrase\" ORDER BY c DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q14",
+        sql: "SELECT SearchPhrase, COUNT(DISTINCT UserID) AS u FROM hits WHERE SearchPhrase <> '' \
+            GROUP BY SearchPhrase ORDER BY u DESC LIMIT 10",
+        shape: "group by a string and count distinct",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"SearchPhrase\", COUNT(DISTINCT \"UserID\") AS u FROM hits \
+                    WHERE \"SearchPhrase\" <> '' GROUP BY \"SearchPhrase\" ORDER BY u DESC LIMIT \
+                    10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q15",
+        sql: "SELECT SearchEngineID, SearchPhrase, COUNT(*) AS c FROM hits WHERE SearchPhrase <> \
+            '' GROUP BY SearchEngineID, SearchPhrase ORDER BY c DESC LIMIT 10",
+        shape: "group by two columns and top k",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"SearchEngineID\", \"SearchPhrase\", COUNT(*) AS c FROM hits \
+                    WHERE \"SearchPhrase\" <> '' GROUP BY \"SearchEngineID\", \"SearchPhrase\" \
+                    ORDER BY c DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q16",
+        sql: "SELECT UserID, COUNT(*) FROM hits GROUP BY UserID ORDER BY COUNT(*) DESC LIMIT 10",
+        shape: "group by, very high card",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"UserID\", COUNT(*) FROM hits GROUP BY \"UserID\" ORDER BY \
+                    COUNT(*) DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q17",
+        sql: "SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY UserID, SearchPhrase ORDER \
+            BY COUNT(*) DESC LIMIT 10",
+        shape: "group by two, very high card",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"UserID\", \"SearchPhrase\", COUNT(*) FROM hits GROUP BY \
+                    \"UserID\", \"SearchPhrase\" ORDER BY COUNT(*) DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q18",
+        sql: "SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY UserID, SearchPhrase LIMIT \
+            10",
+        shape: "group by two, no ordering",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"UserID\", \"SearchPhrase\", COUNT(*) FROM hits GROUP BY \
+                    \"UserID\", \"SearchPhrase\" LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q19",
+        sql: "SELECT UserID, extract(minute FROM EventTime) AS m, SearchPhrase, COUNT(*) FROM hits \
+            GROUP BY UserID, m, SearchPhrase ORDER BY COUNT(*) DESC LIMIT 10",
+        shape: "group by with an extract",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"UserID\", extract(minute FROM \
+                    to_timestamp_seconds(\"EventTime\")) AS m, \"SearchPhrase\", COUNT(*) FROM \
+                    hits GROUP BY \"UserID\", m, \"SearchPhrase\" ORDER BY COUNT(*) DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q20",
+        sql: "SELECT UserID FROM hits WHERE UserID = 435090932899640449",
+        shape: "point lookup",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some("SELECT \"UserID\" FROM hits WHERE \"UserID\" = 435090932899640449"),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q21",
+        sql: "SELECT COUNT(*) FROM hits WHERE URL LIKE '%google%'",
+        shape: "substring scan",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some("SELECT COUNT(*) FROM hits WHERE \"URL\" LIKE '%google%'"),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q22",
+        sql: "SELECT SearchPhrase, MIN(URL), COUNT(*) AS c FROM hits WHERE URL LIKE '%google%' AND \
+            SearchPhrase <> '' GROUP BY SearchPhrase ORDER BY c DESC LIMIT 10",
+        shape: "substring scan and group by",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"SearchPhrase\", MIN(\"URL\"), COUNT(*) AS c FROM hits WHERE \
+                    \"URL\" LIKE '%google%' AND \"SearchPhrase\" <> '' GROUP BY \"SearchPhrase\" \
+                    ORDER BY c DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q23",
+        sql: "SELECT SearchPhrase, MIN(URL), MIN(Title), COUNT(*) AS c, COUNT(DISTINCT UserID) \
+            FROM hits WHERE Title LIKE '%Google%' AND URL NOT LIKE '%.google.%' AND SearchPhrase \
+            <> '' GROUP BY SearchPhrase ORDER BY c DESC LIMIT 10",
+        shape: "two substring scans and group by",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"SearchPhrase\", MIN(\"URL\"), MIN(\"Title\"), COUNT(*) AS c, \
+                    COUNT(DISTINCT \"UserID\") FROM hits WHERE \"Title\" LIKE '%Google%' AND \
+                    \"URL\" NOT LIKE '%.google.%' AND \"SearchPhrase\" <> '' GROUP BY \
+                    \"SearchPhrase\" ORDER BY c DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q24",
+        sql: "SELECT * FROM hits WHERE URL LIKE '%google%' ORDER BY EventTime LIMIT 10",
+        shape: "select star and top k",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT * FROM hits WHERE \"URL\" LIKE '%google%' ORDER BY \"EventTime\" \
+                    LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q25",
+        sql: "SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER BY EventTime LIMIT 10",
+        shape: "top k by a date",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"SearchPhrase\" FROM hits WHERE \"SearchPhrase\" <> '' ORDER BY \
+                    \"EventTime\" LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q26",
+        sql: "SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER BY SearchPhrase LIMIT \
+            10",
+        shape: "top k by a string",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"SearchPhrase\" FROM hits WHERE \"SearchPhrase\" <> '' ORDER BY \
+                    \"SearchPhrase\" LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q27",
+        sql: "SELECT SearchPhrase FROM hits WHERE SearchPhrase <> '' ORDER BY EventTime, \
+            SearchPhrase LIMIT 10",
+        shape: "top k by two columns",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"SearchPhrase\" FROM hits WHERE \"SearchPhrase\" <> '' ORDER BY \
+                    \"EventTime\", \"SearchPhrase\" LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q28",
+        sql: "SELECT CounterID, AVG(length(URL)) AS l, COUNT(*) AS c FROM hits WHERE URL <> '' \
+            GROUP BY CounterID HAVING COUNT(*) > 100000 ORDER BY l DESC LIMIT 25",
+        shape: "group by with a string length",
+        dialects: &[
+            Dialect {
+                engines: &["duckdb", "rudb"],
+                sql: Some(
+                    "SELECT CounterID, AVG(STRLEN(URL)) AS l, COUNT(*) AS c FROM hits WHERE \
+                    URL <> '' GROUP BY CounterID HAVING COUNT(*) > 100000 ORDER BY l DESC LIMIT \
+                    25",
+                ),
+                why: COUNTED,
+            },
+            Dialect {
+                engines: &["polars"],
+                sql: None,
+                why: "the SQLContext has no strlen and no character length function",
+            },
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT \"CounterID\", AVG(octet_length(\"URL\")) AS l, COUNT(*) AS c \
+                    FROM hits WHERE \"URL\" <> '' GROUP BY \"CounterID\" HAVING COUNT(*) > 100000 \
+                    ORDER BY l DESC LIMIT 25",
+                ),
+                why: QUOTED,
+            },
+        ],
+    },
+    Query {
+        name: "q29",
+        sql: "SELECT REGEXP_REPLACE(Referer, '^https?://(?:www\\.)?([^/]+)/.*$', '\\1') AS k, \
+            AVG(length(Referer)) AS l, COUNT(*) AS c, MIN(Referer) FROM hits WHERE Referer <> '' \
+            GROUP BY k HAVING COUNT(*) > 100000 ORDER BY l DESC LIMIT 25",
+        shape: "group by a regular expression",
+        dialects: &[
+            Dialect {
+                engines: &["duckdb", "rudb"],
+                sql: Some(
+                    "SELECT REGEXP_REPLACE(Referer, '^https?://(?:www\\.)?([^/]+)/.*$', \
+                    '\\1') AS k, AVG(STRLEN(Referer)) AS l, COUNT(*) AS c, MIN(Referer) FROM hits \
+                    WHERE Referer <> '' GROUP BY k HAVING COUNT(*) > 100000 ORDER BY l DESC LIMIT \
+                    25",
+                ),
+                why: COUNTED,
+            },
+            Dialect {
+                engines: &["polars"],
+                sql: None,
+                why: "the SQLContext has no regexp_replace",
+            },
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT REGEXP_REPLACE(\"Referer\", '^https?://(?:www\\.)?([^/]+)/.*$', \
+                    '\\1') AS k, AVG(octet_length(\"Referer\")) AS l, COUNT(*) AS c, \
+                    MIN(\"Referer\") FROM hits WHERE \"Referer\" <> '' GROUP BY k HAVING COUNT(*) \
+                    > 100000 ORDER BY l DESC LIMIT 25",
+                ),
+                why: QUOTED,
+            },
+        ],
+    },
+    Query {
+        name: "q30",
+        sql: "SELECT SUM(ResolutionWidth), SUM(ResolutionWidth + 1), SUM(ResolutionWidth + 2), \
+            SUM(ResolutionWidth + 3), SUM(ResolutionWidth + 4), SUM(ResolutionWidth + 5), \
+            SUM(ResolutionWidth + 6), SUM(ResolutionWidth + 7), SUM(ResolutionWidth + 8), \
+            SUM(ResolutionWidth + 9), SUM(ResolutionWidth + 10), SUM(ResolutionWidth + 11), \
+            SUM(ResolutionWidth + 12), SUM(ResolutionWidth + 13), SUM(ResolutionWidth + 14), \
+            SUM(ResolutionWidth + 15), SUM(ResolutionWidth + 16), SUM(ResolutionWidth + 17), \
+            SUM(ResolutionWidth + 18), SUM(ResolutionWidth + 19), SUM(ResolutionWidth + 20), \
+            SUM(ResolutionWidth + 21), SUM(ResolutionWidth + 22), SUM(ResolutionWidth + 23), \
+            SUM(ResolutionWidth + 24), SUM(ResolutionWidth + 25), SUM(ResolutionWidth + 26), \
+            SUM(ResolutionWidth + 27), SUM(ResolutionWidth + 28), SUM(ResolutionWidth + 29), \
+            SUM(ResolutionWidth + 30), SUM(ResolutionWidth + 31), SUM(ResolutionWidth + 32), \
+            SUM(ResolutionWidth + 33), SUM(ResolutionWidth + 34), SUM(ResolutionWidth + 35), \
+            SUM(ResolutionWidth + 36), SUM(ResolutionWidth + 37), SUM(ResolutionWidth + 38), \
+            SUM(ResolutionWidth + 39), SUM(ResolutionWidth + 40), SUM(ResolutionWidth + 41), \
+            SUM(ResolutionWidth + 42), SUM(ResolutionWidth + 43), SUM(ResolutionWidth + 44), \
+            SUM(ResolutionWidth + 45), SUM(ResolutionWidth + 46), SUM(ResolutionWidth + 47), \
+            SUM(ResolutionWidth + 48), SUM(ResolutionWidth + 49), SUM(ResolutionWidth + 50), \
+            SUM(ResolutionWidth + 51), SUM(ResolutionWidth + 52), SUM(ResolutionWidth + 53), \
+            SUM(ResolutionWidth + 54), SUM(ResolutionWidth + 55), SUM(ResolutionWidth + 56), \
+            SUM(ResolutionWidth + 57), SUM(ResolutionWidth + 58), SUM(ResolutionWidth + 59), \
+            SUM(ResolutionWidth + 60), SUM(ResolutionWidth + 61), SUM(ResolutionWidth + 62), \
+            SUM(ResolutionWidth + 63), SUM(ResolutionWidth + 64), SUM(ResolutionWidth + 65), \
+            SUM(ResolutionWidth + 66), SUM(ResolutionWidth + 67), SUM(ResolutionWidth + 68), \
+            SUM(ResolutionWidth + 69), SUM(ResolutionWidth + 70), SUM(ResolutionWidth + 71), \
+            SUM(ResolutionWidth + 72), SUM(ResolutionWidth + 73), SUM(ResolutionWidth + 74), \
+            SUM(ResolutionWidth + 75), SUM(ResolutionWidth + 76), SUM(ResolutionWidth + 77), \
+            SUM(ResolutionWidth + 78), SUM(ResolutionWidth + 79), SUM(ResolutionWidth + 80), \
+            SUM(ResolutionWidth + 81), SUM(ResolutionWidth + 82), SUM(ResolutionWidth + 83), \
+            SUM(ResolutionWidth + 84), SUM(ResolutionWidth + 85), SUM(ResolutionWidth + 86), \
+            SUM(ResolutionWidth + 87), SUM(ResolutionWidth + 88), SUM(ResolutionWidth + 89) FROM \
+            hits",
+        shape: "ninety sums over one column",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT SUM(\"ResolutionWidth\"), SUM(\"ResolutionWidth\" + 1), \
+                    SUM(\"ResolutionWidth\" + 2), SUM(\"ResolutionWidth\" + 3), \
+                    SUM(\"ResolutionWidth\" + 4), SUM(\"ResolutionWidth\" + 5), \
+                    SUM(\"ResolutionWidth\" + 6), SUM(\"ResolutionWidth\" + 7), \
+                    SUM(\"ResolutionWidth\" + 8), SUM(\"ResolutionWidth\" + 9), \
+                    SUM(\"ResolutionWidth\" + 10), SUM(\"ResolutionWidth\" + 11), \
+                    SUM(\"ResolutionWidth\" + 12), SUM(\"ResolutionWidth\" + 13), \
+                    SUM(\"ResolutionWidth\" + 14), SUM(\"ResolutionWidth\" + 15), \
+                    SUM(\"ResolutionWidth\" + 16), SUM(\"ResolutionWidth\" + 17), \
+                    SUM(\"ResolutionWidth\" + 18), SUM(\"ResolutionWidth\" + 19), \
+                    SUM(\"ResolutionWidth\" + 20), SUM(\"ResolutionWidth\" + 21), \
+                    SUM(\"ResolutionWidth\" + 22), SUM(\"ResolutionWidth\" + 23), \
+                    SUM(\"ResolutionWidth\" + 24), SUM(\"ResolutionWidth\" + 25), \
+                    SUM(\"ResolutionWidth\" + 26), SUM(\"ResolutionWidth\" + 27), \
+                    SUM(\"ResolutionWidth\" + 28), SUM(\"ResolutionWidth\" + 29), \
+                    SUM(\"ResolutionWidth\" + 30), SUM(\"ResolutionWidth\" + 31), \
+                    SUM(\"ResolutionWidth\" + 32), SUM(\"ResolutionWidth\" + 33), \
+                    SUM(\"ResolutionWidth\" + 34), SUM(\"ResolutionWidth\" + 35), \
+                    SUM(\"ResolutionWidth\" + 36), SUM(\"ResolutionWidth\" + 37), \
+                    SUM(\"ResolutionWidth\" + 38), SUM(\"ResolutionWidth\" + 39), \
+                    SUM(\"ResolutionWidth\" + 40), SUM(\"ResolutionWidth\" + 41), \
+                    SUM(\"ResolutionWidth\" + 42), SUM(\"ResolutionWidth\" + 43), \
+                    SUM(\"ResolutionWidth\" + 44), SUM(\"ResolutionWidth\" + 45), \
+                    SUM(\"ResolutionWidth\" + 46), SUM(\"ResolutionWidth\" + 47), \
+                    SUM(\"ResolutionWidth\" + 48), SUM(\"ResolutionWidth\" + 49), \
+                    SUM(\"ResolutionWidth\" + 50), SUM(\"ResolutionWidth\" + 51), \
+                    SUM(\"ResolutionWidth\" + 52), SUM(\"ResolutionWidth\" + 53), \
+                    SUM(\"ResolutionWidth\" + 54), SUM(\"ResolutionWidth\" + 55), \
+                    SUM(\"ResolutionWidth\" + 56), SUM(\"ResolutionWidth\" + 57), \
+                    SUM(\"ResolutionWidth\" + 58), SUM(\"ResolutionWidth\" + 59), \
+                    SUM(\"ResolutionWidth\" + 60), SUM(\"ResolutionWidth\" + 61), \
+                    SUM(\"ResolutionWidth\" + 62), SUM(\"ResolutionWidth\" + 63), \
+                    SUM(\"ResolutionWidth\" + 64), SUM(\"ResolutionWidth\" + 65), \
+                    SUM(\"ResolutionWidth\" + 66), SUM(\"ResolutionWidth\" + 67), \
+                    SUM(\"ResolutionWidth\" + 68), SUM(\"ResolutionWidth\" + 69), \
+                    SUM(\"ResolutionWidth\" + 70), SUM(\"ResolutionWidth\" + 71), \
+                    SUM(\"ResolutionWidth\" + 72), SUM(\"ResolutionWidth\" + 73), \
+                    SUM(\"ResolutionWidth\" + 74), SUM(\"ResolutionWidth\" + 75), \
+                    SUM(\"ResolutionWidth\" + 76), SUM(\"ResolutionWidth\" + 77), \
+                    SUM(\"ResolutionWidth\" + 78), SUM(\"ResolutionWidth\" + 79), \
+                    SUM(\"ResolutionWidth\" + 80), SUM(\"ResolutionWidth\" + 81), \
+                    SUM(\"ResolutionWidth\" + 82), SUM(\"ResolutionWidth\" + 83), \
+                    SUM(\"ResolutionWidth\" + 84), SUM(\"ResolutionWidth\" + 85), \
+                    SUM(\"ResolutionWidth\" + 86), SUM(\"ResolutionWidth\" + 87), \
+                    SUM(\"ResolutionWidth\" + 88), SUM(\"ResolutionWidth\" + 89) FROM hits",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q31",
+        sql: "SELECT SearchEngineID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG(ResolutionWidth) \
+            FROM hits WHERE SearchPhrase <> '' GROUP BY SearchEngineID, ClientIP ORDER BY c DESC \
+            LIMIT 10",
+        shape: "group by two and several aggregates",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"SearchEngineID\", \"ClientIP\", COUNT(*) AS c, \
+                    SUM(\"IsRefresh\"), AVG(\"ResolutionWidth\") FROM hits WHERE \"SearchPhrase\" \
+                    <> '' GROUP BY \"SearchEngineID\", \"ClientIP\" ORDER BY c DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q32",
+        sql: "SELECT WatchID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG(ResolutionWidth) FROM \
+            hits WHERE SearchPhrase <> '' GROUP BY WatchID, ClientIP ORDER BY c DESC LIMIT 10",
+        shape: "group by a high card pair",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"WatchID\", \"ClientIP\", COUNT(*) AS c, SUM(\"IsRefresh\"), \
+                    AVG(\"ResolutionWidth\") FROM hits WHERE \"SearchPhrase\" <> '' GROUP BY \
+                    \"WatchID\", \"ClientIP\" ORDER BY c DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q33",
+        sql: "SELECT WatchID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG(ResolutionWidth) FROM \
+            hits GROUP BY WatchID, ClientIP ORDER BY c DESC LIMIT 10",
+        shape: "group by a high card pair, unfiltered",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"WatchID\", \"ClientIP\", COUNT(*) AS c, SUM(\"IsRefresh\"), \
+                    AVG(\"ResolutionWidth\") FROM hits GROUP BY \"WatchID\", \"ClientIP\" ORDER \
+                    BY c DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q34",
+        sql: "SELECT URL, COUNT(*) AS c FROM hits GROUP BY URL ORDER BY c DESC LIMIT 10",
+        shape: "group by a long string",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"URL\", COUNT(*) AS c FROM hits GROUP BY \"URL\" ORDER BY c \
+                    DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q35",
+        sql: "SELECT 1, URL, COUNT(*) AS c FROM hits GROUP BY 1, URL ORDER BY c DESC LIMIT 10",
+        shape: "group by a constant and a long string",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT 1, \"URL\", COUNT(*) AS c FROM hits GROUP BY 1, \"URL\" ORDER BY \
+                    c DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q36",
+        sql: "SELECT ClientIP, ClientIP - 1, ClientIP - 2, ClientIP - 3, COUNT(*) AS c FROM hits \
+            GROUP BY ClientIP, ClientIP - 1, ClientIP - 2, ClientIP - 3 ORDER BY c DESC LIMIT 10",
+        shape: "group by four expressions",
+        dialects: &[
+            Dialect {
+                engines: &["polars"],
+                sql: None,
+                why: "the SQLContext rejects the repeated ClientIP output name in the group by",
+            },
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT \"ClientIP\", \"ClientIP\" - 1, \"ClientIP\" - 2, \"ClientIP\" - \
+                    3, COUNT(*) AS c FROM hits GROUP BY \"ClientIP\", \"ClientIP\" - 1, \
+                    \"ClientIP\" - 2, \"ClientIP\" - 3 ORDER BY c DESC LIMIT 10",
+                ),
+                why: QUOTED,
+            },
+        ],
+    },
+    Query {
+        name: "q37",
+        sql: "SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= \
+            '2013-07-01' AND EventDate <= '2013-07-31' AND DontCountHits = 0 AND IsRefresh = 0 \
+            AND URL <> '' GROUP BY URL ORDER BY PageViews DESC LIMIT 10",
+        shape: "date range and group by a URL",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"URL\", COUNT(*) AS PageViews FROM hits WHERE \"CounterID\" = \
+                    62 AND \"EventDate\" >= '2013-07-01' AND \"EventDate\" <= '2013-07-31' AND \
+                    \"DontCountHits\" = 0 AND \"IsRefresh\" = 0 AND \"URL\" <> '' GROUP BY \
+                    \"URL\" ORDER BY PageViews DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q38",
+        sql: "SELECT Title, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= \
+            '2013-07-01' AND EventDate <= '2013-07-31' AND DontCountHits = 0 AND IsRefresh = 0 \
+            AND Title <> '' GROUP BY Title ORDER BY PageViews DESC LIMIT 10",
+        shape: "date range and group by a title",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"Title\", COUNT(*) AS PageViews FROM hits WHERE \"CounterID\" = \
+                    62 AND \"EventDate\" >= '2013-07-01' AND \"EventDate\" <= '2013-07-31' AND \
+                    \"DontCountHits\" = 0 AND \"IsRefresh\" = 0 AND \"Title\" <> '' GROUP BY \
+                    \"Title\" ORDER BY PageViews DESC LIMIT 10",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q39",
+        sql: "SELECT URL, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= \
+            '2013-07-01' AND EventDate <= '2013-07-31' AND IsRefresh = 0 AND IsLink <> 0 AND \
+            IsDownload = 0 GROUP BY URL ORDER BY PageViews DESC LIMIT 10 OFFSET 1000",
+        shape: "date range, group by and offset",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"URL\", COUNT(*) AS PageViews FROM hits WHERE \"CounterID\" = \
+                    62 AND \"EventDate\" >= '2013-07-01' AND \"EventDate\" <= '2013-07-31' AND \
+                    \"IsRefresh\" = 0 AND \"IsLink\" <> 0 AND \"IsDownload\" = 0 GROUP BY \"URL\" \
+                    ORDER BY PageViews DESC LIMIT 10 OFFSET 1000",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q40",
+        sql: "SELECT TraficSourceID, SearchEngineID, AdvEngineID, CASE WHEN (SearchEngineID = 0 \
+            AND AdvEngineID = 0) THEN Referer ELSE '' END AS Src, URL AS Dst, COUNT(*) AS \
+            PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2013-07-01' AND EventDate \
+            <= '2013-07-31' AND IsRefresh = 0 GROUP BY TraficSourceID, SearchEngineID, \
+            AdvEngineID, Src, Dst ORDER BY PageViews DESC LIMIT 10 OFFSET 1000",
+        shape: "date range, a case and a wide group by",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"TraficSourceID\", \"SearchEngineID\", \"AdvEngineID\", CASE \
+                    WHEN (\"SearchEngineID\" = 0 AND \"AdvEngineID\" = 0) THEN \"Referer\" ELSE \
+                    '' END AS Src, \"URL\" AS Dst, COUNT(*) AS PageViews FROM hits WHERE \
+                    \"CounterID\" = 62 AND \"EventDate\" >= '2013-07-01' AND \"EventDate\" <= \
+                    '2013-07-31' AND \"IsRefresh\" = 0 GROUP BY \"TraficSourceID\", \
+                    \"SearchEngineID\", \"AdvEngineID\", Src, Dst ORDER BY PageViews DESC LIMIT \
+                    10 OFFSET 1000",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q41",
+        sql: "SELECT URLHash, EventDate, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND \
+            EventDate >= '2013-07-01' AND EventDate <= '2013-07-31' AND IsRefresh = 0 AND \
+            TraficSourceID IN (-1, 6) AND RefererHash = 3594120000172545465 GROUP BY URLHash, \
+            EventDate ORDER BY PageViews DESC LIMIT 10 OFFSET 100",
+        shape: "date range with an IN and a hash",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"URLHash\", \"EventDate\", COUNT(*) AS PageViews FROM hits \
+                    WHERE \"CounterID\" = 62 AND \"EventDate\" >= '2013-07-01' AND \"EventDate\" \
+                    <= '2013-07-31' AND \"IsRefresh\" = 0 AND \"TraficSourceID\" IN (-1, 6) AND \
+                    \"RefererHash\" = 3594120000172545465 GROUP BY \"URLHash\", \"EventDate\" \
+                    ORDER BY PageViews DESC LIMIT 10 OFFSET 100",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q42",
+        sql: "SELECT WindowClientWidth, WindowClientHeight, COUNT(*) AS PageViews FROM hits WHERE \
+            CounterID = 62 AND EventDate >= '2013-07-01' AND EventDate <= '2013-07-31' AND \
+            IsRefresh = 0 AND DontCountHits = 0 AND URLHash = 2868770270353813622 GROUP BY \
+            WindowClientWidth, WindowClientHeight ORDER BY PageViews DESC LIMIT 10 OFFSET 10000",
+        shape: "date range and a deep offset",
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"WindowClientWidth\", \"WindowClientHeight\", COUNT(*) AS \
+                    PageViews FROM hits WHERE \"CounterID\" = 62 AND \"EventDate\" >= \
+                    '2013-07-01' AND \"EventDate\" <= '2013-07-31' AND \"IsRefresh\" = 0 AND \
+                    \"DontCountHits\" = 0 AND \"URLHash\" = 2868770270353813622 GROUP BY \
+                    \"WindowClientWidth\", \"WindowClientHeight\" ORDER BY PageViews DESC LIMIT \
+                    10 OFFSET 10000",
+            ),
+            why: QUOTED,
+        }],
+    },
+    Query {
+        name: "q43",
+        sql: "SELECT DATE_TRUNC('minute', EventTime) AS M, COUNT(*) AS PageViews FROM hits WHERE \
+            CounterID = 62 AND EventDate >= '2013-07-14' AND EventDate <= '2013-07-15' AND \
+            IsRefresh = 0 AND DontCountHits = 0 GROUP BY DATE_TRUNC('minute', EventTime) ORDER BY \
+            DATE_TRUNC('minute', EventTime) LIMIT 10 OFFSET 1000",
+        shape: "minute buckets over a date range",
+        dialects: &[
+            Dialect { engines: &["polars"], sql: None, why: "the SQLContext has no date_trunc" },
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT DATE_TRUNC('minute', to_timestamp_seconds(\"EventTime\")) AS M, \
+                    COUNT(*) AS PageViews FROM hits WHERE \"CounterID\" = 62 AND \"EventDate\" >= \
+                    '2013-07-14' AND \"EventDate\" <= '2013-07-15' AND \"IsRefresh\" = 0 AND \
+                    \"DontCountHits\" = 0 GROUP BY DATE_TRUNC('minute', \
+                    to_timestamp_seconds(\"EventTime\")) ORDER BY DATE_TRUNC('minute', M) LIMIT \
+                    10 OFFSET 1000",
+                ),
+                why: QUOTED,
+            },
+        ],
     },
 ];
 
@@ -210,19 +1054,85 @@ pub fn sorting_key(suite: &str, table: &str) -> &'static str {
 pub fn queries(name: &str) -> Option<&'static [Query]> {
     match name {
         "smoke" => Some(SMOKE),
+        "clickbench" => Some(CLICKBENCH),
         _ => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{SMOKE, SUITES, find, queries, sorting_key};
+    use super::{CLICKBENCH, SMOKE, SUITES, find, queries, sorting_key};
 
     #[test]
-    fn the_only_suite_with_queries_in_it_is_the_one_that_runs() {
+    fn a_suite_this_harness_has_the_queries_of_says_how_many_it_has() {
         for suite in SUITES {
-            let has = queries(suite.name).is_some();
-            assert_eq!(has, suite.name == "smoke", "{} disagrees with itself", suite.name);
+            if let Some(got) = queries(suite.name) {
+                assert_eq!(got.len(), suite.queries, "{} miscounts itself", suite.name);
+            }
+        }
+    }
+
+    #[test]
+    fn the_clickbench_text_is_the_official_text_and_not_a_translation() {
+        // Three spot checks against the official files rather than a checksum, because a checksum
+        // says a byte moved and these say which byte and why it matters.
+        let q1 = CLICKBENCH.iter().find(|q| q.name == "q1").unwrap();
+        assert_eq!(q1.sql, "SELECT COUNT(*) FROM hits");
+        // ClickHouse writes the length in bytes and DuckDB writes it in characters, and this is
+        // the whole reason per engine text exists.
+        let q28 = CLICKBENCH.iter().find(|q| q.name == "q28").unwrap();
+        assert!(q28.sql_for("clickhouse-local").unwrap().contains("AVG(length(URL))"));
+        assert!(q28.sql_for("duckdb").unwrap().contains("AVG(STRLEN(URL))"));
+        // DataFusion quotes every identifier because it lowercases the ones nobody quoted.
+        let q2 = CLICKBENCH.iter().find(|q| q.name == "q2").unwrap();
+        assert!(q2.sql_for("datafusion").unwrap().contains("\"AdvEngineID\""), "{q2:?}");
+    }
+
+    #[test]
+    fn an_engine_nobody_wrote_a_dialect_for_gets_the_default_text() {
+        for query in CLICKBENCH {
+            assert_eq!(query.sql_for("clickhouse-server"), Some(query.sql), "{}", query.name);
+            assert_eq!(query.sql_for("clickhouse-local"), Some(query.sql), "{}", query.name);
+        }
+    }
+
+    #[test]
+    fn polars_is_short_exactly_the_four_its_sql_context_has_no_function_for() {
+        let short: Vec<&str> =
+            CLICKBENCH.iter().filter(|q| q.sql_for("polars").is_none()).map(|q| q.name).collect();
+        assert_eq!(short, vec!["q28", "q29", "q36", "q43"]);
+    }
+
+    #[test]
+    fn every_query_a_dialect_takes_away_says_why_in_a_sentence() {
+        for query in CLICKBENCH.iter().chain(SMOKE) {
+            for (engine, why) in query.absent() {
+                assert!(why.len() > 20, "{} says nothing about {engine}", query.name);
+            }
+            for dialect in query.dialects {
+                assert!(!dialect.why.is_empty(), "{} has a dialect with no reason", query.name);
+                assert!(!dialect.engines.is_empty(), "{} has a dialect for nobody", query.name);
+            }
+        }
+    }
+
+    #[test]
+    fn a_query_the_default_text_covers_is_not_reported_as_absent() {
+        let q1 = CLICKBENCH.iter().find(|q| q.name == "q1").unwrap();
+        assert!(q1.absent().is_empty());
+        assert!(q1.absent_for("polars").is_none());
+        let q43 = CLICKBENCH.iter().find(|q| q.name == "q43").unwrap();
+        assert!(q43.absent_for("polars").unwrap().contains("date_trunc"));
+        assert!(q43.absent_for("duckdb").is_none());
+    }
+
+    #[test]
+    fn every_clickbench_query_reads_the_one_table_the_suite_declares() {
+        for query in CLICKBENCH {
+            for engine in ["clickhouse-local", "duckdb", "datafusion"] {
+                let sql = query.sql_for(engine).expect("has text");
+                assert!(sql.contains(" hits"), "{} for {engine} reads no hits", query.name);
+            }
         }
     }
 

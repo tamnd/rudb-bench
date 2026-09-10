@@ -725,6 +725,7 @@ mod tests {
                 answer: "10000000".to_owned(),
             }],
             keeps_state: false,
+            missing: Vec::new(),
         }
     }
 

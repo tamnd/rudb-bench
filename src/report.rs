@@ -101,6 +101,18 @@ pub struct SuiteResult {
     pub loaded: Loaded,
     /// Every query, in the order they ran, losses included.
     pub queries: Vec<QueryResult>,
+    /// The queries this engine has no faithful expression of, by name.
+    ///
+    /// Empty for almost every column. Not empty for Polars on ClickBench, whose `SQLContext` has no
+    /// `strlen`, no `regexp_replace` and no `date_trunc`, so four of the forty three are not
+    /// expressible without somebody rewriting them until they ran, which would make the column a
+    /// measurement of the rewrite. Declared in the query table and never discovered at run time,
+    /// so that the gap is in a diff somebody reviewed.
+    ///
+    /// A column with anything in here is not the whole suite, which rule three asks for, so it
+    /// cannot be published and [`publishable`] says so.
+    pub missing: Vec<String>,
+
     /// Whether this engine carried state from one query into the next.
     ///
     /// False for four of the five engines here, because a fresh process per run is what stops
@@ -122,6 +134,26 @@ impl SuiteResult {
     #[must_use]
     pub fn cold_total(&self) -> Duration {
         self.queries.iter().map(|q| q.runs.cold).sum()
+    }
+
+    /// One query by the name the suite gave it.
+    #[must_use]
+    pub fn find(&self, name: &str) -> Option<&QueryResult> {
+        self.queries.iter().find(|q| q.name == name)
+    }
+
+    /// Total hot over only the queries named here, for a ratio between two ragged columns.
+    ///
+    /// `None` when this column is short one of them, because the alternative is a total over a
+    /// different set of queries than the one it is being divided by, and that ratio would be the
+    /// most flattering number in the table for whichever engine ran the least.
+    #[must_use]
+    pub fn hot_total_over(&self, names: &[String]) -> Option<Duration> {
+        let mut total = Duration::ZERO;
+        for name in names {
+            total += self.find(name)?.runs.hot.headline();
+        }
+        Some(total)
     }
 
     /// The largest peak any query reached, when every query reported one.
@@ -248,6 +280,17 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
         ));
     }
 
+    // Rule three asks for the whole suite, so a column missing four of forty three is not the suite
+    // even though every query it did run was measured properly. Named rather than counted, because
+    // which four decides whether the gap is worth closing or worth writing down and leaving.
+    if !result.missing.is_empty() {
+        reasons.push(format!(
+            "{} of the suite has no faithful expression here, so this is not the whole suite rule              three asks for: {}",
+            result.missing.len(),
+            result.missing.join(", ")
+        ));
+    }
+
     if let Some(spread) = result.shape_spread().filter(|s| *s < FLAT) {
         reasons.push(format!(
             "every query here ran within {spread:.2}x of every other one, so most of what was \
@@ -312,12 +355,21 @@ pub fn run(
     }
     let loaded = engine.load(tables)?;
 
+    // Taken before the loop because the loop borrows the engine mutably, and needed inside it
+    // because which text a query has is a question about the engine.
+    let who = engine.name().to_owned();
+    let mut missing = Vec::new();
+
     let mut results = Vec::with_capacity(queries.len());
     for query in queries {
+        let Some(sql) = query.sql_for(&who) else {
+            missing.push(query.name.to_owned());
+            continue;
+        };
         let mut costs: Vec<Cost> = Vec::with_capacity(hot + 1);
         let mut answer = String::new();
         let runs = Runs::collect(hot, || {
-            let ran = engine.run(query.sql)?;
+            let ran = engine.run(sql)?;
             if answer.is_empty() {
                 answer = ran.answer;
             }
@@ -338,11 +390,12 @@ pub fn run(
 
     Ok(SuiteResult {
         suite,
-        engine: engine.name().to_owned(),
+        engine: who,
         version: engine.version().to_owned(),
         loaded,
         queries: results,
         keeps_state: engine.keeps_state(),
+        missing,
     })
 }
 
@@ -568,11 +621,14 @@ impl Comparison {
     pub fn disagreements(&self) -> Vec<String> {
         let mut out = Vec::new();
         let Some(reference) = self.results.first() else { return out };
-        for (at, query) in reference.queries.iter().enumerate() {
+        for query in &reference.queries {
+            // By name, because a column can be short a query and lining two columns up by position
+            // would compare one engine's q29 against another's q30 and report a disagreement that
+            // is really an off by one in this loop.
             let answers: Vec<(String, String)> = self
                 .results
                 .iter()
-                .filter_map(|r| r.queries.get(at).map(|q| (r.engine.clone(), q.answer.clone())))
+                .filter_map(|r| r.find(&query.name).map(|q| (r.engine.clone(), q.answer.clone())))
                 .collect();
             for line in crate::answer::disagreements(&answers) {
                 out.push(format!("{}: {line}", query.name));
@@ -774,6 +830,30 @@ pub fn comparison(compared: &Comparison) -> String {
         line(&mut out, "");
     }
 
+    // Said before the disagreements, because a reader who has just noticed a column is short wants
+    // to know why before they read anything else about it. The reason comes out of the query table
+    // rather than out of the run, so it is a sentence somebody wrote and reviewed.
+    for result in compared.results.iter().filter(|r| !r.missing.is_empty()) {
+        let defined = crate::suite::queries(compared.suite.name).unwrap_or(&[]);
+        for name in &result.missing {
+            let why = defined
+                .iter()
+                .find(|q| q.name == name)
+                .and_then(|q| q.absent_for(&result.engine))
+                .unwrap_or("no text was declared for it");
+            line(&mut out, &format!("{} did not run {name}, because {why}.", result.engine));
+        }
+        line(
+            &mut out,
+            &format!(
+                "So the {} column is {} of {} queries and its ratio is over the shared ones.",
+                result.engine,
+                result.queries.len(),
+                result.queries.len() + result.missing.len()
+            ),
+        );
+    }
+
     let disagreements = compared.disagreements();
     if disagreements.is_empty() && compared.results.len() > 1 {
         line(
@@ -832,15 +912,17 @@ fn grid(compared: &Comparison) -> String {
     }
 
     let mut rows = vec![header];
-    for (at, query) in reference.queries.iter().enumerate() {
+    // By name and never by position. A column short a query is the whole reason this exists, and
+    // indexing a ragged column would put q30's time on q29's row, which is a wrong number rather
+    // than a missing one.
+    for query in &reference.queries {
         let mut row = vec![query.name.clone(), query.shape.clone()];
         for result in &compared.results {
-            row.push(
-                result
-                    .queries
-                    .get(at)
-                    .map_or_else(|| "did not run".to_owned(), |q| show(q.runs.hot.headline())),
-            );
+            row.push(match result.find(&query.name) {
+                Some(q) => show(q.runs.hot.headline()),
+                None if result.missing.contains(&query.name) => "no dialect".to_owned(),
+                None => "did not run".to_owned(),
+            });
         }
         rows.push(row);
     }
@@ -869,12 +951,30 @@ fn grid(compared: &Comparison) -> String {
     }));
     // The ratio last, because it is the one number a reader takes away, and because it means
     // nothing without the six rows above it that say what was measured.
-    let base = reference.hot_total().as_secs_f64();
-    rows.push(summary(&format!("vs {}", reference.engine), compared, move |r| {
+    //
+    // Over the queries every column has, rather than over each column's own total. A column short
+    // four queries has a smaller total for that reason alone, and dividing it by a full one would
+    // hand the engine that ran the least the best number on the page.
+    let common: Vec<String> = reference
+        .queries
+        .iter()
+        .map(|q| q.name.clone())
+        .filter(|name| compared.results.iter().all(|r| r.find(name).is_some()))
+        .collect();
+    let base = reference.hot_total_over(&common).unwrap_or(Duration::ZERO).as_secs_f64();
+    let label = if common.len() == reference.queries.len() {
+        format!("vs {}", reference.engine)
+    } else {
+        format!("vs {} on {} shared", reference.engine, common.len())
+    };
+    rows.push(summary(&label, compared, move |r| {
+        let Some(hot) = r.hot_total_over(&common) else {
+            return "n/a".to_owned();
+        };
         if base <= 0.0 {
             return "n/a".to_owned();
         }
-        format!("{:.2}x", r.hot_total().as_secs_f64() / base)
+        format!("{:.2}x", hot.as_secs_f64() / base)
     }));
 
     let mut widths = vec![0usize; rows[0].len()];
@@ -971,6 +1071,7 @@ mod tests {
                 answer: "10000000".to_owned(),
             }],
             keeps_state: false,
+            missing: Vec::new(),
         }
     }
 
@@ -1083,6 +1184,50 @@ mod tests {
     #[test]
     fn a_query_too_fast_for_the_clock_gives_no_ratio_rather_than_an_infinite_one() {
         assert!(shaped("polars", &[0, 40]).shape_spread().is_none());
+    }
+
+    /// A column with the named queries taken out of it, the way an engine with no dialect for them
+    /// arrives at the report.
+    fn short(name: &str, medians: &[u64], without: &[&str]) -> SuiteResult {
+        let mut result = shaped(name, medians);
+        result.queries.retain(|q| !without.contains(&q.name.as_str()));
+        result.missing = without.iter().map(|&n| n.to_owned()).collect();
+        result
+    }
+
+    #[test]
+    fn a_column_short_a_query_keeps_every_later_row_next_to_the_query_it_belongs_to() {
+        let text = comparison(&compared(
+            vec![shaped("duckdb", &[100, 200, 300]), short("polars", &[100, 200, 300], &["q2"])],
+            vec![],
+        ));
+        let q3 = text.lines().find(|l| l.starts_with("q3")).expect("a q3 row");
+        // 300ms and not 200ms. Indexing the short column by position would have slid q3's cell up
+        // into q2's place and printed the wrong engine's number under a heading that looked right.
+        assert!(q3.contains("300.000ms"), "{text}");
+        let q2 = text.lines().find(|l| l.starts_with("q2")).expect("a q2 row");
+        assert!(q2.contains("no dialect"), "{text}");
+    }
+
+    #[test]
+    fn a_ratio_against_a_column_that_ran_less_is_taken_over_what_both_of_them_ran() {
+        let text = comparison(&compared(
+            vec![shaped("duckdb", &[100, 800, 100]), short("polars", &[200, 800, 200], &["q2"])],
+            vec![],
+        ));
+        // 400 against 200 and not 400 against 1000. Over its own total the short column would have
+        // come out at 0.40x, which reads as two and a half times faster than DuckDB when it is in
+        // fact twice as slow on every query it ran.
+        let row = text.lines().find(|l| l.starts_with("vs duckdb")).expect("a ratio row");
+        assert!(row.contains("2.00x"), "{text}");
+        assert!(row.contains("on 2 shared"), "{text}");
+    }
+
+    #[test]
+    fn a_column_with_no_dialect_for_part_of_the_suite_is_not_the_whole_suite() {
+        let reasons = publishable(&short("polars", &[100, 200, 300], &["q2"]));
+        let reason = reasons.iter().find(|r| r.contains("no faithful expression")).expect("said");
+        assert!(reason.contains("q2"), "{reason}");
     }
 
     #[test]
