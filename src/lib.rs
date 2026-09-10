@@ -13,6 +13,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod fleet;
+
+pub use fleet::{FLEET, Machine, REPORTING_MACHINE, Role};
+
 /// A system on the board, and what it measured on ClickBench at `c6a.4xlarge`.
 ///
 /// These are recomputed from the official result files rather than taken from anybody's slide, on

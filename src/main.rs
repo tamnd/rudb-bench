@@ -8,7 +8,7 @@
 
 use std::process::ExitCode;
 
-use rudb_bench::{CLICKBENCH_C6A_4XLARGE, target_seconds};
+use rudb_bench::{CLICKBENCH_C6A_4XLARGE, FLEET, REPORTING_MACHINE, Role, target_seconds};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -21,6 +21,10 @@ fn main() -> ExitCode {
         }
         Some("baselines") => {
             baselines();
+            ExitCode::SUCCESS
+        }
+        Some("fleet") => {
+            fleet();
             ExitCode::SUCCESS
         }
         Some("run" | "load" | "report" | "machine") => {
@@ -69,6 +73,43 @@ fn baselines() {
     }
 }
 
+/// The machines the project actually has, and what a number from each is worth.
+///
+/// Printed with the reporting machine at the top rather than at the bottom, because the useful
+/// fact here is the one about what these machines are not.
+fn fleet() {
+    println!("Published numbers come from {REPORTING_MACHINE}.");
+    println!("Nothing below is that machine. Reporting rule seven: never compare across machines.");
+    println!();
+    println!("machine     role         cores/threads   memory   free disk");
+    for machine in FLEET {
+        let role = match machine.role {
+            Role::Reporting => "reporting",
+            Role::Regression => "regression",
+            Role::Correctness => "correctness",
+        };
+        println!(
+            "{:<10}  {:<11}  {:>6}/{:<7}  {:>4} GiB  {:>5} GiB",
+            machine.name,
+            role,
+            machine.cores,
+            machine.threads,
+            machine.memory_gib,
+            machine.free_disk_gib
+        );
+    }
+    println!();
+    for machine in FLEET {
+        println!("{}: {}", machine.name, machine.os);
+        println!("  {}", machine.cpu);
+        println!("  {}", machine.note);
+        println!();
+    }
+    println!("These track the engine against itself over time, which is a job that wants the same");
+    println!("machine far more than it wants the right machine. They do not produce a number that");
+    println!("goes in a README, a release note or a talk. Probed 10 September 2026.");
+}
+
 fn help() {
     println!("rudb-bench {VERSION}");
     println!("The benchmark harness for rudb.");
@@ -76,13 +117,14 @@ fn help() {
     println!("Usage: rudb-bench <command> [options]");
     println!();
     println!("  baselines     print the recorded board and the number we have to reach");
+    println!("  fleet         print the development machines and what a number from each is worth");
     println!("  machine       record the machine, the frequency policy and the mount options");
     println!("  load          load a suite's data into each engine and time it");
     println!("  run           run a suite against each engine and record the distribution");
     println!("  report        write the per-query table, losses included");
     println!("  -V, --version print the version and exit");
     println!();
-    println!("Only `baselines` works. The rest arrives with M1, which is the milestone where the");
-    println!("apparatus is used in anger. The design is spec/15-rudb-bench.md in");
+    println!("Only `baselines` and `fleet` work. The rest arrives with M1, which is the milestone");
+    println!("where the apparatus is used in anger. The design is spec/15-rudb-bench.md in");
     println!("https://github.com/tamnd/rudb.");
 }

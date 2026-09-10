@@ -61,6 +61,28 @@ The primary reporting machine is `c6a.4xlarge`, 16 vCPU and 32 GiB, because that
 
 Frequency policy, turbo state, page cache handling, filesystem and mount options are recorded in the result artifact rather than assumed. Nothing is measured on a shared CI runner, ever, and the CI in this repository deliberately runs no benchmarks: a timing from a shared virtual machine is not a timing.
 
+### The machines we actually have
+
+Those are the machines a published number comes from. They are not the machines the project owns. `rudb-bench fleet` prints what is really here, which is four boxes and none of them is a `c6a.4xlarge`.
+
+```
+$ rudb-bench fleet
+Published numbers come from c6a.4xlarge, 16 vCPU, 32 GiB, gp2.
+Nothing below is that machine. Reporting rule seven: never compare across machines.
+
+machine     role         cores/threads   memory   free disk
+gamingpc    regression       24/32         63 GiB    249 GiB
+server3     regression        8/8          23 GiB     44 GiB
+server2     correctness       6/6          11 GiB     25 GiB
+server1     correctness       4/4           5 GiB    114 GiB
+```
+
+The distinction is structural rather than a note somebody stops reading. A machine carries a role, a role says whether a number from it may be published, and nothing in the fleet may. There is a test that fails if that stops being true, so adding a reporting machine is a conversation about whether it really is one.
+
+What these are for is the other job a benchmark does, which is telling you on a Tuesday that the change you merged on Monday cost eight percent. That job wants the same machine over time much more than it wants the right machine, and these are the same machines over time.
+
+Each one has a caveat that is worth knowing before trusting anything from it. `gamingpc` is the only machine that can hold ClickBench comfortably and the only one that can say anything about thread scaling, but its cores are heterogeneous, 8 performance and 16 efficiency, so a thread landing on the wrong kind is a 2x outlier with nothing to do with the change under test. It is also the only Windows machine, which matters because the storage layer has to work there and nobody finds a Windows file locking problem on a Mac. `server3` is the default for a Linux regression run, with 44 GiB free against DuckDB's own 20.46 GB `hits` file, which means loading it streams from Parquet and deletes the intermediate rather than keeping both. `server2` and `server1` do correctness and compatibility work. `server1` has about 2 GiB of memory free, which makes it useless for timing and genuinely useful for the resource claim, since an out of memory there is a real finding.
+
 ## Who we measure against
 
 DuckDB at the version compatibility is claimed against, in its native format. This is the primary comparison.
