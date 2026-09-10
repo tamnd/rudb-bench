@@ -118,7 +118,7 @@ fn fleet() {
     println!("Published numbers come from {REPORTING_MACHINE}.");
     println!("Nothing below is that machine. Reporting rule seven: never compare across machines.");
     println!();
-    println!("machine     role         cores/threads   memory   free disk");
+    println!("machine       role         cores/threads   memory   free disk   clickbench");
     for machine in FLEET {
         let role = match machine.role {
             Role::Reporting => "reporting",
@@ -126,13 +126,14 @@ fn fleet() {
             Role::Correctness => "correctness",
         };
         println!(
-            "{:<10}  {:<11}  {:>6}/{:<7}  {:>4} GiB  {:>5} GiB",
+            "{:<12}  {:<11}  {:>6}/{:<7}  {:>4} GiB  {:>5} GiB   {}",
             machine.name,
             role,
             machine.cores,
             machine.threads,
             machine.memory_gib,
-            machine.free_disk_gib
+            machine.free_disk_gib,
+            if machine.clickbench { "yes" } else { "no" }
         );
     }
     println!();
