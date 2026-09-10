@@ -87,8 +87,14 @@ jobs:
         run: cargo run -q -- machine
       # The whole measurement path, on a runner whose timings mean nothing. What is being checked
       # is that it produces a table, not what is in it.
+      #
+      # `--check` compares the run against baselines/smoke.txt and fails when a query got twice as
+      # slow and left the recorded range behind. There is no record for a GitHub runner in that file
+      # and there should not be, since the hardware underneath varies between runs, so today this
+      # prints the sentence saying it had nothing to compare and passes. That is the read path being
+      # exercised rather than a gate being satisfied, and the output says which of the two it was.
       - name: the smoke suite still measures something
-        run: cargo run -q --release -- run smoke
+        run: cargo run -q --release -- run smoke --check
 
   docs:
     name: documentation

@@ -112,6 +112,27 @@ pub fn threads_here() -> usize {
     std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
 }
 
+/// What to call this machine in a file that gets committed.
+///
+/// The hostname, unless `RUDB_BENCH_MACHINE` says otherwise. The override exists for CI, where the
+/// hostname is a different random string on every run and the useful name is the runner image. It
+/// is not a way to pretend one machine is another: the committed record carries whatever this
+/// returned, the scheduled check refuses to compare two records whose names differ, and somebody
+/// who lies to it here is lying to a file with their name on the commit.
+///
+/// `unknown` when the system will not say, which is a name like any other and sorts to one place,
+/// rather than an empty string that would silently match the next machine that also would not say.
+#[must_use]
+pub fn name_here() -> String {
+    if let Some(named) = std::env::var_os("RUDB_BENCH_MACHINE") {
+        let named = named.to_string_lossy().trim().to_owned();
+        if !named.is_empty() {
+            return named;
+        }
+    }
+    read_command("hostname", &[]).unwrap_or_else(|| "unknown".to_owned())
+}
+
 /// Installed memory.
 fn memory() -> Fact {
     if let Some(line) = field_in_file("/proc/meminfo", "MemTotal") {

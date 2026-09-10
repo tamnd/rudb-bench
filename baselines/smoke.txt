@@ -1,0 +1,66 @@
+# Committed benchmark records, read by the regression gate.
+#
+# One block per suite, machine and engine. Written by `rudb-bench run <suite> --record` and read by
+# `rudb-bench run <suite> --check`, which fails when a query's median moved past the threshold and
+# its samples no longer overlap the ones here. A query that swung wide on the day is reported and
+# never failed, per section 13.8 of spec/engine/13-measurement.md in tamnd/rudb.
+#
+# Times are microseconds, as integers, in the order lower quartile, median, upper quartile. Integers
+# because a number a formatter rounded is a number that drifts by a rounding step every time this
+# file is rewritten, and three of them because a median alone can only be compared by a percentage
+# and a percentage on a shared runner is a coin flip.
+#
+# These are not published numbers and nothing here is comparable to anybody's board. They exist to
+# be compared against themselves on the same machine. Reporting rule seven still applies.
+
+[record]
+suite     smoke
+machine   server3
+engine    clickhouse-local
+version   26.9.1.1138
+recorded  2026-09-10
+query     q1             566002     648651     729915
+query     q2             482546     559223     670231
+query     q3             522815     578966     703788
+query     q4             458225     501087     610038
+query     q5             590258     608876     679123
+query     q6             509498     569140     622122
+
+[record]
+suite     smoke
+machine   server3
+engine    datafusion
+version   datafusion-cli 55.0.0
+recorded  2026-09-10
+query     q1              42767      44917      55642
+query     q2              91057     119513     130603
+query     q3             107457     121008     173481
+query     q4             120705     146511     176141
+query     q5             104773     116699     123717
+query     q6             303712     324010     335808
+
+[record]
+suite     smoke
+machine   server3
+engine    duckdb
+version   v1.5.5 (Variegata) d8cdaa33fd
+recorded  2026-09-10
+query     q1              40343      43736      60163
+query     q2             110636     139040     173464
+query     q3              71276      77069     105029
+query     q4             137789     153757     194875
+query     q5             131463     170753     215589
+query     q6             209281     230027     262382
+
+[record]
+suite     smoke
+machine   server3
+engine    polars
+version   1.44.2
+recorded  2026-09-10
+query     q1             393738     409813     450602
+query     q2             405210     430392     487988
+query     q3             474483     520941     575524
+query     q4             454273     498961     517747
+query     q5             508778     529084     559506
+query     q6             521899     547239     575365

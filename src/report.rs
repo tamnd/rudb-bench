@@ -135,7 +135,7 @@ impl SuiteResult {
     ///
     /// The worst rather than the average, because the question this answers is whether anything in
     /// the run was disturbed, and one query that swung by half while the other five were steady is
-    /// a run where something else was using the machine. An average over six would hide it.
+    /// the case worth catching. An average over six would hide it.
     ///
     /// `None` when a query was too fast for the clock to have a ratio about, which is a different
     /// thing from a steady one and prints differently.
@@ -636,15 +636,22 @@ pub fn comparison(compared: &Comparison) -> String {
 
     let disturbed = compared.disturbed();
     if !disturbed.is_empty() {
-        line(&mut out, "Something else was using this machine while this ran:");
+        line(&mut out, "These swung wider than rule two allows:");
         for who in &disturbed {
             line(&mut out, &format!("  {who}"));
         }
+        // Two causes and no claim about which. The first version of this said something else was
+        // using the machine, which was a diagnosis rather than a reading, and it was wrong: on an
+        // idle server3 the bare startup of duckdb and of clickhouse swing by 37% and 48% of their
+        // own medians with no query attached. On a suite whose queries are tens of milliseconds
+        // that is most of what got timed. A report that names the wrong cause sends somebody to
+        // look at the wrong machine for an afternoon.
+        line(&mut out, "That is either another tenant on this machine, or a query so short that");
+        line(&mut out, "starting the process is most of what was timed. Either way the ratio row");
         line(
             &mut out,
-            "So the ratio row is a ratio of two disturbed numbers. Take the run again on",
+            "compares two numbers whose error bars are wider than the gap between them.",
         );
-        line(&mut out, "a quiet machine before quoting anything out of it.");
         line(&mut out, "");
     }
 
@@ -1087,10 +1094,10 @@ mod tests {
             vec![result(Peak::Bytes(1024), 5), swung("polars", &[10, 10, 20, 30, 40])],
             vec![],
         ));
-        assert!(text.contains("Something else was using this machine"), "{text}");
+        assert!(text.contains("swung wider than rule two allows"), "{text}");
         assert!(text.contains("polars swung by"), "{text}");
         assert!(text.contains("q1"), "{text}");
-        assert!(text.contains("Take the run again"), "{text}");
+        assert!(text.contains("error bars are wider than the gap"), "{text}");
         // The steady engine is not accused of anything.
         assert!(!text.contains("duckdb swung by"), "{text}");
     }
@@ -1101,7 +1108,7 @@ mod tests {
             vec![result(Peak::Bytes(1024), 5), rival("polars", 5, "10000000")],
             vec![],
         ));
-        assert!(!text.contains("Something else was using this machine"), "{text}");
+        assert!(!text.contains("swung wider than rule two allows"), "{text}");
     }
 
     #[test]

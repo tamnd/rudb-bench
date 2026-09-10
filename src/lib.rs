@@ -31,6 +31,7 @@ pub mod fleet;
 pub mod machine;
 pub mod measure;
 pub mod memory;
+pub mod regress;
 pub mod report;
 pub mod suite;
 
