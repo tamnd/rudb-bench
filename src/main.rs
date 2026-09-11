@@ -229,7 +229,20 @@ struct Plan {
     /// regression gate compares against, and `--store` adds a row to the history of what each layer
     /// bought. A run that closes a layer usually wants both and neither implies the other.
     store: Option<String>,
+    /// The engines this run asked for, or every engine on the machine when it did not ask.
+    ///
+    /// A filter rather than a list to add to, because the reason to reach for this is always that
+    /// one engine is in the way of the other four. A run of TPC-H at scale factor 100 on `gamingpc`
+    /// took the machine down inside Polars, and without this flag the only way to get the other
+    /// four numbers back was to uninstall Polars. An engine left out this way is an abstention with
+    /// a sentence saying it was left out, not a missing row, because a table that silently has one
+    /// fewer column than the one before it is the thing this harness exists to not produce.
+    engines: Option<Vec<String>>,
 }
+
+/// Every engine this harness knows how to drive, in the order [`discover`] builds them.
+const ENGINES: [&str; 6] =
+    ["duckdb", "clickhouse-local", "datafusion", "polars", "clickhouse-server", "rudb"];
 
 /// Read the arguments after `run`.
 ///
@@ -244,6 +257,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     let mut gate = Gate::Nothing;
     let mut runs = None;
     let mut store = None;
+    let mut engines = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let wanted = match arg.as_str() {
@@ -274,6 +288,33 @@ fn plan(args: &[String]) -> Result<Plan, String> {
                 store = Some(given.clone());
                 continue;
             }
+            "--engines" => {
+                let given = rest.next().ok_or(
+                    "--engines wants a comma separated list after it, such as \
+                     `--engines duckdb,clickhouse-local`",
+                )?;
+                let wanted: Vec<String> = given
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                if wanted.is_empty() {
+                    return Err(format!(
+                        "--engines {given} names no engine, and a run of nothing is not a run"
+                    ));
+                }
+                for name in &wanted {
+                    if !ENGINES.contains(&name.as_str()) {
+                        return Err(format!(
+                            "--engines {name} is not an engine here, the ones there are: {}",
+                            ENGINES.join(", ")
+                        ));
+                    }
+                }
+                engines = Some(wanted);
+                continue;
+            }
             other if other.starts_with("--") => {
                 return Err(format!("unknown option {other}, try `rudb-bench --help`"));
             }
@@ -294,6 +335,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
         gate,
         runs: runs.unwrap_or_else(|| gate.runs()),
         store,
+        engines,
     })
 }
 
@@ -312,7 +354,7 @@ fn run(plan: &Plan) -> ExitCode {
     };
 
     let scratch = scratch();
-    let (mut engines, missing) = discover(&scratch, suite);
+    let (mut engines, missing) = discover(&scratch, suite, plan.engines.as_deref());
 
     // The data before the engines, because every engine gets the same files and the first thing a
     // reader of a result asks is which files those were.
@@ -451,44 +493,62 @@ fn ledger() -> ExitCode {
 /// somebody else's memory and somebody else's page cache in a column that claims to be DuckDB's.
 /// Since the comparison runs one engine to completion before starting the next, putting it last
 /// means it comes up after everything it could disturb has already been measured.
+///
+/// `asked` is the `--engines` filter and `None` means every engine here. An engine the filter left
+/// out comes back as an abstention rather than as nothing at all, so that a table produced by a
+/// focused run cannot be mistaken for a table produced by a full one.
 fn discover(
     scratch: &std::path::Path,
     suite: &'static Suite,
+    asked: Option<&[String]>,
 ) -> (Vec<Box<dyn Engine>>, Vec<Abstention>) {
     let mut engines: Vec<Box<dyn Engine>> = Vec::new();
     let mut missing = Vec::new();
+    let wanted = |name: &str| asked.is_none_or(|list| list.iter().any(|one| one == name));
 
-    match Duckdb::discover(scratch, suite) {
-        Ok(engine) => engines.push(Box::new(engine)),
-        Err(e) => missing.push(gap("duckdb", &e)),
+    macro_rules! consider {
+        ($name:literal, $found:expr) => {
+            if wanted($name) {
+                match $found {
+                    Ok(engine) => engines.push(Box::new(engine)),
+                    Err(e) => missing.push(gap($name, &e)),
+                }
+            } else {
+                missing.push(unasked($name));
+            }
+        };
     }
-    match ClickhouseLocal::discover(scratch, suite) {
-        Ok(engine) => engines.push(Box::new(engine)),
-        Err(e) => missing.push(gap("clickhouse-local", &e)),
-    }
-    match Datafusion::discover(scratch, suite) {
-        Ok(engine) => engines.push(Box::new(engine)),
-        Err(e) => missing.push(gap("datafusion", &e)),
-    }
-    match Polars::discover(scratch, suite) {
-        Ok(engine) => engines.push(Box::new(engine)),
-        Err(e) => missing.push(gap("polars", &e)),
-    }
-    match ClickhouseServer::discover(scratch, suite) {
-        Ok(engine) => engines.push(Box::new(engine)),
-        Err(e) => missing.push(gap("clickhouse-server", &e)),
-    }
+
+    consider!("duckdb", Duckdb::discover(scratch, suite));
+    consider!("clickhouse-local", ClickhouseLocal::discover(scratch, suite));
+    consider!("datafusion", Datafusion::discover(scratch, suite));
+    consider!("polars", Polars::discover(scratch, suite));
+    consider!("clickhouse-server", ClickhouseServer::discover(scratch, suite));
 
     // rudb is always in the list, because an engine that is missing from a comparison because it
     // could not have been built is a different thing from one that abstains, and only one of those
-    // is where this project actually is.
-    engines.push(Box::new(Rudb::discover(scratch)));
+    // is where this project actually is. The filter still applies to it, because a run that asked
+    // for four rivals and got five rows would be a filter that does not mean what it says.
+    if wanted("rudb") {
+        engines.push(Box::new(Rudb::discover(scratch)));
+    } else {
+        missing.push(unasked("rudb"));
+    }
     (engines, missing)
 }
 
 /// An engine that is not on this machine, as a line of the report.
 fn gap(what: &str, why: &BenchError) -> Abstention {
     Abstention { engine: what.to_owned(), version: "not found".to_owned(), why: why.to_string() }
+}
+
+/// An engine that is on this machine and was left out of this run on purpose.
+fn unasked(what: &str) -> Abstention {
+    Abstention {
+        engine: what.to_owned(),
+        version: "not asked for".to_owned(),
+        why: "left out of this run by --engines".to_owned(),
+    }
 }
 
 /// Where a run puts its data.
@@ -523,6 +583,7 @@ fn help() {
     );
     println!("    --record        replace the committed records for the engines that ran here");
     println!("    --store <layer> add this run to the ledger as the row that closes a layer");
+    println!("    --engines a,b   run only these, the rest abstain saying they were left out");
     println!("    --runs n        hot runs per query, five at least, default five and fifteen");
     println!("                    for anything that reads or writes a record");
     println!("  ledger        print what each layer bought, from the committed runs");
@@ -609,5 +670,40 @@ mod tests {
     fn an_unknown_flag_is_an_error_and_not_a_suite_with_dashes_on_it() {
         let e = plan(&args("smoke --fast")).unwrap_err();
         assert!(e.contains("--fast"), "{e}");
+    }
+
+    #[test]
+    fn asking_for_nothing_in_particular_asks_for_every_engine() {
+        assert_eq!(plan(&args("tpch")).unwrap().engines, None);
+    }
+
+    #[test]
+    fn the_engine_filter_keeps_the_order_and_the_spelling_it_was_given() {
+        let got = plan(&args("tpch --engines duckdb,clickhouse-local,datafusion")).unwrap();
+        assert_eq!(
+            got.engines,
+            Some(vec!["duckdb".to_owned(), "clickhouse-local".to_owned(), "datafusion".to_owned()])
+        );
+        assert_eq!(got.suite, "tpch");
+    }
+
+    #[test]
+    fn an_engine_nobody_here_has_heard_of_is_refused_with_the_list_of_the_ones_there_are() {
+        // Typing `clickhouse` when the engine is called `clickhouse-local` is the way this gets
+        // used wrong, and silently running five engines instead of one would hide it for an hour.
+        let e = plan(&args("tpch --engines clickhouse")).unwrap_err();
+        assert!(e.contains("clickhouse-local"), "{e}");
+        assert!(plan(&args("tpch --engines")).is_err());
+        assert!(plan(&args("tpch --engines ,,")).is_err());
+    }
+
+    #[test]
+    fn every_name_the_filter_accepts_is_a_name_discovery_actually_builds() {
+        // The two lists are written in two places, and the day one of them gains an engine is the
+        // day the other one has to. This is the test that says so.
+        for name in super::ENGINES {
+            assert!(plan(&args(&format!("tpch --engines {name}"))).is_ok(), "{name}");
+        }
+        assert_eq!(super::ENGINES.len(), 6);
     }
 }
