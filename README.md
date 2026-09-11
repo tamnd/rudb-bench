@@ -10,7 +10,7 @@ The design is [`spec/15-rudb-bench.md`](https://github.com/tamnd/rudb/blob/main/
 
 ## Status
 
-Early, and running. rudb cannot run a query yet, so what gets measured today is five rivals against each other: DuckDB, ClickHouse twice, DataFusion and Polars, on a generated smoke dataset and on the real ClickBench `hits`. That is not a placeholder. Every reporting rule below is a property of the apparatus rather than of the engine, and every one of them is easier to build now, against engines nobody here has a stake in, than on the afternoon somebody wants a headline.
+Early, and running. rudb cannot run a query yet, so what gets measured today is five rivals against each other: DuckDB, ClickHouse twice, DataFusion and Polars, on a generated smoke dataset, on the real ClickBench `hits` and on TPC-H at scale factor 100. That is not a placeholder. Every reporting rule below is a property of the apparatus rather than of the engine, and every one of them is easier to build now, against engines nobody here has a stake in, than on the afternoon somebody wants a headline.
 
 What exists is the recorded board, which was recorded before there was anything to flatter, and a measurement path that runs end to end: load, on-disk size, a cold run, five hot runs, the median and the interquartile range, peak resident memory, and a per-query table with a list of the reasons the number may not be published underneath it. Today that list is never empty.
 
@@ -115,6 +115,35 @@ A column that is short a query is then handled everywhere it would otherwise lie
 The difference between TPC-H and ClickBench is that TPC-H has a specification. The business questions have one meaning, there is no per engine `queries.sql` anywhere to be faithful to, so there is one text and every engine gets it. The text is DuckDB's rendering out of `extension/tpch/dbgen/queries`, because that one is public, versioned and checkable rather than retyped by us out of a PDF.
 
 Whether every engine actually takes that text is a question with an answer, so it was asked before the table was written, against a real SF 0.01 corpus rather than against an empty schema. DuckDB, ClickHouse and DataFusion each answered all twenty two. Polars answers nineteen: its `SQLContext` does not resolve the correlated `p_partkey` in q02 or q17, and it rejects the `NOT LIKE` inside the q13 join constraint. Those three are declared absent in the table for the same reason the four ClickBench ones are.
+
+### The first full TPC-H at scale factor 100, and what it says
+
+TPC-H has now run end to end on `gamingpc-wsl` over the real 22.50 GiB corpus, all twenty two queries, five runs each, with DuckDB and `clickhouse local` each loading into a format of their own and DataFusion reading the Parquet where it lies. It is committed as the `2a` row of `runs/tpch.txt`.
+
+```
+engine              hot total   hot cpu   peak RSS      load    on disk   vs duckdb   worst IQR   shape spread
+duckdb                30.936s   536.480s  16.65 GiB    53.524s  25.90 GiB     1.00x       10.4%         15.29x
+datafusion           106.241s  2209.510s  28.14 GiB   no load   22.50 GiB     3.43x       34.7%         64.06x
+clickhouse-local     130.813s  2269.040s  17.36 GiB   248.100s  25.92 GiB     4.23x       65.9%         66.35x
+```
+
+The first thing this says is that TPC-H is not ClickBench, and it is worth saying loudly because the two tables come from the same harness on the same machine a week apart. On ClickBench three of the five engines landed within nine percent of each other on total hot time and the ordering between them was noise. On TPC-H the second engine is three and a half times the first and the third is four and a quarter. Nothing about the machine changed. What changed is that ClickBench is forty three scans of one table with a `GROUP BY` on the end and TPC-H is twenty two join plans over eight tables, and joins are where the engines are actually different.
+
+The shape spread column is the compact way to see it. That is an engine's slowest query over its fastest, and DuckDB's is 15.29x where the other two are 64.06x and 66.35x. An engine whose worst query is fifteen times its best has a plan for everything in the suite. An engine whose worst is sixty five times its best has a handful of queries it falls off a cliff on, and it is the same handful in both columns: q09, the product type profit measure, is 3.105s for DuckDB and 37.064s for `clickhouse local`, and q02 is 302ms against 25.719s. Those are the correlated subquery and the six way join, not the scan.
+
+The `clickhouse-server` row is missing and the reason is recorded rather than glossed. Building the MergeTree table needs `OPTIMIZE TABLE lineitem FINAL` over six hundred million rows, and `clickhouse client` gives up on it at its three hundred second default. That is a harness bug and not a ClickHouse limit, since the server was still working when the client stopped waiting. Until it is fixed the TPC-H table has no tuned ClickHouse column, which matters because ClickBench showed the tuned server at 2.48x the local one over the same data, so the gap between DuckDB and ClickHouse here is an upper bound on the real one rather than the real one.
+
+The target does not move. Ten times DuckDB over this suite on this machine is 3.09s hot over twenty two queries, against a current fastest of 30.936s. That is the second number of its kind, after ClickBench's, and it points at the joins rather than at the scan.
+
+### Three engines, three opinions about how wide a decimal is
+
+The first two TPC-H runs both reported q01 and q08 as disagreements, thirty two numbers against thirty two and four against four, which is the shape of a report saying every row is there and every number is wrong. Running the two queries by hand against all three engines says otherwise. Every engine agrees on the answer. They disagree about the result type.
+
+`avg` over a `DECIMAL(15,2)` is a double in DuckDB, a decimal of scale six in DataFusion and a decimal of scale four in ClickHouse. So the average quantity in q01 comes back as `25.499370423275426`, `25.499370` and `25.4993`, which are the same number printed to three widths. q08 divides two decimal sums and does the same thing, worse: DuckDB says `0.039535108776109315`, DataFusion says `0.03953510` and ClickHouse says `0.0395`. A relative tolerance of a part in a billion calls all three pairs different, correctly, because they are different to a part in a billion and there is nothing in the text that says they should not be.
+
+So the comparison now allows two numbers to differ in the last place either of them was printed to, which is `10^-f` for `f` decimal places and is absolute rather than relative. The wider of that and the old relative tolerance wins, so nothing that used to pass now fails. The weakening is real and applies only to the decimal places: a number printed with no decimal point at all is compared at the relative tolerance alone, so a count off by one in a hundred and forty eight million is still caught, and a ratio of 0.041 against everybody else's 0.0395 is still caught however few places anybody printed.
+
+This is a different kind of concession from the seventeen unsettled ClickBench queries and it is worth keeping the two apart. Those are queries whose answer the data does not determine, so no checker can ever check them. These two are queries whose answer every engine got right and the checker was reading the printing rather than the value.
 
 ### ClickHouse is two rows, because it is two systems
 

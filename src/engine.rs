@@ -591,6 +591,13 @@ pub struct ClickhouseServer {
 const NOT_THE_SERVER: &str =
     "the timer wraps clickhouse client and the work happens in a server process it did not start";
 
+/// How long the client waits on the server, in seconds, before deciding it is gone.
+///
+/// Two hours. The default is five minutes and that is a sensible default for a person at a terminal
+/// and the wrong one here, since a load or a merge that takes longer than five minutes is a fact
+/// about the engine this harness exists to record rather than a reason to stop.
+const WAIT: u32 = 7200;
+
 impl ClickhouseServer {
     /// Find a ClickHouse, pick a port for it, and give it a directory. Nothing starts yet.
     ///
@@ -698,7 +705,17 @@ impl ClickhouseServer {
             .arg("--host")
             .arg("127.0.0.1")
             .arg("--port")
-            .arg(self.port.to_string());
+            .arg(self.port.to_string())
+            // The client gives up on a server that has not sent anything for five minutes, and the
+            // first TPC-H at scale factor 100 lost its whole tuned ClickHouse column to that:
+            // `OPTIMIZE TABLE lineitem FINAL` over six hundred million rows sends nothing until it
+            // is done, so the client reported a timeout while the server was still merging. A
+            // benchmark harness is the one client that should wait, because the thing it is here to
+            // find out is how long the server takes.
+            .arg("--receive_timeout")
+            .arg(WAIT.to_string())
+            .arg("--send_timeout")
+            .arg(WAIT.to_string());
         command
     }
 
