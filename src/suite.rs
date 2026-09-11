@@ -272,6 +272,19 @@ const QUOTED: &str = "DataFusion lowercases an unquoted identifier and hits is c
 /// left to say the columns disagreed.
 const COUNTED: &str = "DuckDB's STRLEN counts characters and ClickHouse's length counts bytes";
 
+/// Why rudb is absent from the eight ClickBench queries that group by something almost unique.
+///
+/// Measured on gamingpc against the real ninety nine million row file, one query at a time with a
+/// twenty gigabyte cap on the address space. Thirty five of the forty three finish. These eight all
+/// group by a key with tens of millions of distinct values, the hash table holds every one of them,
+/// nothing spills, and the process ends on an allocation the operating system refused. The scan and
+/// the string work and the sort are all fine at this scale, so the aggregate is the one operator
+/// here with no bound on it. tamnd/rudb#220 is the fix and tamnd/rudb#219 is why the failure is an
+/// abort rather than the out of memory error rudb already knows how to raise.
+const NO_SPILL: &str = "rudb's hash aggregate does not spill and this groups by a key with tens of \
+                        millions of distinct values, so the table outgrows the machine. \
+                        tamnd/rudb#220, milestone E5";
+
 /// The ClickBench queries, forty three of them, as the official repository has them.
 ///
 /// The default text is ClickHouse's, which is the reference set the board was built around. It is
@@ -483,57 +496,69 @@ pub const CLICKBENCH: &[Query] = &[
         name: "q16",
         sql: "SELECT UserID, COUNT(*) FROM hits GROUP BY UserID ORDER BY COUNT(*) DESC LIMIT 10",
         shape: "group by, very high card",
-        dialects: &[Dialect {
-            engines: &["datafusion"],
-            sql: Some(
-                "SELECT \"UserID\", COUNT(*) FROM hits GROUP BY \"UserID\" ORDER BY \
+        dialects: &[
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT \"UserID\", COUNT(*) FROM hits GROUP BY \"UserID\" ORDER BY \
                     COUNT(*) DESC LIMIT 10",
-            ),
-            why: QUOTED,
-        }],
+                ),
+                why: QUOTED,
+            },
+            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
+        ],
     },
     Query {
         name: "q17",
         sql: "SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY UserID, SearchPhrase ORDER \
             BY COUNT(*) DESC LIMIT 10",
         shape: "group by two, very high card",
-        dialects: &[Dialect {
-            engines: &["datafusion"],
-            sql: Some(
-                "SELECT \"UserID\", \"SearchPhrase\", COUNT(*) FROM hits GROUP BY \
+        dialects: &[
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT \"UserID\", \"SearchPhrase\", COUNT(*) FROM hits GROUP BY \
                     \"UserID\", \"SearchPhrase\" ORDER BY COUNT(*) DESC LIMIT 10",
-            ),
-            why: QUOTED,
-        }],
+                ),
+                why: QUOTED,
+            },
+            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
+        ],
     },
     Query {
         name: "q18",
         sql: "SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY UserID, SearchPhrase LIMIT \
             10",
         shape: "group by two, no ordering",
-        dialects: &[Dialect {
-            engines: &["datafusion"],
-            sql: Some(
-                "SELECT \"UserID\", \"SearchPhrase\", COUNT(*) FROM hits GROUP BY \
+        dialects: &[
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT \"UserID\", \"SearchPhrase\", COUNT(*) FROM hits GROUP BY \
                     \"UserID\", \"SearchPhrase\" LIMIT 10",
-            ),
-            why: QUOTED,
-        }],
+                ),
+                why: QUOTED,
+            },
+            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
+        ],
     },
     Query {
         name: "q19",
         sql: "SELECT UserID, extract(minute FROM EventTime) AS m, SearchPhrase, COUNT(*) FROM hits \
             GROUP BY UserID, m, SearchPhrase ORDER BY COUNT(*) DESC LIMIT 10",
         shape: "group by with an extract",
-        dialects: &[Dialect {
-            engines: &["datafusion"],
-            sql: Some(
-                "SELECT \"UserID\", extract(minute FROM \
+        dialects: &[
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT \"UserID\", extract(minute FROM \
                     to_timestamp_seconds(\"EventTime\")) AS m, \"SearchPhrase\", COUNT(*) FROM \
                     hits GROUP BY \"UserID\", m, \"SearchPhrase\" ORDER BY COUNT(*) DESC LIMIT 10",
-            ),
-            why: QUOTED,
-        }],
+                ),
+                why: QUOTED,
+            },
+            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
+        ],
     },
     Query {
         name: "q20",
@@ -813,56 +838,68 @@ pub const CLICKBENCH: &[Query] = &[
         sql: "SELECT WatchID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG(ResolutionWidth) FROM \
             hits WHERE SearchPhrase <> '' GROUP BY WatchID, ClientIP ORDER BY c DESC LIMIT 10",
         shape: "group by a high card pair",
-        dialects: &[Dialect {
-            engines: &["datafusion"],
-            sql: Some(
-                "SELECT \"WatchID\", \"ClientIP\", COUNT(*) AS c, SUM(\"IsRefresh\"), \
+        dialects: &[
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT \"WatchID\", \"ClientIP\", COUNT(*) AS c, SUM(\"IsRefresh\"), \
                     AVG(\"ResolutionWidth\") FROM hits WHERE \"SearchPhrase\" <> '' GROUP BY \
                     \"WatchID\", \"ClientIP\" ORDER BY c DESC LIMIT 10",
-            ),
-            why: QUOTED,
-        }],
+                ),
+                why: QUOTED,
+            },
+            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
+        ],
     },
     Query {
         name: "q33",
         sql: "SELECT WatchID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG(ResolutionWidth) FROM \
             hits GROUP BY WatchID, ClientIP ORDER BY c DESC LIMIT 10",
         shape: "group by a high card pair, unfiltered",
-        dialects: &[Dialect {
-            engines: &["datafusion"],
-            sql: Some(
-                "SELECT \"WatchID\", \"ClientIP\", COUNT(*) AS c, SUM(\"IsRefresh\"), \
+        dialects: &[
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT \"WatchID\", \"ClientIP\", COUNT(*) AS c, SUM(\"IsRefresh\"), \
                     AVG(\"ResolutionWidth\") FROM hits GROUP BY \"WatchID\", \"ClientIP\" ORDER \
                     BY c DESC LIMIT 10",
-            ),
-            why: QUOTED,
-        }],
+                ),
+                why: QUOTED,
+            },
+            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
+        ],
     },
     Query {
         name: "q34",
         sql: "SELECT URL, COUNT(*) AS c FROM hits GROUP BY URL ORDER BY c DESC LIMIT 10",
         shape: "group by a long string",
-        dialects: &[Dialect {
-            engines: &["datafusion"],
-            sql: Some(
-                "SELECT \"URL\", COUNT(*) AS c FROM hits GROUP BY \"URL\" ORDER BY c \
+        dialects: &[
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT \"URL\", COUNT(*) AS c FROM hits GROUP BY \"URL\" ORDER BY c \
                     DESC LIMIT 10",
-            ),
-            why: QUOTED,
-        }],
+                ),
+                why: QUOTED,
+            },
+            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
+        ],
     },
     Query {
         name: "q35",
         sql: "SELECT 1, URL, COUNT(*) AS c FROM hits GROUP BY 1, URL ORDER BY c DESC LIMIT 10",
         shape: "group by a constant and a long string",
-        dialects: &[Dialect {
-            engines: &["datafusion"],
-            sql: Some(
-                "SELECT 1, \"URL\", COUNT(*) AS c FROM hits GROUP BY 1, \"URL\" ORDER BY \
+        dialects: &[
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT 1, \"URL\", COUNT(*) AS c FROM hits GROUP BY 1, \"URL\" ORDER BY \
                     c DESC LIMIT 10",
-            ),
-            why: QUOTED,
-        }],
+                ),
+                why: QUOTED,
+            },
+            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
+        ],
     },
     Query {
         name: "q36",
