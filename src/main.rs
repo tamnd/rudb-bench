@@ -25,6 +25,7 @@ use std::process::ExitCode;
 use rudb_bench::engine::{
     BenchError, ClickhouseLocal, ClickhouseServer, Datafusion, Duckdb, Engine, Polars, Rudb,
 };
+use rudb_bench::kernels;
 use rudb_bench::ledger;
 use rudb_bench::machine;
 use rudb_bench::regress::{self, FACTOR, Watch};
@@ -58,6 +59,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("ledger") => ledger(),
+        Some("kernels") => kernels(&args[1..]),
         Some("run") => match plan(&args[1..]) {
             Ok(plan) => run(&plan),
             Err(e) => {
@@ -481,6 +483,94 @@ fn ledger() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Measure rudb's kernels in rudb's own process, and check or record what they cost.
+///
+/// The one subcommand here that does not start an engine and send it SQL, because a kernel cannot be
+/// reached that way. It runs `cargo xtask kernels --json` in a rudb checkout and keeps the answer.
+/// Everything it adds over reading that task's table by eye is in [`rudb_bench::kernels`]: a machine
+/// name on the numbers, a committed file, and a comparison against the last run at a threshold the
+/// measurement can support.
+///
+/// It is not a [`Suite`], and that is a decision rather than an omission. A suite is queries over
+/// tables against every engine on the machine, all three of which this is not, and forcing it into
+/// that shape would mean a `queries: 0` entry that the report code has to keep making exceptions
+/// for. The `micro` suite entry stays what it is, a description of the category.
+fn kernels(args: &[String]) -> ExitCode {
+    let mut record = false;
+    let mut check = false;
+    let mut repo = None;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--record" => record = true,
+            "--check" => check = true,
+            "--repo" => match rest.next() {
+                Some(path) => repo = Some(path.clone()),
+                None => {
+                    eprintln!("rudb-bench: --repo needs a path");
+                    return ExitCode::FAILURE;
+                }
+            },
+            other => {
+                eprintln!("rudb-bench: unknown argument {other}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
+    let repo = kernels::repo(repo.as_deref());
+    println!("measuring the kernels in {}", repo.display());
+    println!("this builds rudb under the bench profile first, so the first run is a few minutes");
+    println!();
+    let cells = match kernels::measure(&repo) {
+        Ok(cells) => cells,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let rudb = kernels::describe(&repo);
+    println!("rudb {rudb} on {}", machine::name_here());
+    println!("{}", kernels::summary(&cells));
+    println!();
+
+    let at = kernels::path();
+    if check {
+        let records = match kernels::read(&at) {
+            Ok(records) => records,
+            Err(e) => {
+                eprintln!("rudb-bench: {e}");
+                return ExitCode::FAILURE;
+            }
+        };
+        let here = machine::name_here();
+        let Some(against) = records.iter().find(|old| old.machine == here) else {
+            // Not a failure. The first run on a machine has nothing to compare against, and a gate
+            // that fails on a machine nobody has recorded yet is a gate that stops the first person
+            // to try it rather than the change that broke something.
+            println!("no record for {here} in {}, so there is nothing to check", at.display());
+            println!("take one with `rudb-bench kernels --record`");
+            return ExitCode::SUCCESS;
+        };
+        println!("against {} measured on {}", against.rudb, against.recorded);
+        let (text, failed) = kernels::report(&kernels::compare(against, &cells));
+        print!("{text}");
+        if failed {
+            return ExitCode::FAILURE;
+        }
+    }
+
+    if record {
+        let taken = kernels::record_of(cells, rudb);
+        if let Err(e) = kernels::write(&at, taken) {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+        println!("recorded in {}", at.display());
+    }
+    ExitCode::SUCCESS
+}
+
 /// Every engine on this machine, and a sentence for every one that is not.
 ///
 /// DuckDB first, because it is the reference column of the comparison and the ratio row is stated
@@ -587,6 +677,12 @@ fn help() {
     println!("    --runs n        hot runs per query, five at least, default five and fifteen");
     println!("                    for anything that reads or writes a record");
     println!("  ledger        print what each layer bought, from the committed runs");
+    println!("  kernels       measure rudb's own loops in rudb's process, per row");
+    println!("    --repo <path>   the rudb checkout, default ../rudb");
+    println!("    --record        replace this machine's block in baselines/kernels.txt");
+    println!(
+        "    --check         fail on a cell {FACTOR:.0}x slower, and on any cell that lost its loop"
+    );
     println!("  load          load a suite's data into each engine and time it");
     println!("  report        write the published status page from the last run");
     println!("  -V, --version print the version and exit");
@@ -601,6 +697,8 @@ fn help() {
     println!("  RUDB_BENCH_SCRATCH      where a run puts its data");
     println!("  RUDB_BENCH_MACHINE      what to call this machine in a committed record");
     println!("  RUDB_BENCH_BASELINE     the records file, default baselines/<suite>.txt");
+    println!("  RUDB_BENCH_RUDB_REPO    the rudb checkout the kernel suite measures");
+    println!("  RUDB_BENCH_KERNELS      the kernel records file, default baselines/kernels.txt");
     println!();
     println!("`run` works on the smoke suite, which generates its own data and measures nothing");
     println!("anybody should quote. The suites that matter need a download or a generator and");
