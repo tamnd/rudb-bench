@@ -275,18 +275,26 @@ const QUOTED: &str = "DataFusion lowercases an unquoted identifier and hits is c
 /// encoded UTF-8 and the two counts are not the same number there.
 const COUNTED: &str = "DuckDB's length counts characters where ClickHouse's counts bytes, and STRLEN is the one that matches";
 
-/// Why rudb is absent from the eight ClickBench queries that group by something almost unique.
+/// Why rudb is absent from the one ClickBench query that groups by something almost unique.
 ///
-/// Measured on gamingpc against the real ninety nine million row file, one query at a time with a
-/// twenty gigabyte cap on the address space. Thirty five of the forty three finish. These eight all
-/// group by a key with tens of millions of distinct values, the hash table holds every one of them,
-/// nothing spills, and the process ends on an allocation the operating system refused. The scan and
-/// the string work and the sort are all fine at this scale, so the aggregate is the one operator
-/// here with no bound on it. tamnd/rudb#220 is the fix and tamnd/rudb#219 is why the failure is an
-/// abort rather than the out of memory error rudb already knows how to raise.
-const NO_SPILL: &str = "rudb's hash aggregate does not spill and this groups by a key with tens of \
-                        millions of distinct values, so the table outgrows the machine. \
-                        tamnd/rudb#220, milestone E5";
+/// This said eight until tamnd/rudb#269 was found, which was a memory charge taken off the buffer a
+/// group key is read into rather than off the copy that goes into the table. That buffer keeps
+/// whatever the longest string it has held needed, so every group after the first long key was
+/// charged for that key's length, by a factor of forty on q15. Seven of the eight were not out of
+/// memory at all, they were out of budget, and they run now.
+///
+/// Measured again on gamingpc against the real ninety nine million row file, one query at a time,
+/// with rudb at the default limit of eighty percent of the machine. Forty two of the forty three
+/// finish. q33 is the one left and it is honest: it groups by `WatchID, ClientIP` over the whole
+/// table, `WatchID` is close to unique, so the table really is about a hundred million groups and
+/// the allocation it dies asking for is fourteen gigabytes in one piece. tamnd/rudb#220 is the fix.
+///
+/// Two of the seven that came back are worth watching rather than celebrating. q19 holds thirty
+/// gigabytes on a machine with thirty one and spends most of its hundred and sixty eight seconds
+/// swapping, which is tamnd/rudb#272, and q34 and q35 hold sixteen.
+const NO_SPILL: &str = "rudb's hash aggregate does not spill and this groups by a key that is \
+                        close to unique over a hundred million rows, so the table outgrows the \
+                        machine. tamnd/rudb#220, milestone E5";
 
 /// The ClickBench queries, forty three of them, as the official repository has them.
 ///
@@ -499,69 +507,57 @@ pub const CLICKBENCH: &[Query] = &[
         name: "q16",
         sql: "SELECT UserID, COUNT(*) FROM hits GROUP BY UserID ORDER BY COUNT(*) DESC LIMIT 10",
         shape: "group by, very high card",
-        dialects: &[
-            Dialect {
-                engines: &["datafusion"],
-                sql: Some(
-                    "SELECT \"UserID\", COUNT(*) FROM hits GROUP BY \"UserID\" ORDER BY \
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"UserID\", COUNT(*) FROM hits GROUP BY \"UserID\" ORDER BY \
                     COUNT(*) DESC LIMIT 10",
-                ),
-                why: QUOTED,
-            },
-            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
-        ],
+            ),
+            why: QUOTED,
+        }],
     },
     Query {
         name: "q17",
         sql: "SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY UserID, SearchPhrase ORDER \
             BY COUNT(*) DESC LIMIT 10",
         shape: "group by two, very high card",
-        dialects: &[
-            Dialect {
-                engines: &["datafusion"],
-                sql: Some(
-                    "SELECT \"UserID\", \"SearchPhrase\", COUNT(*) FROM hits GROUP BY \
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"UserID\", \"SearchPhrase\", COUNT(*) FROM hits GROUP BY \
                     \"UserID\", \"SearchPhrase\" ORDER BY COUNT(*) DESC LIMIT 10",
-                ),
-                why: QUOTED,
-            },
-            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
-        ],
+            ),
+            why: QUOTED,
+        }],
     },
     Query {
         name: "q18",
         sql: "SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY UserID, SearchPhrase LIMIT \
             10",
         shape: "group by two, no ordering",
-        dialects: &[
-            Dialect {
-                engines: &["datafusion"],
-                sql: Some(
-                    "SELECT \"UserID\", \"SearchPhrase\", COUNT(*) FROM hits GROUP BY \
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"UserID\", \"SearchPhrase\", COUNT(*) FROM hits GROUP BY \
                     \"UserID\", \"SearchPhrase\" LIMIT 10",
-                ),
-                why: QUOTED,
-            },
-            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
-        ],
+            ),
+            why: QUOTED,
+        }],
     },
     Query {
         name: "q19",
         sql: "SELECT UserID, extract(minute FROM EventTime) AS m, SearchPhrase, COUNT(*) FROM hits \
             GROUP BY UserID, m, SearchPhrase ORDER BY COUNT(*) DESC LIMIT 10",
         shape: "group by with an extract",
-        dialects: &[
-            Dialect {
-                engines: &["datafusion"],
-                sql: Some(
-                    "SELECT \"UserID\", extract(minute FROM \
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"UserID\", extract(minute FROM \
                     to_timestamp_seconds(\"EventTime\")) AS m, \"SearchPhrase\", COUNT(*) FROM \
                     hits GROUP BY \"UserID\", m, \"SearchPhrase\" ORDER BY COUNT(*) DESC LIMIT 10",
-                ),
-                why: QUOTED,
-            },
-            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
-        ],
+            ),
+            why: QUOTED,
+        }],
     },
     Query {
         name: "q20",
@@ -841,18 +837,15 @@ pub const CLICKBENCH: &[Query] = &[
         sql: "SELECT WatchID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG(ResolutionWidth) FROM \
             hits WHERE SearchPhrase <> '' GROUP BY WatchID, ClientIP ORDER BY c DESC LIMIT 10",
         shape: "group by a high card pair",
-        dialects: &[
-            Dialect {
-                engines: &["datafusion"],
-                sql: Some(
-                    "SELECT \"WatchID\", \"ClientIP\", COUNT(*) AS c, SUM(\"IsRefresh\"), \
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"WatchID\", \"ClientIP\", COUNT(*) AS c, SUM(\"IsRefresh\"), \
                     AVG(\"ResolutionWidth\") FROM hits WHERE \"SearchPhrase\" <> '' GROUP BY \
                     \"WatchID\", \"ClientIP\" ORDER BY c DESC LIMIT 10",
-                ),
-                why: QUOTED,
-            },
-            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
-        ],
+            ),
+            why: QUOTED,
+        }],
     },
     Query {
         name: "q33",
@@ -876,33 +869,27 @@ pub const CLICKBENCH: &[Query] = &[
         name: "q34",
         sql: "SELECT URL, COUNT(*) AS c FROM hits GROUP BY URL ORDER BY c DESC LIMIT 10",
         shape: "group by a long string",
-        dialects: &[
-            Dialect {
-                engines: &["datafusion"],
-                sql: Some(
-                    "SELECT \"URL\", COUNT(*) AS c FROM hits GROUP BY \"URL\" ORDER BY c \
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT \"URL\", COUNT(*) AS c FROM hits GROUP BY \"URL\" ORDER BY c \
                     DESC LIMIT 10",
-                ),
-                why: QUOTED,
-            },
-            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
-        ],
+            ),
+            why: QUOTED,
+        }],
     },
     Query {
         name: "q35",
         sql: "SELECT 1, URL, COUNT(*) AS c FROM hits GROUP BY 1, URL ORDER BY c DESC LIMIT 10",
         shape: "group by a constant and a long string",
-        dialects: &[
-            Dialect {
-                engines: &["datafusion"],
-                sql: Some(
-                    "SELECT 1, \"URL\", COUNT(*) AS c FROM hits GROUP BY 1, \"URL\" ORDER BY \
+        dialects: &[Dialect {
+            engines: &["datafusion"],
+            sql: Some(
+                "SELECT 1, \"URL\", COUNT(*) AS c FROM hits GROUP BY 1, \"URL\" ORDER BY \
                     c DESC LIMIT 10",
-                ),
-                why: QUOTED,
-            },
-            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
-        ],
+            ),
+            why: QUOTED,
+        }],
     },
     Query {
         name: "q36",
@@ -1742,6 +1729,17 @@ mod tests {
         let short: Vec<&str> =
             CLICKBENCH.iter().filter(|q| q.sql_for("polars").is_none()).map(|q| q.name).collect();
         assert_eq!(short, vec!["q28", "q29", "q36", "q43"]);
+    }
+
+    #[test]
+    fn rudb_is_short_exactly_the_one_whose_group_by_does_not_fit() {
+        // Pinned so that the day one comes back or one goes away, it is a diff somebody reviewed
+        // rather than a column that quietly changed shape. It was eight of these until
+        // tamnd/rudb#269, and seven of the eight were a wrong memory charge rather than a real
+        // table that did not fit.
+        let short: Vec<&str> =
+            CLICKBENCH.iter().filter(|q| q.sql_for("rudb").is_none()).map(|q| q.name).collect();
+        assert_eq!(short, vec!["q33"]);
     }
 
     #[test]
