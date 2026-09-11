@@ -15,6 +15,31 @@
 
 [record]
 suite     smoke
+machine   gamingpc-wsl
+engine    duckdb
+version   v2.0.0-dev84237 (Development Version) cc7e7bac7f
+recorded  2026-09-11
+query     q1              21949      22716      23087
+query     q2              35957      37384      37947
+query     q3              28127      29090      30319
+query     q4              41693      42322      43482
+query     q5              41226      43086      44243
+query     q6              26119      26516      28384
+
+[record]
+suite     smoke
+machine   gamingpc-wsl
+engine    rudb
+version   rudb 0.2.16
+recorded  2026-09-11
+query     q1               1803       1833       1861
+query     q2              88695      89992      90820
+query     q3             394999     399532     402107
+query     q4             498408     505141     507413
+query     q5             411543     413342     417391
+
+[record]
+suite     smoke
 machine   server3
 engine    clickhouse-local
 version   26.9.1.1138
