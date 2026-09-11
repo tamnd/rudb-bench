@@ -1605,12 +1605,25 @@ pub fn loading(suite: &str, engine: &str, table: &str) -> Option<Loading> {
 /// everything, or a count that is off by an order of magnitude, since the numbers still have to be
 /// there and the shape of the answer is still compared everywhere else in the suite. Twenty six of
 /// the forty three queries are still checked to the last bit of a double.
+///
+/// Looked at again for milestone E0e, tamnd/rudb#112, now that tamnd/rudb-compat can put rudb and
+/// a real DuckDB to the same file and arbitrate. Not one of the seventeen comes off this list, and
+/// the reason is rule three. Fourteen of them are ties at a `LIMIT`, the only way to settle a tie
+/// is to break it, and breaking it means running text that is not the official text, which is the
+/// one thing a board number may not do. So they are settled in the other repository instead, where
+/// `corpus/clickbench-settled.sql` is the same forty three queries with the tie broken and every
+/// answer compared byte for byte, and they stay unsettled here where the official text runs.
+///
+/// What that arbitration did change is q4, which turned out not to be a rounding difference.
 pub const CLICKBENCH_UNSETTLED: &[(&str, &str)] = &[
     (
         "q4",
-        "AVG(UserID) over a hundred million bigints near 10^18, where the order the partial sums \
-         are added in moves the result further than the one part in a billion this harness calls \
-         the same number",
+        "AVG(UserID) over a hundred million bigints near 10^18, where the engines disagree for two \
+         reasons. The order the partial sums are added in moves the floating point ones further \
+         apart than the one part in a billion this harness calls the same number, and DuckDB is \
+         plainly wrong: it sums the bigint column short by a multiple of 2^64 on this file, where \
+         its own hugeint and decimal paths, rudb, and adding the column up outside a database all \
+         agree. tamnd/rudb-compat#12",
     ),
     (
         "q16",
