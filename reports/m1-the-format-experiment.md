@@ -43,6 +43,7 @@ Ratios are rudb over Parquet, so under one is a win.
 | corpus | rows | columns | codec | Parquet | rudb | ratio |
 | ------ | ----- | ------- | ----- | ------- | ---- | ----- |
 | ClickBench hits | 99,997,497 | 105 | Snappy | 13.76 GB | 9.65 GB | 0.70 |
+| TPC-H lineitem | 600,037,902 | 16 | Snappy | 21.16 GB | 13.62 GB | 0.64 |
 | TPC-H orders | 150,000,000 | 9 | Snappy | 6.05 GB | 3.49 GB | 0.58 |
 | TPC-H partsupp | 80,000,000 | 5 | Snappy | 4.09 GB | 2.87 GB | 0.70 |
 | TPC-H customer | 15,000,000 | 8 | Snappy | 1.15 GB | 807.45 MB | 0.68 |
@@ -52,9 +53,11 @@ Ratios are rudb over Parquet, so under one is a win.
 | NYC for hire vehicle 2024-01 | 19,663,930 | 15 of 24 | ZSTD-1 | 287.70 MB | 205.63 MB | 0.71 |
 | Ookla fixed Q1 2024 | 6,655,986 | 9 of 11 | Snappy | 327.04 MB | 525.96 MB | 1.61 |
 
-TPC-H `lineitem` is missing from that table and is not missing from the experiment. It is 600,037,902 rows and 21.23 GB, it is on the machine now, and at 52,254 rows a second it is a nine hour pass. The row goes in when it lands and this report gets amended with it. Nothing in the decision below waits on it, because `orders` at 150 million rows came out at 0.58 and `lineitem` is the same generator writing the same kinds of column.
+The `lineitem` row was written in after the rest of the table, which is what the first version of this report said would happen. It is the largest single thing the experiment has encoded, 600,037,902 rows over 4,884 chunks in 11,446.8 seconds of wall clock on server1, three hours and eleven minutes rather than the nine hours this report estimated, which was an arithmetic slip rather than a measurement: 600 million rows at the 52,254 rows a second that had been measured is three hours and change. Peak resident was 169.67 MB for a 21 GB file, and every chunk decoded back to what went in. It came out at 0.64, between the 0.58 of `orders` and the 0.70 of `partsupp`, which is where the guess said it would be.
 
-Summed over everything in that table, 26.37 GB of Parquet becomes 17.96 GB of rudb, which is 0.68, which is 1.47 times smaller. Against DuckDB, whose published `hits` is 20.46 GB against our 9.65 GB, it is 2.12 times smaller. The claim in document 02 was ten.
+Two columns in it are worth naming. `l_orderkey` came out at 0.08 of what Parquet stores it in, 892.02 MB against 74.32 MB, because the file is sorted by it and the chooser picked plain run length encoding over a hundred and fifty million distinct values. That is the largest single column ratio anywhere in this experiment and it is entirely a property of the sort order rather than of the encoder. `l_linenumber` came out at 1.44, the only column in the table that is worse than Parquet by more than a rounding error, and the shape the chooser picked for it is `DELTA(RLE(DICT(FOR+BITPACK[4], FOR+BITPACK[3]), FOR+BITPACK[3]))` on a column with seven distinct values that cycles one to seven. Parquet stores it in 140.37 MB and rudb in 201.98 MB. A column that counts one to seven and starts over should be the easiest thing in the file, and the chooser is picking five levels and losing, which is a chooser defect rather than a format limit and is the smallest reproducing case of one anywhere here.
+
+Summed over everything in that table, 47.53 GB of Parquet becomes 31.58 GB of rudb, which is 0.66, which is 1.51 times smaller. Against DuckDB, whose published `hits` is 20.46 GB against our 9.65 GB, it is 2.12 times smaller. The claim in document 02 was ten.
 
 The three rows with "of" in the column count are the honest part. Floating point columns are not encoded yet and are skipped, and they are skipped on both sides of the ratio, so those three ratios describe part of a file rather than a file. The part that is missing is not small: ten float columns of yellow taxi are 16.78 MB of a 47.65 MB file, nine of the for hire vehicle file are 163.09 MB of 450.86 MB, and two of Ookla are 18.35 MB of 345.42 MB. If floats were stored raw at the size Parquet already achieves for them, which is the most pessimistic reading, the whole file ratios would be 0.74, 0.82 and 1.58 rather than 0.59, 0.71 and 1.61. The TPC-H rows have no floats in them, because `dbgen` emits decimals, and `hits` has none either, so six of the nine rows are whole file numbers and three are not.
 
@@ -217,6 +220,6 @@ Seventh, and this is the one that actually blocks the storage engine, the choose
 
 It cost about two weeks of machine time and it prevented three months of storage engine work on top of an assumption that is false.
 
-It also produced the number that the whole project now runs against, which is that rudb's format is 1.47 times smaller than Parquet and 2.12 times smaller than DuckDB on the data we have, and the ten in document 02 is not coming from the format. If a 10x resource claim survives at all it has to come from somewhere else, and saying that out loud now is worth more than any of the individual ratios above.
+It also produced the number that the whole project now runs against, which is that rudb's format is 1.51 times smaller than Parquet and 2.12 times smaller than DuckDB on the data we have, and the ten in document 02 is not coming from the format. If a 10x resource claim survives at all it has to come from somewhere else, and saying that out loud now is worth more than any of the individual ratios above.
 
 The measurements, pass by pass and with every number, are in the comments on [issue 2](https://github.com/tamnd/rudb/issues/2). The encoder is `experiments/format-lab` in the rudb repository, and it is meant to be thrown away.
