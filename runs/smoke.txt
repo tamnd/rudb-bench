@@ -69,3 +69,55 @@ peak      -
 read      -
 load      6677700
 disk      52894738
+
+[run]
+suite     smoke
+machine   gamingpc-wsl
+layer     2a the baseline
+commit    3dffae4
+recorded  2026-09-10
+[engine]
+name      duckdb
+version   v1.5.5 (Variegata) d8cdaa33fd
+hot       161524
+cpu       450000
+peak      149565440
+read      0
+load      166938
+disk      96481280
+[engine]
+name      clickhouse-local
+version   26.9.1.1162
+hot       970453
+cpu       1430000
+peak      433926144
+read      0
+load      274927
+disk      51920079
+[engine]
+name      datafusion
+version   datafusion-cli 55.0.0
+hot       201394
+cpu       1220000
+peak      449990656
+read      0
+load      0
+disk      10916872
+[engine]
+name      polars
+version   1.44.2 in sink mode
+hot       686984
+cpu       1490000
+peak      301846528
+read      0
+load      0
+disk      10916872
+[engine]
+name      clickhouse-server
+version   26.9.1.1162
+hot       232263
+cpu       -
+peak      -
+read      -
+load      1325339
+disk      53368679
