@@ -1249,14 +1249,22 @@ impl Engine for Polars {
 
 /// rudb, driven through `rudb-cli` the same way everything else here is driven.
 ///
-/// It abstains rather than losing, which is a distinction worth keeping. There is no path from a
-/// file on disk into a chunk yet, so a rudb row on any of these suites would be a timing of an
-/// error message. When that path exists, [`Engine::can_run`] is the only thing here that changes.
+/// It read the Parquet where it lies rather than loading it, which puts it in the same column as
+/// DataFusion and Polars: no storage format of its own yet, an empty load time, and the on disk
+/// number is the source file. Persistence is E2 and this row should not pretend otherwise.
+///
+/// The arguments are DuckDB's arguments. `-batch -csv -noheader -c` is what the DuckDB row above
+/// sends and it is what this row sends, which is the drop in claim tested rather than asserted, and
+/// the day it stops being true this is one of the places that will say so.
 #[derive(Debug, Clone)]
 pub struct Rudb {
     binary: Option<PathBuf>,
     version: String,
+    ddl: Vec<String>,
+    source_bytes: u64,
     runner: Runner,
+    /// Which suite is running, so the view is declared the way that suite's entry declares it.
+    suite: &'static str,
 }
 
 impl Rudb {
@@ -1266,18 +1274,17 @@ impl Rudb {
     /// between a rudb that is not built and a rudb that cannot read a Parquet file is a difference
     /// the report should be able to state.
     #[must_use]
-    pub fn discover(scratch: &Path) -> Self {
+    pub fn discover(scratch: &Path, suite: &'static Suite) -> Self {
         let binary =
             std::env::var_os("RUDB_BENCH_RUDB").map_or_else(|| on_path("rudb"), PathBuf::from);
-        match version_of(&binary, &["--version"], "RUDB_BENCH_RUDB") {
-            Ok(version) => {
-                Self { binary: Some(binary), version, runner: Runner::new(scratch, "rudb") }
-            }
-            Err(_) => Self {
-                binary: None,
-                version: "not built".to_owned(),
-                runner: Runner::new(scratch, "rudb"),
-            },
+        let found = version_of(&binary, &["--version"], "RUDB_BENCH_RUDB");
+        Self {
+            binary: found.is_ok().then_some(binary),
+            version: found.unwrap_or_else(|_| "not built".to_owned()),
+            ddl: Vec::new(),
+            source_bytes: 0,
+            runner: Runner::new(scratch, "rudb"),
+            suite: suite.name,
         }
     }
 }
@@ -1292,18 +1299,61 @@ impl Engine for Rudb {
     }
 
     fn can_run(&self, suite: &Suite) -> Ability {
-        match &self.binary {
-            None => Ability::no("no rudb on PATH, set RUDB_BENCH_RUDB"),
-            Some(_) => Ability::no(format!(
-                "no path from a file on disk into a chunk yet, so {} would be a timing of an error \
-                 message. spec/engine/05-scan.md, sub-milestone 2e",
-                suite.name
-            )),
+        if self.binary.is_none() {
+            return Ability::no("no rudb on PATH, set RUDB_BENCH_RUDB");
         }
+        // Every join in rudb is a nested loop, so a suite that is twenty two joins would be timed on
+        // a hang rather than on a query. The smoke suite has one join and declares it absent for
+        // rudb by name in `suite.rs`, which keeps the gap in one place a reader can find. A whole
+        // suite of them is a refusal instead, because a table of twenty two absences is not a row.
+        if suite.name == "tpch" {
+            return Ability::no(
+                "every join in rudb is a nested loop and TPC-H is twenty two of them, so this \
+                 would be a timing of a hang. spec/07-execution.md section 7.4, milestone E3",
+            );
+        }
+        Ability::Yes
     }
 
-    fn load(&mut self, _tables: &[Table]) -> Result<Loaded, BenchError> {
-        Err(BenchError::new("rudb has no storage layer yet, see M1 in spec/17-milestones.md"))
+    fn load(&mut self, tables: &[Table]) -> Result<Loaded, BenchError> {
+        // Nothing is converted, so nothing is timed, and the views are replayed in front of every
+        // query because this harness starts a fresh process per run on purpose.
+        //
+        // A view and not a `CREATE TABLE AS SELECT`, which rudb also has. The CTAS holds the table
+        // in memory, so on ClickBench it would be a load of fourteen gigabytes into a process that
+        // is about to be thrown away, once per query, and the number it produced would be a number
+        // about `INSERT` rather than about the scan this milestone is measuring.
+        self.ddl = Vec::with_capacity(tables.len());
+        for t in tables {
+            // The suite's own conversion where the board publishes one. On ClickBench that is the
+            // four integer columns the file stores as seconds and days, and without it q19's
+            // `extract(minute FROM EventTime)` has nothing to resolve against. rudb shares DuckDB's
+            // entry because it is DuckDB's SQL: `* REPLACE`, `make_date` and `epoch_ms` all bind.
+            match loading(self.suite, "rudb", &t.name) {
+                Some(Loading { fixup: Fixup::Select(select), options, .. }) => {
+                    self.ddl.push(format!(
+                        "CREATE VIEW {} AS SELECT {select} FROM read_parquet('{}'{}{options})",
+                        t.name,
+                        t.path.display(),
+                        if options.is_empty() { "" } else { ", " }
+                    ));
+                }
+                _ => self.ddl.push(format!(
+                    "CREATE VIEW {} AS SELECT * FROM read_parquet('{}')",
+                    t.name,
+                    t.path.display()
+                )),
+            }
+        }
+        self.source_bytes = tables.iter().map(|t| t.bytes).sum();
+        Ok(Loaded {
+            took: Duration::ZERO,
+            on_disk: self.source_bytes,
+            on_disk_is: "the source Parquet, this engine has no storage format of its own yet"
+                .to_owned(),
+            converted: false,
+            cpu: Some(Duration::ZERO),
+        })
     }
 
     fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
@@ -1311,6 +1361,10 @@ impl Engine for Rudb {
             return Err(BenchError::new("there is no rudb to run"));
         };
         let mut command = self.runner.command(&binary);
+        command.arg("-batch").arg("-csv").arg("-noheader");
+        for statement in &self.ddl {
+            command.arg("-c").arg(statement);
+        }
         command.arg("-c").arg(sql);
         self.runner.go(command, "rudb")
     }
@@ -1359,22 +1413,104 @@ fn on_path(name: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{Ability, Duckdb, Engine, POLARS_SCRIPT, Rudb, on_path};
+    use super::{Ability, Duckdb, Engine, POLARS_SCRIPT, Rudb, Runner, on_path};
     use crate::data::Table;
-    use crate::suite::find;
+    use crate::suite::{Suite, find};
 
     fn scratch(what: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("rudb-bench-{what}-{}", std::process::id()))
     }
 
+    /// A rudb that is on the machine, so that the tests below are about the answers and not about
+    /// whether somebody built it before running them.
+    fn built(suite: &'static Suite) -> Rudb {
+        Rudb {
+            binary: Some(std::path::PathBuf::from("rudb")),
+            version: "under test".to_owned(),
+            ddl: Vec::new(),
+            source_bytes: 0,
+            runner: Runner::new(&scratch("rudb"), "rudb"),
+            suite: suite.name,
+        }
+    }
+
     #[test]
-    fn rudb_abstains_with_a_reason_rather_than_failing_fast_and_looking_quick() {
-        let scratch = scratch("rudb");
-        let mut rudb = Rudb::discover(&scratch);
+    fn rudb_reads_the_parquet_where_it_lies_and_the_load_column_stays_empty() {
+        let clickbench = find("clickbench").unwrap();
+        let mut rudb = built(clickbench);
+        assert!(rudb.can_run(clickbench).yes());
+        let hits = Table {
+            name: "hits".to_owned(),
+            path: std::path::PathBuf::from("/tmp/hits.parquet"),
+            bytes: 14_779_976_446,
+        };
+        let loaded =
+            rudb.load(std::slice::from_ref(&hits)).expect("declaring a view is not a load");
+        assert_eq!(loaded.took, std::time::Duration::ZERO, "nothing was converted so nothing took");
+        assert_eq!(loaded.on_disk, hits.bytes, "the source file is the on disk number");
+        assert!(!loaded.converted);
+        assert!(loaded.on_disk_is.contains("Parquet"), "{}", loaded.on_disk_is);
+    }
+
+    /// The view carries the board's own conversion, which is where six of the forty three live.
+    ///
+    /// `hits.parquet` stores the date as days and the three times as seconds, all four as
+    /// integers, so without the projection those six queries compare an integer against a date and
+    /// q19 asks for the minute of one. This is the assertion that says the recipe reached the SQL.
+    #[test]
+    fn the_clickbench_view_converts_the_four_integer_columns_and_reads_blobs_as_strings() {
+        let mut rudb = built(find("clickbench").unwrap());
+        let hits = Table {
+            name: "hits".to_owned(),
+            path: std::path::PathBuf::from("/tmp/hits.parquet"),
+            bytes: 1,
+        };
+        rudb.load(std::slice::from_ref(&hits)).expect("declaring a view is not a load");
+        let [view] = rudb.ddl.as_slice() else { panic!("one table is one view") };
+        assert!(view.starts_with("CREATE VIEW hits AS SELECT * REPLACE ("), "{view}");
+        for column in ["EventDate", "EventTime", "ClientEventTime", "LocalEventTime"] {
+            assert!(view.contains(column), "{column} is not converted, {view}");
+        }
+        assert!(
+            view.contains("read_parquet('/tmp/hits.parquet', binary_as_string=True)"),
+            "{view}"
+        );
+    }
+
+    /// A suite nobody published a recipe for gets a plain view, which is the smoke suite today.
+    #[test]
+    fn a_suite_with_no_recipe_reads_the_file_as_it_is() {
+        let mut rudb = built(find("smoke").unwrap());
+        let one = Table {
+            name: "smoke".to_owned(),
+            path: std::path::PathBuf::from("/tmp/s.parquet"),
+            bytes: 1,
+        };
+        rudb.load(std::slice::from_ref(&one)).expect("declaring a view is not a load");
+        assert_eq!(rudb.ddl, ["CREATE VIEW smoke AS SELECT * FROM read_parquet('/tmp/s.parquet')"]);
+    }
+
+    #[test]
+    fn rudb_refuses_tpch_with_a_reason_rather_than_timing_a_hang() {
+        let tpch = find("tpch").unwrap();
+        let rudb = built(tpch);
+        assert!(!rudb.can_run(tpch).yes());
+        let why = rudb.can_run(tpch).why().expect("a refusal says why").to_owned();
+        assert!(why.contains("nested loop"), "{why}");
+        assert!(why.contains("E3"), "a refusal names the milestone that lifts it, {why}");
+    }
+
+    #[test]
+    fn a_rudb_that_is_not_built_says_so_rather_than_looking_quick() {
+        let scratch = scratch("rudb-absent");
         let smoke = find("smoke").unwrap();
-        assert!(!rudb.can_run(smoke).yes());
-        assert!(rudb.can_run(smoke).why().is_some_and(|why| !why.is_empty()));
-        assert!(rudb.load(&[]).is_err());
+        let mut rudb = Rudb::discover(&scratch, smoke);
+        if rudb.can_run(smoke).yes() {
+            // There is a rudb on this machine, so there is nothing here to test.
+            return;
+        }
+        assert!(rudb.can_run(smoke).why().is_some_and(|why| why.contains("RUDB_BENCH_RUDB")));
+        assert!(rudb.run("SELECT 1").is_err());
         let _ = std::fs::remove_dir_all(&scratch);
     }
 

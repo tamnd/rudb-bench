@@ -143,7 +143,7 @@ fn every_engine_on_this_machine_gets_the_same_file_and_answers_the_same_thing() 
     if let Ok(engine) = Polars::discover(&at, smoke) {
         engines.push(Box::new(engine));
     }
-    engines.push(Box::new(Rudb::discover(&at)));
+    engines.push(Box::new(Rudb::discover(&at, smoke)));
     eprintln!("comparing {} engines", engines.len() - 1);
 
     let suite = find("smoke").unwrap();
