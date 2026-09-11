@@ -170,7 +170,13 @@ fn suites() {
 
 /// Everything about this machine that has to be read next to a number from it.
 fn machine_record() {
-    let scratch = scratch();
+    let scratch = match scratch() {
+        Ok(at) => at,
+        Err(e) => {
+            eprintln!("rudb-bench: cannot make the scratch directory: {e}");
+            return;
+        }
+    };
     println!("Probed now, for the directory the data would land in.");
     println!("{}", scratch.display());
     println!();
@@ -184,6 +190,7 @@ fn machine_record() {
     );
     println!("a gap in the record. Section 15.4 wants all of this printed next to the number and");
     println!("not assumed, because the assumption that fails silently is the frequency policy.");
+    let _ = std::fs::remove_dir_all(&scratch);
 }
 
 /// What `run` does with the committed records afterwards.
@@ -355,7 +362,13 @@ fn run(plan: &Plan) -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    let scratch = scratch();
+    let scratch = match scratch() {
+        Ok(at) => at,
+        Err(e) => {
+            eprintln!("rudb-bench: cannot make the scratch directory: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     let (mut engines, missing) = discover(&scratch, suite, plan.engines.as_deref());
 
     // The data before the engines, because every engine gets the same files and the first thing a
@@ -641,16 +654,33 @@ fn unasked(what: &str) -> Abstention {
     }
 }
 
-/// Where a run puts its data.
+/// Where a run puts its data, which is a directory of its own that it makes and then removes.
 ///
-/// Under the temporary directory by default and wherever `RUDB_BENCH_SCRATCH` says otherwise,
-/// because on three of the four machines in the fleet the temporary directory is on the small
-/// device and the data has to go somewhere else.
-fn scratch() -> std::path::PathBuf {
-    std::env::var_os("RUDB_BENCH_SCRATCH").map_or_else(
-        || std::env::temp_dir().join(format!("rudb-bench-{}", std::process::id())),
-        std::path::PathBuf::from,
-    )
+/// Under the temporary directory by default and under `RUDB_BENCH_SCRATCH` when that names a place,
+/// because on three of the four machines in the fleet the temporary directory is on the small device
+/// and the data has to go somewhere else. Either way the directory is named after this process, for
+/// two reasons. Two runs on one machine do not write over each other, and the directory removed at
+/// the end of a run is one this made rather than one somebody pointed at, which matters because the
+/// removal is a `remove_dir_all` and the variable is set by hand.
+///
+/// It is made here rather than by whoever writes into it first. Nothing was making it when the
+/// suite's data was already on the machine, because the only `create_dir_all` on that path is in
+/// the generator, so every engine failed with `No such file or directory` on a run that had nothing
+/// to generate.
+fn scratch() -> Result<std::path::PathBuf, std::io::Error> {
+    let under = std::env::var_os("RUDB_BENCH_SCRATCH")
+        .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
+    scratch_under(&under)
+}
+
+/// The directory a run works in, under the place it was told to work, made if it is not there.
+///
+/// Split out from [`scratch`] so a test can ask for one without setting an environment variable,
+/// which is unsafe in this edition and is shared with every other test in the process anyway.
+fn scratch_under(under: &std::path::Path) -> Result<std::path::PathBuf, std::io::Error> {
+    let at = under.join(format!("rudb-bench-{}", std::process::id()));
+    std::fs::create_dir_all(&at)?;
+    Ok(at)
 }
 
 fn help() {
@@ -694,7 +724,8 @@ fn help() {
     println!("  RUDB_BENCH_PYTHON       a python3 with polars installed");
     println!("  RUDB_BENCH_RUDB         the rudb binary, when there is one worth running");
     println!("  RUDB_BENCH_DATA         where the corpora live, default ~/rudb-data");
-    println!("  RUDB_BENCH_SCRATCH      where a run puts its data");
+    println!("  RUDB_BENCH_SCRATCH      where a run makes the directory it works in and removes");
+    println!("                          afterwards, default the temporary directory");
     println!("  RUDB_BENCH_MACHINE      what to call this machine in a committed record");
     println!("  RUDB_BENCH_BASELINE     the records file, default baselines/<suite>.txt");
     println!("  RUDB_BENCH_RUDB_REPO    the rudb checkout the kernel suite measures");
@@ -708,11 +739,26 @@ fn help() {
 
 #[cfg(test)]
 mod tests {
-    use super::{Gate, plan};
+    use super::{Gate, plan, scratch_under};
     use rudb_bench::regress::Watch;
 
     fn args(line: &str) -> Vec<String> {
         line.split_whitespace().map(str::to_owned).collect()
+    }
+
+    /// The directory is made, and it is under the place rather than being the place.
+    ///
+    /// Both halves matter. Nothing made it before, so a run with nothing to generate had every
+    /// engine fail with `No such file or directory`, and the end of a run removes it with a
+    /// `remove_dir_all`, which is not something to point at a directory somebody named by hand.
+    #[test]
+    fn the_scratch_directory_is_made_under_the_place_it_was_given() {
+        let under = std::env::temp_dir().join("rudb-bench-scratch-test");
+        let at = scratch_under(&under).expect("a directory under the temporary directory");
+        assert!(at.is_dir(), "{} was not made", at.display());
+        assert_eq!(at.parent(), Some(under.as_path()));
+        assert!(scratch_under(&under).is_ok(), "asking twice is not an error");
+        std::fs::remove_dir_all(&under).expect("the test cleans up after itself");
     }
 
     #[test]
