@@ -172,6 +172,12 @@ Later rows print the change under each number. What matters more than the change
 
 `runs/<suite>.txt` and `baselines/<suite>.txt` look alike and are not interchangeable. A baseline record is per query and holds three quartiles, because the gate asks whether one query got twice as slow. A run is per engine and holds totals, because the ledger asks what a layer bought across a suite. Records are replaced when they are retaken and runs never are, because a history that overwrites itself is a table.
 
+## Reports
+
+A milestone whose exit criterion is a measurement publishes the measurement here, in `reports/`, rather than leaving it in a comment thread on the issue. The rule is that a report names the number it was supposed to hit before it gives the number it hit.
+
+[`reports/m1-the-format-experiment.md`](reports/m1-the-format-experiment.md) is the first one. It is the storage format measurement from M1: a standalone encoder over ClickBench `hits`, TPC-H at scale factor 100 and three real Parquet files off the internet, answering whether shared dictionaries, shared symbol tables and recomputation rules deliver the ratios the specification assumed. The target was `hits` under 4 GB and the line at which the resource claim was declared wrong was 6 GB. It came out at 9.65 GB, the claim was wrong, and the specification was amended. The two techniques with no equivalent in DuckDB were worth 4 MB of it, and front coding a sorted dictionary, which any format could adopt tomorrow, was worth 2 GB.
+
 ## The reporting rules
 
 These apply to the README, release notes, the dashboard, any talk, any post, and any conversation. They are in the engine's specification in full and this is the short version.
