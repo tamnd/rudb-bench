@@ -247,7 +247,13 @@ pub const SMOKE: &[Query] = &[
         sql: "SELECT a.tag, count(*) FROM smoke a JOIN smoke b ON a.k = b.k \
               WHERE a.id < 100000 AND b.id < 100000 GROUP BY a.tag",
         shape: "join and group by",
-        dialects: &[],
+        dialects: &[Dialect {
+            engines: &["rudb"],
+            sql: None,
+            why: "every join in rudb is a nested loop, so this is a hundred thousand rows against a \
+                  hundred thousand rows and the number would be about the loop rather than about \
+                  the join. spec/07-execution.md section 7.4, milestone E3",
+        }],
     },
 ];
 
@@ -1506,6 +1512,18 @@ pub fn loading(suite: &str, engine: &str, table: &str) -> Option<Loading> {
             why: "DuckDB will not insert an integer into a TIMESTAMP column, so its entry converts \
                   the four in the projection and reads the string columns as strings",
         }),
+        "rudb" => Some(Loading {
+            columns: None,
+            fixup: Fixup::Select(
+                "* REPLACE (make_date(EventDate) AS EventDate, epoch_ms(EventTime * 1000) AS \
+                 EventTime, epoch_ms(ClientEventTime * 1000) AS ClientEventTime, \
+                 epoch_ms(LocalEventTime * 1000) AS LocalEventTime)",
+            ),
+            options: "binary_as_string=True",
+            why: "it aims to be a drop in replacement for DuckDB, so it takes DuckDB's projection \
+                  unchanged, and it declares no schema because it reads the Parquet where it lies \
+                  rather than inserting it anywhere",
+        }),
         "datafusion" => Some(Loading {
             columns: None,
             fixup: Fixup::View(
@@ -1716,7 +1734,6 @@ mod tests {
         assert!(loading("smoke", "duckdb", "smoke").is_none());
         assert!(loading("tpch", "duckdb", "lineitem").is_none());
         assert!(loading("clickbench", "duckdb", "hit").is_none());
-        assert!(loading("clickbench", "rudb", "hits").is_none());
     }
 
     #[test]
@@ -1755,6 +1772,17 @@ mod tests {
         assert!(view.contains("{raw}"), "the view has to name the raw table");
         assert!(view.contains("EventDate"));
 
+        // rudb takes DuckDB's projection unchanged, which is the drop in claim written down as a
+        // recipe rather than said in a README. It declares no schema because its table is the file.
+        let rudb = loading("clickbench", "rudb", "hits").unwrap();
+        assert!(rudb.columns.is_none());
+        assert_eq!(rudb.options, duckdb.options);
+        let Fixup::Select(mine) = rudb.fixup else { panic!("rudb reads through a select") };
+        assert_eq!(
+            mine, select,
+            "rudb runs DuckDB's projection or it is not a drop in replacement"
+        );
+
         // Polars is not SQL at all, so its two casts go on the scan.
         let polars = loading("clickbench", "polars", "hits").unwrap();
         assert!(polars.columns.is_none());
@@ -1767,7 +1795,9 @@ mod tests {
         // A recipe that only says what it does is one nobody can check against the engine, and
         // checking it against the engine is the entire reason these were copied rather than
         // invented.
-        for engine in ["clickhouse-local", "clickhouse-server", "duckdb", "datafusion", "polars"] {
+        for engine in
+            ["clickhouse-local", "clickhouse-server", "duckdb", "datafusion", "polars", "rudb"]
+        {
             let load = loading("clickbench", engine, "hits").unwrap();
             assert!(load.why.len() > 40, "{engine} needs a real reason");
         }

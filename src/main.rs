@@ -620,7 +620,7 @@ fn discover(
     // is where this project actually is. The filter still applies to it, because a run that asked
     // for four rivals and got five rows would be a filter that does not mean what it says.
     if wanted("rudb") {
-        engines.push(Box::new(Rudb::discover(scratch)));
+        engines.push(Box::new(Rudb::discover(scratch, suite)));
     } else {
         missing.push(unasked("rudb"));
     }
