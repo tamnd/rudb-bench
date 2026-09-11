@@ -183,8 +183,9 @@ impl Query {
 ///
 /// This exists because ClickBench is not one query set, it is five. The official repository keeps a
 /// `queries.sql` per engine and they differ: ClickHouse writes `length(URL)` where DuckDB writes
-/// `STRLEN(URL)`, because DuckDB's `length` counts characters and ClickHouse's counts bytes and the
-/// two give different answers on the same data. DataFusion quotes every identifier, because it
+/// `STRLEN(URL)`, because ClickHouse's `length` counts bytes and DuckDB's counts characters, so
+/// `STRLEN` is the DuckDB function that means what the board asked for. DataFusion quotes every
+/// identifier, because it
 /// lowercases unquoted ones and the columns in `hits` are camel case. Running our own translation
 /// instead of theirs would produce a number about our translation.
 ///
@@ -266,11 +267,13 @@ const QUOTED: &str = "DataFusion lowercases an unquoted identifier and hits is c
 
 /// Why DuckDB has its own text for the two queries that average a string length.
 ///
-/// Not a spelling difference. `STRLEN` counts characters, `length` counts bytes, `hits` is full of
-/// percent encoded UTF-8, and the two boards therefore print different numbers for q28 and q29 on
-/// the same file. Both are right about their own engine, so both texts are here and the report is
-/// left to say the columns disagreed.
-const COUNTED: &str = "DuckDB's STRLEN counts characters and ClickHouse's length counts bytes";
+/// Not a spelling difference, and not a disagreement either. ClickHouse's `length` counts bytes and
+/// DuckDB's counts characters, so the DuckDB board says `STRLEN`, which is DuckDB's byte counting
+/// function. Measured rather than assumed: on `héllo`, ClickHouse's `length` is 6 and its
+/// `lengthUTF8` is 5, DuckDB's `strlen` is 6 and its `length` is 5. The two texts are different so
+/// that the two boards ask the same question, which matters on `hits` because it is full of percent
+/// encoded UTF-8 and the two counts are not the same number there.
+const COUNTED: &str = "DuckDB's length counts characters where ClickHouse's counts bytes, and STRLEN is the one that matches";
 
 /// Why rudb is absent from the eight ClickBench queries that group by something almost unique.
 ///
@@ -1703,8 +1706,8 @@ mod tests {
         // says a byte moved and these say which byte and why it matters.
         let q1 = CLICKBENCH.iter().find(|q| q.name == "q1").unwrap();
         assert_eq!(q1.sql, "SELECT COUNT(*) FROM hits");
-        // ClickHouse writes the length in bytes and DuckDB writes it in characters, and this is
-        // the whole reason per engine text exists.
+        // Both boards ask for the length in bytes and the two engines spell that differently, and
+        // this is the whole reason per engine text exists.
         let q28 = CLICKBENCH.iter().find(|q| q.name == "q28").unwrap();
         assert!(q28.sql_for("clickhouse-local").unwrap().contains("AVG(length(URL))"));
         assert!(q28.sql_for("duckdb").unwrap().contains("AVG(STRLEN(URL))"));
