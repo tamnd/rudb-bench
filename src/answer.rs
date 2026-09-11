@@ -37,22 +37,58 @@ const TOLERANCE: f64 = 1e-9;
 /// Whether two answers say the same thing.
 #[must_use]
 pub fn same(a: &str, b: &str) -> bool {
-    let (mut left, mut right) = (numbers(a), numbers(b));
+    let (mut left, mut right) = (printed(a), printed(b));
     if left.len() != right.len() {
         return false;
     }
-    left.sort_by(f64::total_cmp);
-    right.sort_by(f64::total_cmp);
+    left.sort_by(|x, y| f64::total_cmp(&x.0, &y.0));
+    right.sort_by(|x, y| f64::total_cmp(&x.0, &y.0));
     left.iter().zip(&right).all(|(x, y)| close(*x, *y))
 }
 
-/// Two numbers that are the same number to within the tolerance.
-fn close(a: f64, b: f64) -> bool {
-    if a == b {
+/// Two numbers that are the same number, to the last place the shorter of them was printed to.
+///
+/// The relative tolerance above is right when both engines printed a double. It is wrong when one of
+/// them printed a decimal, and TPC-H is where that happens. `avg` over a `DECIMAL(15,2)` gives a
+/// double in DuckDB, a decimal of scale six in DataFusion and a decimal of scale four in ClickHouse,
+/// so q01's average quantity comes back as `25.499370423275426`, `25.499370` and `25.4993`. Dividing
+/// two decimal sums in q08 does the same thing, and there the ClickHouse answer is four places wide.
+/// All three engines agree on every digit any of them chose to print, and a relative tolerance of a
+/// part in a billion called them three different answers for two runs in a row.
+///
+/// So a number printed to `f` decimal places is also allowed to differ in its last place, which is
+/// `10^-f` and is an absolute quantity rather than a relative one. The wider of the two rules wins,
+/// so nothing that used to pass now fails.
+///
+/// This is a weakening and the honest way to put it is that a digit an engine did not print is a
+/// digit nobody can check. What keeps it from being a bad trade is that it applies to the decimal
+/// places and not to the value: a number with no decimal point in it is compared at the relative
+/// tolerance alone, so a count off by one in a hundred and forty eight million is still caught, and
+/// an engine that returns a ratio of 0.041 where the rest return 0.0395 is still caught whatever
+/// anybody printed.
+fn close(a: (f64, Option<u32>), b: (f64, Option<u32>)) -> bool {
+    if a.0 == b.0 {
         return true;
     }
-    let scale = a.abs().max(b.abs());
-    (a - b).abs() <= TOLERANCE * scale
+    let scale = a.0.abs().max(b.0.abs());
+    let mut allowed = TOLERANCE * scale;
+    if let (Some(left), Some(right)) = (a.1, b.1) {
+        allowed = allowed.max(10_f64.powi(-i32::try_from(left.min(right)).unwrap_or(i32::MAX)));
+    }
+    (a.0 - b.0).abs() <= allowed
+}
+
+/// How many decimal places a printed number carried, when it carried any.
+///
+/// `None` for a word with no decimal point, because an integer holds all of its digits, and for a
+/// word written with an exponent, because the places after the point there are not the places of the
+/// value and no engine here prints a decimal that way.
+fn places(word: &str) -> Option<u32> {
+    if word.contains(['e', 'E']) {
+        return None;
+    }
+    let (_, fraction) = word.split_once('.')?;
+    u32::try_from(fraction.chars().filter(char::is_ascii_digit).count()).ok()
 }
 
 /// A bordered table without its header, or the text unchanged when it is not one.
@@ -100,6 +136,15 @@ fn body(text: &str) -> &str {
 /// not three, and a comma between fields, so that a CSV row is not one very long number.
 #[must_use]
 pub fn numbers(text: &str) -> Vec<f64> {
+    printed(text).into_iter().map(|(value, _)| value).collect()
+}
+
+/// Every number in a block of output, with how many decimal places it was printed to.
+///
+/// The place count is what the comparison needs and it is gone the moment the text is parsed, so it
+/// comes out of the scanner rather than being guessed back from the double afterwards.
+#[must_use]
+pub fn printed(text: &str) -> Vec<(f64, Option<u32>)> {
     let chars: Vec<char> = body(text).chars().collect();
     let mut found = Vec::new();
     let mut at = 0;
@@ -143,7 +188,7 @@ pub fn numbers(text: &str) -> Vec<f64> {
 
         let word: String = chars[start..end].iter().collect();
         if let Ok(value) = word.parse::<f64>() {
-            found.push(value);
+            found.push((value, places(&word)));
         }
         at = end.max(at + 1);
     }
@@ -281,6 +326,36 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert!(found[0].contains("clickhouse-local"), "{}", found[0]);
         assert!(found[0].contains("duckdb"), "{}", found[0]);
+    }
+
+    /// The three TPC-H q01 answers, as the three engines actually printed them at scale factor 100.
+    #[test]
+    fn a_decimal_average_and_a_double_average_of_the_same_column_agree() {
+        let duckdb = "A,F,25.499370423275426,38236.11698430489,0.050002243530929025";
+        let datafusion = "A,F,25.499370,38236.116984,0.050002";
+        let clickhouse = "A,F,25.4993,38236.1169,0.0500";
+        assert!(same(duckdb, datafusion));
+        assert!(same(duckdb, clickhouse));
+        assert!(same(datafusion, clickhouse));
+    }
+
+    /// q08 is a division of two sums, and the three engines pick three different result scales.
+    #[test]
+    fn a_ratio_printed_to_four_places_agrees_with_the_same_ratio_printed_to_eighteen() {
+        assert!(same("1995,0.039535108776109315", "1995,0.03953510"));
+        assert!(same("1995,0.039535108776109315", "1995,0.0395"));
+        // And a ratio that is genuinely a different ratio is still a different answer, however few
+        // places either side printed.
+        assert!(!same("1995,0.039535108776109315", "1995,0.0410"));
+        assert!(!same("1995,0.0395", "1995,0.0410"));
+    }
+
+    /// The weakening applies to the decimal places and not to the value, and this is where that
+    /// distinction earns its keep.
+    #[test]
+    fn a_count_that_is_off_by_one_is_still_a_wrong_answer_however_large_the_count() {
+        assert!(!same("148047881", "148047882"));
+        assert!(!same("1,148047881", "1,148047882"));
     }
 
     #[test]
