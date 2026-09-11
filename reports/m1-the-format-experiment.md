@@ -91,7 +91,7 @@ An earlier run of this pass said sixteen columns wanted one dictionary. That was
 
 The obvious candidate on a web log is `URL` and `Referer`, which are both columns of URLs, and they do not overlap. `Referer` holds the page somebody came from and `URL` holds the page they landed on, and on a log of one site those are different sets of strings.
 
-On the eight other corpora the answer is the same or emptier. Seven of them print "no two columns overlap enough to share, so there is nothing to price" on every chunk: yellow taxi, Ookla, and all five TPC-H tables measured. The one exception is the for hire vehicle file, which finds two groups and prices both.
+On the nine other corpora the answer is the same or emptier. Eight of them print "no two columns overlap enough to share, so there is nothing to price" on every chunk: yellow taxi, Ookla, and all six TPC-H tables. `lineitem` is the most decisive of those, because it is the largest table in the experiment, it has four string columns and 600,037,902 rows, and across 4,884 chunks and 120 pairs it never once found two columns that share a vocabulary. The one exception anywhere is the for hire vehicle file, which finds two groups and prices both.
 
 ```
 | group                                                                                            |   apart | shared table | shared dict | best saves | picked          |
@@ -131,7 +131,7 @@ The other seven have violations and a rule with violations is not a rule. The tw
 
 The `with keys` column is the other half of the answer and it is worse than the first half. Storing the mapping as keys and values costs more than the column costs in all eight cases, and by a factor of thirteen on `HID` to `WindowName`. A recomputation rule is only ever cheaper than the column when it is expressed against the determining column's dictionary codes, which means it needs a dictionary that is stable across the chunk boundary, which is section 6.5 and is the same global dictionary machinery that Q1 just said is not worth building.
 
-On the other corpora the detector found candidates and the candidates are worse than the ones on `hits`, in an instructive way. Twenty seven dependencies at 0.98 or better across 308 pairs, and reading them column by column shows that almost all of them are an artifact of the test rather than a property of the data.
+On the other corpora the detector found candidates and the candidates are worse than the ones on `hits`, in an instructive way. Twenty eight dependencies at 0.98 or better across 428 pairs, and reading them column by column shows that almost all of them are an artifact of the test rather than a property of the data.
 
 ```
 | corpus            | pairs | reported | example                                             |
@@ -144,13 +144,14 @@ On the other corpora the detector found candidates and the candidates are worse 
 | TPC-H supplier    |    21 |        3 | s_comment determines s_acctbal                      |
 | TPC-H orders      |    36 |        0 | none at 0.98 or better                              |
 | TPC-H partsupp    |    10 |        0 | none at 0.98 or better                              |
+| TPC-H lineitem    |   120 |        1 | l_orderkey determines l_linestatus                  |
 ```
 
-Every example in that table has a near unique column on the left. A microsecond timestamp determines a two value flag because almost no two rows share a timestamp. `tile`, which is a WKT polygon with 6,214,187 distinct values in 6,655,986 rows, determines all seven numeric columns for the same reason. `c_address` is unique per customer, so it determines `c_acctbal` and it would equally determine anything else in the table. These are true statements and they are worth nothing, because the storage cost of a rule keyed on a near unique column is the near unique column.
+Every example in that table has a near unique column on the left. A microsecond timestamp determines a two value flag because almost no two rows share a timestamp. `tile`, which is a WKT polygon with 6,214,187 distinct values in 6,655,986 rows, determines all seven numeric columns for the same reason. `c_address` is unique per customer, so it determines `c_acctbal` and it would equally determine anything else in the table. `l_orderkey` is the clearest case in the set, because it is the primary key of `orders` and it appears on average four times in `lineitem`, and four rows at a time is enough for the sketch to conclude that it determines a column holding `O` and `F`. These are true statements and they are worth nothing, because the storage cost of a rule keyed on a near unique column is the near unique column.
 
-Exactly one of the twenty six is a non trivial dependency: `p_brand` determines `p_mfgr` on TPC-H part, twenty five brands onto five manufacturers, which is true by construction of `dbgen`. It is worth nothing either, because `p_mfgr` is five distinct values over twenty million rows and a dictionary with RLE on top of it already stores that column in almost no space at all.
+Exactly one of the twenty eight is a non trivial dependency: `p_brand` determines `p_mfgr` on TPC-H part, twenty five brands onto five manufacturers, which is true by construction of `dbgen`. It is worth nothing either, because `p_mfgr` is five distinct values over twenty million rows and a dictionary with RLE on top of it already stores that column in almost no space at all.
 
-That is the finding to carry forward, and it is about the detector and not about the data. The dependence score cannot distinguish a real rule from a left side that is nearly unique, and any future version of this test has to require that the determining column has materially fewer distinct values than the table has rows before it reports anything. Without that filter the test reports 624 candidates on `hits` and 26 on everything else, and a human has to read all of them.
+That is the finding to carry forward, and it is about the detector and not about the data. The dependence score cannot distinguish a real rule from a left side that is nearly unique, and any future version of this test has to require that the determining column has materially fewer distinct values than the table has rows before it reports anything. Without that filter the test reports 624 candidates on `hits` and 28 on everything else, and a human has to read all of them.
 
 ## Q5, memory during dictionary construction
 
@@ -158,9 +159,9 @@ This one is fine, and it is the only question in the milestone whose answer is y
 
 Peak resident for the whole file pass over `hits`, streaming 105 columns at 122,880 rows a chunk, building every dictionary in the file and holding a sketch per column, was 1002 MB. On the first million rows it was 441 MB, and the difference is the per column sketches filling up rather than anything growing without bound.
 
-On the eight smaller corpora it never went over 262.63 MB, and that peak was Ookla, whose 6.6 million rows carry a column of polygon strings. The rest sit between 72.39 MB for yellow taxi and 235.15 MB for TPC-H partsupp, with no relationship to the size of the file: TPC-H orders at 150 million rows and 6.05 GB peaked at 161.80 MB, lower than Ookla at 6.6 million rows.
+On the nine other corpora it never went over 262.63 MB, and that peak was Ookla, whose 6.6 million rows carry a column of polygon strings. The rest sit between 72.39 MB for yellow taxi and 235.15 MB for TPC-H partsupp, with no relationship to the size of the file: TPC-H orders at 150 million rows and 6.05 GB peaked at 161.80 MB, lower than Ookla at 6.6 million rows, and TPC-H lineitem at 600 million rows and 21.16 GB peaked at 169.67 MB, which is a file two hundred times the size of Ookla in two thirds of the memory. Peak resident tracks the width of the row and the length of the strings in it, and not the length of the file, which is what streaming a chunk at a time is supposed to mean and is worth having measured rather than assumed.
 
-The `groups` pass, which holds three encodings of a group at once, peaked at 813 MB on `hits` and never over 92.14 MB on anything else.
+The `groups` pass, which holds three encodings of a group at once, peaked at 813 MB on `hits` and never over 92.14 MB on anything else, including 74.91 MB on the 600 million rows of `lineitem`.
 
 Q5 asked whether a global dictionary can be built during a load without an unacceptable cost, and on these files the memory is not the cost. The encode throughput is.
 
@@ -168,11 +169,12 @@ Q5 asked whether a global dictionary can be built during a load without an unacc
 
 Encode runs at 5 MB/s of values per core and decode at 186 MB/s. That is a write path 37 times slower than its read path, and no product ships that.
 
-In row terms, the nine corpora ran between 49,067 and 119,061 rows a second on four cores.
+In row terms, the ten corpora ran between 49,067 and 119,061 rows a second on four cores.
 
 | corpus | rows | wall clock | rows/s | peak resident |
 | ------ | ---- | ---------- | ------ | ------------- |
 | ClickBench hits | 99,997,497 | 105 min | 15,873 | 1002 MB |
+| TPC-H lineitem | 600,037,902 | 11446.8s | 52,420 | 169.67 MB |
 | TPC-H orders | 150,000,000 | 2917.3s | 51,417 | 161.80 MB |
 | TPC-H partsupp | 80,000,000 | 1446.9s | 55,290 | 235.15 MB |
 | TPC-H customer | 15,000,000 | 305.7s | 49,067 | 190.95 MB |
