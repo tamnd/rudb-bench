@@ -1,0 +1,640 @@
+# The kernel record, read by `rudb-bench kernels --check`.
+#
+# One block per machine. Written by `rudb-bench kernels --record`, which runs `cargo xtask kernels
+# --json` in a rudb checkout and stores what it said. The numbers are nanoseconds per row and every
+# machine has its own, so a block is only ever compared against a later block from the same machine.
+#
+# A cell line is the table, the case, the detail, the form pair or stage, the null percentage, the
+# rows the time was divided by, nanoseconds per row, the interquartile range as a percentage of the
+# median, and whether a specialized loop ran or the row at a time path did. Separated by pipes
+# because a case name has spaces in it and a column layout that breaks on the first one is a file
+# format that works until somebody adds a case.
+#
+# This is also the committed form of the compaction surface, which sub-milestone 2b asks for by
+# name: the rows whose table is `compaction` are it.
+#
+# Rule ten applies here as everywhere. Nothing in this file times a query, so nothing in it is a
+# result on its own.
+
+[kernels]
+machine   server3
+rudb      0.2.2 f45d284
+recorded  2026-09-11
+cell      comparison | Bool | BOOLEAN | flat/flat | 0 | 1024 | 0.2234 | 21.1 | kernel
+cell      comparison | Bool | BOOLEAN | flat/const | 0 | 1024 | 0.3426 | 4.2 | kernel
+cell      comparison | Bool | BOOLEAN | const/flat | 0 | 1024 | 0.4209 | 18.3 | kernel
+cell      comparison | Bool | BOOLEAN | dict/const | 0 | 1024 | 1.3893 | 21.0 | kernel
+cell      comparison | Bool | BOOLEAN | dict/flat | 0 | 1024 | 77.0184 | 4.3 | oracle
+cell      comparison | Bool | BOOLEAN | flat/flat | 1 | 1024 | 1.6786 | 6.9 | kernel
+cell      comparison | Bool | BOOLEAN | flat/const | 1 | 1024 | 1.8107 | 18.7 | kernel
+cell      comparison | Bool | BOOLEAN | const/flat | 1 | 1024 | 1.6424 | 9.9 | kernel
+cell      comparison | Bool | BOOLEAN | dict/const | 1 | 1024 | 1.2017 | 10.7 | kernel
+cell      comparison | Bool | BOOLEAN | dict/flat | 1 | 1024 | 72.4762 | 4.5 | oracle
+cell      comparison | Bool | BOOLEAN | flat/flat | 50 | 1024 | 1.5930 | 11.9 | kernel
+cell      comparison | Bool | BOOLEAN | flat/const | 50 | 1024 | 1.6422 | 1.9 | kernel
+cell      comparison | Bool | BOOLEAN | const/flat | 50 | 1024 | 1.5948 | 3.0 | kernel
+cell      comparison | Bool | BOOLEAN | dict/const | 50 | 1024 | 1.2306 | 2.6 | kernel
+cell      comparison | Bool | BOOLEAN | dict/flat | 50 | 1024 | 64.0184 | 8.6 | oracle
+cell      comparison | Int8 | TINYINT | flat/flat | 0 | 1024 | 0.2655 | 11.8 | kernel
+cell      arithmetic | Int8 | TINYINT | flat/flat | 0 | 1024 | 1.1190 | 11.9 | kernel
+cell      comparison | Int8 | TINYINT | flat/const | 0 | 1024 | 0.3319 | 7.4 | kernel
+cell      arithmetic | Int8 | TINYINT | flat/const | 0 | 1024 | 1.2409 | 5.9 | kernel
+cell      comparison | Int8 | TINYINT | const/flat | 0 | 1024 | 0.3813 | 11.9 | kernel
+cell      arithmetic | Int8 | TINYINT | const/flat | 0 | 1024 | 1.5081 | 5.9 | kernel
+cell      comparison | Int8 | TINYINT | dict/const | 0 | 1024 | 1.4676 | 8.0 | kernel
+cell      arithmetic | Int8 | TINYINT | dict/const | 0 | 1024 | 85.7691 | 5.4 | oracle
+cell      comparison | Int8 | TINYINT | dict/flat | 0 | 1024 | 81.7575 | 10.0 | oracle
+cell      arithmetic | Int8 | TINYINT | dict/flat | 0 | 1024 | 89.6849 | 2.7 | oracle
+cell      comparison | Int8 | TINYINT | flat/flat | 1 | 1024 | 1.5342 | 10.8 | kernel
+cell      arithmetic | Int8 | TINYINT | flat/flat | 1 | 1024 | 2.4386 | 5.0 | kernel
+cell      comparison | Int8 | TINYINT | flat/const | 1 | 1024 | 1.7354 | 15.1 | kernel
+cell      arithmetic | Int8 | TINYINT | flat/const | 1 | 1024 | 2.6201 | 18.1 | kernel
+cell      comparison | Int8 | TINYINT | const/flat | 1 | 1024 | 1.5755 | 7.7 | kernel
+cell      arithmetic | Int8 | TINYINT | const/flat | 1 | 1024 | 2.4366 | 3.2 | kernel
+cell      comparison | Int8 | TINYINT | dict/const | 1 | 1024 | 1.4579 | 4.3 | kernel
+cell      arithmetic | Int8 | TINYINT | dict/const | 1 | 1024 | 100.1893 | 17.0 | oracle
+cell      comparison | Int8 | TINYINT | dict/flat | 1 | 1024 | 81.1443 | 1.3 | oracle
+cell      arithmetic | Int8 | TINYINT | dict/flat | 1 | 1024 | 102.6092 | 8.2 | oracle
+cell      comparison | Int8 | TINYINT | flat/flat | 50 | 1024 | 1.4619 | 6.7 | kernel
+cell      arithmetic | Int8 | TINYINT | flat/flat | 50 | 1024 | 2.4942 | 5.3 | kernel
+cell      comparison | Int8 | TINYINT | flat/const | 50 | 1024 | 1.8665 | 4.6 | kernel
+cell      arithmetic | Int8 | TINYINT | flat/const | 50 | 1024 | 2.3334 | 12.7 | kernel
+cell      comparison | Int8 | TINYINT | const/flat | 50 | 1024 | 1.5528 | 9.7 | kernel
+cell      arithmetic | Int8 | TINYINT | const/flat | 50 | 1024 | 2.4630 | 12.2 | kernel
+cell      comparison | Int8 | TINYINT | dict/const | 50 | 1024 | 1.3946 | 12.5 | kernel
+cell      arithmetic | Int8 | TINYINT | dict/const | 50 | 1024 | 83.7332 | 6.7 | oracle
+cell      comparison | Int8 | TINYINT | dict/flat | 50 | 1024 | 69.4652 | 6.7 | oracle
+cell      arithmetic | Int8 | TINYINT | dict/flat | 50 | 1024 | 83.6188 | 2.1 | oracle
+cell      comparison | Int16 | SMALLINT | flat/flat | 0 | 1024 | 0.2790 | 6.2 | kernel
+cell      arithmetic | Int16 | SMALLINT | flat/flat | 0 | 1024 | 1.5825 | 5.1 | kernel
+cell      comparison | Int16 | SMALLINT | flat/const | 0 | 1024 | 0.4050 | 4.9 | kernel
+cell      arithmetic | Int16 | SMALLINT | flat/const | 0 | 1024 | 1.2663 | 3.5 | kernel
+cell      comparison | Int16 | SMALLINT | const/flat | 0 | 1024 | 0.3870 | 5.3 | kernel
+cell      arithmetic | Int16 | SMALLINT | const/flat | 0 | 1024 | 1.5617 | 45.3 | kernel
+cell      comparison | Int16 | SMALLINT | dict/const | 0 | 1024 | 1.4863 | 6.1 | kernel
+cell      arithmetic | Int16 | SMALLINT | dict/const | 0 | 1024 | 88.9412 | 5.3 | oracle
+cell      comparison | Int16 | SMALLINT | dict/flat | 0 | 1024 | 81.6543 | 15.2 | oracle
+cell      arithmetic | Int16 | SMALLINT | dict/flat | 0 | 1024 | 87.7785 | 11.3 | oracle
+cell      comparison | Int16 | SMALLINT | flat/flat | 1 | 1024 | 1.3630 | 5.6 | kernel
+cell      arithmetic | Int16 | SMALLINT | flat/flat | 1 | 1024 | 2.5362 | 4.1 | kernel
+cell      comparison | Int16 | SMALLINT | flat/const | 1 | 1024 | 1.4811 | 16.0 | kernel
+cell      arithmetic | Int16 | SMALLINT | flat/const | 1 | 1024 | 2.3334 | 4.5 | kernel
+cell      comparison | Int16 | SMALLINT | const/flat | 1 | 1024 | 1.4971 | 7.2 | kernel
+cell      arithmetic | Int16 | SMALLINT | const/flat | 1 | 1024 | 2.1552 | 10.2 | kernel
+cell      comparison | Int16 | SMALLINT | dict/const | 1 | 1024 | 1.4156 | 3.5 | kernel
+cell      arithmetic | Int16 | SMALLINT | dict/const | 1 | 1024 | 92.9325 | 1.8 | oracle
+cell      comparison | Int16 | SMALLINT | dict/flat | 1 | 1024 | 86.6922 | 8.7 | oracle
+cell      arithmetic | Int16 | SMALLINT | dict/flat | 1 | 1024 | 92.1660 | 7.0 | oracle
+cell      comparison | Int16 | SMALLINT | flat/flat | 50 | 1024 | 1.6764 | 10.2 | kernel
+cell      arithmetic | Int16 | SMALLINT | flat/flat | 50 | 1024 | 2.9654 | 8.1 | kernel
+cell      comparison | Int16 | SMALLINT | flat/const | 50 | 1024 | 1.5910 | 2.8 | kernel
+cell      arithmetic | Int16 | SMALLINT | flat/const | 50 | 1024 | 2.5834 | 15.7 | kernel
+cell      comparison | Int16 | SMALLINT | const/flat | 50 | 1024 | 1.6556 | 6.9 | kernel
+cell      arithmetic | Int16 | SMALLINT | const/flat | 50 | 1024 | 2.4158 | 2.2 | kernel
+cell      comparison | Int16 | SMALLINT | dict/const | 50 | 1024 | 1.6337 | 37.6 | kernel
+cell      arithmetic | Int16 | SMALLINT | dict/const | 50 | 1024 | 89.1010 | 6.4 | oracle
+cell      comparison | Int16 | SMALLINT | dict/flat | 50 | 1024 | 68.6205 | 27.5 | oracle
+cell      arithmetic | Int16 | SMALLINT | dict/flat | 50 | 1024 | 81.1355 | 11.3 | oracle
+cell      comparison | Int32 | INTEGER | flat/flat | 0 | 1024 | 0.3880 | 10.7 | kernel
+cell      arithmetic | Int32 | INTEGER | flat/flat | 0 | 1024 | 1.2340 | 12.5 | kernel
+cell      comparison | Int32 | INTEGER | flat/const | 0 | 1024 | 0.4479 | 8.1 | kernel
+cell      arithmetic | Int32 | INTEGER | flat/const | 0 | 1024 | 1.2907 | 6.7 | kernel
+cell      comparison | Int32 | INTEGER | const/flat | 0 | 1024 | 0.4611 | 10.3 | kernel
+cell      arithmetic | Int32 | INTEGER | const/flat | 0 | 1024 | 1.2264 | 2.6 | kernel
+cell      comparison | Int32 | INTEGER | dict/const | 0 | 1024 | 1.3126 | 4.8 | kernel
+cell      arithmetic | Int32 | INTEGER | dict/const | 0 | 1024 | 88.0962 | 7.6 | oracle
+cell      comparison | Int32 | INTEGER | dict/flat | 0 | 1024 | 76.7685 | 11.3 | oracle
+cell      arithmetic | Int32 | INTEGER | dict/flat | 0 | 1024 | 89.5363 | 2.0 | oracle
+cell      comparison | Int32 | INTEGER | flat/flat | 1 | 1024 | 1.4895 | 9.4 | kernel
+cell      arithmetic | Int32 | INTEGER | flat/flat | 1 | 1024 | 2.6869 | 1.2 | kernel
+cell      comparison | Int32 | INTEGER | flat/const | 1 | 1024 | 1.6646 | 8.6 | kernel
+cell      arithmetic | Int32 | INTEGER | flat/const | 1 | 1024 | 2.2660 | 7.5 | kernel
+cell      comparison | Int32 | INTEGER | const/flat | 1 | 1024 | 1.4131 | 12.3 | kernel
+cell      arithmetic | Int32 | INTEGER | const/flat | 1 | 1024 | 2.3146 | 2.4 | kernel
+cell      comparison | Int32 | INTEGER | dict/const | 1 | 1024 | 1.2453 | 10.8 | kernel
+cell      arithmetic | Int32 | INTEGER | dict/const | 1 | 1024 | 80.1382 | 9.8 | oracle
+cell      comparison | Int32 | INTEGER | dict/flat | 1 | 1024 | 71.3433 | 7.3 | oracle
+cell      arithmetic | Int32 | INTEGER | dict/flat | 1 | 1024 | 93.2467 | 6.3 | oracle
+cell      comparison | Int32 | INTEGER | flat/flat | 50 | 1024 | 1.5898 | 6.7 | kernel
+cell      arithmetic | Int32 | INTEGER | flat/flat | 50 | 1024 | 2.4050 | 5.5 | kernel
+cell      comparison | Int32 | INTEGER | flat/const | 50 | 1024 | 1.7192 | 1.9 | kernel
+cell      arithmetic | Int32 | INTEGER | flat/const | 50 | 1024 | 2.5371 | 3.3 | kernel
+cell      comparison | Int32 | INTEGER | const/flat | 50 | 1024 | 1.6981 | 8.1 | kernel
+cell      arithmetic | Int32 | INTEGER | const/flat | 50 | 1024 | 2.3644 | 6.5 | kernel
+cell      comparison | Int32 | INTEGER | dict/const | 50 | 1024 | 1.3543 | 17.8 | kernel
+cell      arithmetic | Int32 | INTEGER | dict/const | 50 | 1024 | 83.3500 | 6.1 | oracle
+cell      comparison | Int32 | INTEGER | dict/flat | 50 | 1024 | 86.0052 | 27.8 | oracle
+cell      arithmetic | Int32 | INTEGER | dict/flat | 50 | 1024 | 93.0739 | 6.9 | oracle
+cell      comparison | Int64 | BIGINT | flat/flat | 0 | 1024 | 1.2207 | 17.3 | kernel
+cell      arithmetic | Int64 | BIGINT | flat/flat | 0 | 1024 | 1.3949 | 8.6 | kernel
+cell      comparison | Int64 | BIGINT | flat/const | 0 | 1024 | 1.1164 | 3.9 | kernel
+cell      arithmetic | Int64 | BIGINT | flat/const | 0 | 1024 | 1.3496 | 11.6 | kernel
+cell      comparison | Int64 | BIGINT | const/flat | 0 | 1024 | 1.1512 | 9.2 | kernel
+cell      arithmetic | Int64 | BIGINT | const/flat | 0 | 1024 | 1.3245 | 13.4 | kernel
+cell      comparison | Int64 | BIGINT | dict/const | 0 | 1024 | 1.3561 | 9.6 | kernel
+cell      arithmetic | Int64 | BIGINT | dict/const | 0 | 1024 | 91.8015 | 7.7 | oracle
+cell      comparison | Int64 | BIGINT | dict/flat | 0 | 1024 | 82.9526 | 1.4 | oracle
+cell      arithmetic | Int64 | BIGINT | dict/flat | 0 | 1024 | 94.2503 | 2.0 | oracle
+cell      comparison | Int64 | BIGINT | flat/flat | 1 | 1024 | 2.4184 | 8.6 | kernel
+cell      arithmetic | Int64 | BIGINT | flat/flat | 1 | 1024 | 2.6125 | 4.0 | kernel
+cell      comparison | Int64 | BIGINT | flat/const | 1 | 1024 | 2.5420 | 31.0 | kernel
+cell      arithmetic | Int64 | BIGINT | flat/const | 1 | 1024 | 2.8094 | 4.0 | kernel
+cell      comparison | Int64 | BIGINT | const/flat | 1 | 1024 | 2.6106 | 3.1 | kernel
+cell      arithmetic | Int64 | BIGINT | const/flat | 1 | 1024 | 2.7084 | 3.6 | kernel
+cell      comparison | Int64 | BIGINT | dict/const | 1 | 1024 | 1.2819 | 3.5 | kernel
+cell      arithmetic | Int64 | BIGINT | dict/const | 1 | 1024 | 91.3184 | 8.8 | oracle
+cell      comparison | Int64 | BIGINT | dict/flat | 1 | 1024 | 77.7649 | 8.4 | oracle
+cell      arithmetic | Int64 | BIGINT | dict/flat | 1 | 1024 | 96.6591 | 1.7 | oracle
+cell      comparison | Int64 | BIGINT | flat/flat | 50 | 1024 | 2.7727 | 15.2 | kernel
+cell      arithmetic | Int64 | BIGINT | flat/flat | 50 | 1024 | 2.8138 | 9.6 | kernel
+cell      comparison | Int64 | BIGINT | flat/const | 50 | 1024 | 2.5751 | 1.0 | kernel
+cell      arithmetic | Int64 | BIGINT | flat/const | 50 | 1024 | 2.8858 | 1.2 | kernel
+cell      comparison | Int64 | BIGINT | const/flat | 50 | 1024 | 2.5792 | 0.4 | kernel
+cell      arithmetic | Int64 | BIGINT | const/flat | 50 | 1024 | 2.8865 | 2.0 | kernel
+cell      comparison | Int64 | BIGINT | dict/const | 50 | 1024 | 1.3771 | 0.2 | kernel
+cell      arithmetic | Int64 | BIGINT | dict/const | 50 | 1024 | 83.0499 | 1.6 | oracle
+cell      comparison | Int64 | BIGINT | dict/flat | 50 | 1024 | 67.7678 | 1.6 | oracle
+cell      arithmetic | Int64 | BIGINT | dict/flat | 50 | 1024 | 84.4602 | 6.0 | oracle
+cell      comparison | Int128 | HUGEINT | flat/flat | 0 | 1024 | 1.5674 | 3.2 | kernel
+cell      arithmetic | Int128 | HUGEINT | flat/flat | 0 | 1024 | 1.8635 | 34.7 | kernel
+cell      comparison | Int128 | HUGEINT | flat/const | 0 | 1024 | 1.4793 | 15.5 | kernel
+cell      arithmetic | Int128 | HUGEINT | flat/const | 0 | 1024 | 2.0936 | 13.7 | kernel
+cell      comparison | Int128 | HUGEINT | const/flat | 0 | 1024 | 1.7383 | 14.1 | kernel
+cell      arithmetic | Int128 | HUGEINT | const/flat | 0 | 1024 | 1.7628 | 1.3 | kernel
+cell      comparison | Int128 | HUGEINT | dict/const | 0 | 1024 | 1.6986 | 12.0 | kernel
+cell      arithmetic | Int128 | HUGEINT | dict/const | 0 | 1024 | 86.1964 | 7.7 | oracle
+cell      comparison | Int128 | HUGEINT | dict/flat | 0 | 1024 | 81.6841 | 14.2 | oracle
+cell      arithmetic | Int128 | HUGEINT | dict/flat | 0 | 1024 | 87.1254 | 3.3 | oracle
+cell      comparison | Int128 | HUGEINT | flat/flat | 1 | 1024 | 2.5529 | 13.5 | kernel
+cell      arithmetic | Int128 | HUGEINT | flat/flat | 1 | 1024 | 2.9157 | 19.0 | kernel
+cell      comparison | Int128 | HUGEINT | flat/const | 1 | 1024 | 2.5023 | 1.8 | kernel
+cell      arithmetic | Int128 | HUGEINT | flat/const | 1 | 1024 | 2.8238 | 6.1 | kernel
+cell      comparison | Int128 | HUGEINT | const/flat | 1 | 1024 | 2.6098 | 7.2 | kernel
+cell      arithmetic | Int128 | HUGEINT | const/flat | 1 | 1024 | 2.8377 | 2.5 | kernel
+cell      comparison | Int128 | HUGEINT | dict/const | 1 | 1024 | 1.6443 | 4.2 | kernel
+cell      arithmetic | Int128 | HUGEINT | dict/const | 1 | 1024 | 85.8256 | 5.1 | oracle
+cell      comparison | Int128 | HUGEINT | dict/flat | 1 | 1024 | 82.8105 | 6.4 | oracle
+cell      arithmetic | Int128 | HUGEINT | dict/flat | 1 | 1024 | 90.9034 | 13.8 | oracle
+cell      comparison | Int128 | HUGEINT | flat/flat | 50 | 1024 | 2.8305 | 3.2 | kernel
+cell      arithmetic | Int128 | HUGEINT | flat/flat | 50 | 1024 | 2.9273 | 10.0 | kernel
+cell      comparison | Int128 | HUGEINT | flat/const | 50 | 1024 | 2.6440 | 2.6 | kernel
+cell      arithmetic | Int128 | HUGEINT | flat/const | 50 | 1024 | 3.6862 | 14.4 | kernel
+cell      comparison | Int128 | HUGEINT | const/flat | 50 | 1024 | 2.8970 | 1.5 | kernel
+cell      arithmetic | Int128 | HUGEINT | const/flat | 50 | 1024 | 3.2336 | 3.1 | kernel
+cell      comparison | Int128 | HUGEINT | dict/const | 50 | 1024 | 1.8254 | 5.4 | kernel
+cell      arithmetic | Int128 | HUGEINT | dict/const | 50 | 1024 | 89.1007 | 16.6 | oracle
+cell      comparison | Int128 | HUGEINT | dict/flat | 50 | 1024 | 73.2442 | 12.9 | oracle
+cell      arithmetic | Int128 | HUGEINT | dict/flat | 50 | 1024 | 76.4341 | 2.0 | oracle
+cell      comparison | UInt8 | UTINYINT | flat/flat | 0 | 1024 | 0.2579 | 13.0 | kernel
+cell      arithmetic | UInt8 | UTINYINT | flat/flat | 0 | 1024 | 0.3645 | 7.1 | kernel
+cell      comparison | UInt8 | UTINYINT | flat/const | 0 | 1024 | 0.3993 | 11.3 | kernel
+cell      arithmetic | UInt8 | UTINYINT | flat/const | 0 | 1024 | 0.4552 | 8.8 | kernel
+cell      comparison | UInt8 | UTINYINT | const/flat | 0 | 1024 | 0.4110 | 7.4 | kernel
+cell      arithmetic | UInt8 | UTINYINT | const/flat | 0 | 1024 | 0.5706 | 23.4 | kernel
+cell      comparison | UInt8 | UTINYINT | dict/const | 0 | 1024 | 1.8156 | 75.8 | kernel
+cell      arithmetic | UInt8 | UTINYINT | dict/const | 0 | 1024 | 88.5378 | 6.7 | oracle
+cell      comparison | UInt8 | UTINYINT | dict/flat | 0 | 1024 | 75.9784 | 7.7 | oracle
+cell      arithmetic | UInt8 | UTINYINT | dict/flat | 0 | 1024 | 92.3325 | 11.7 | oracle
+cell      comparison | UInt8 | UTINYINT | flat/flat | 1 | 1024 | 1.5835 | 2.9 | kernel
+cell      arithmetic | UInt8 | UTINYINT | flat/flat | 1 | 1024 | 1.7241 | 3.9 | kernel
+cell      comparison | UInt8 | UTINYINT | flat/const | 1 | 1024 | 1.7393 | 3.3 | kernel
+cell      arithmetic | UInt8 | UTINYINT | flat/const | 1 | 1024 | 1.7507 | 9.2 | kernel
+cell      comparison | UInt8 | UTINYINT | const/flat | 1 | 1024 | 1.6297 | 11.5 | kernel
+cell      arithmetic | UInt8 | UTINYINT | const/flat | 1 | 1024 | 1.4514 | 19.0 | kernel
+cell      comparison | UInt8 | UTINYINT | dict/const | 1 | 1024 | 1.4716 | 17.8 | kernel
+cell      arithmetic | UInt8 | UTINYINT | dict/const | 1 | 1024 | 79.7445 | 2.7 | oracle
+cell      comparison | UInt8 | UTINYINT | dict/flat | 1 | 1024 | 76.7168 | 14.5 | oracle
+cell      arithmetic | UInt8 | UTINYINT | dict/flat | 1 | 1024 | 95.8280 | 8.6 | oracle
+cell      comparison | UInt8 | UTINYINT | flat/flat | 50 | 1024 | 1.5698 | 7.2 | kernel
+cell      arithmetic | UInt8 | UTINYINT | flat/flat | 50 | 1024 | 1.6359 | 12.2 | kernel
+cell      comparison | UInt8 | UTINYINT | flat/const | 50 | 1024 | 1.7021 | 5.4 | kernel
+cell      arithmetic | UInt8 | UTINYINT | flat/const | 50 | 1024 | 1.6590 | 5.6 | kernel
+cell      comparison | UInt8 | UTINYINT | const/flat | 50 | 1024 | 1.6470 | 8.1 | kernel
+cell      arithmetic | UInt8 | UTINYINT | const/flat | 50 | 1024 | 1.7649 | 3.7 | kernel
+cell      comparison | UInt8 | UTINYINT | dict/const | 50 | 1024 | 1.4498 | 8.5 | kernel
+cell      arithmetic | UInt8 | UTINYINT | dict/const | 50 | 1024 | 79.5302 | 3.8 | oracle
+cell      comparison | UInt8 | UTINYINT | dict/flat | 50 | 1024 | 66.4304 | 14.7 | oracle
+cell      arithmetic | UInt8 | UTINYINT | dict/flat | 50 | 1024 | 78.9676 | 8.3 | oracle
+cell      comparison | UInt16 | USMALLINT | flat/flat | 0 | 1024 | 0.2696 | 9.3 | kernel
+cell      arithmetic | UInt16 | USMALLINT | flat/flat | 0 | 1024 | 0.3471 | 5.3 | kernel
+cell      comparison | UInt16 | USMALLINT | flat/const | 0 | 1024 | 0.4974 | 3.2 | kernel
+cell      arithmetic | UInt16 | USMALLINT | flat/const | 0 | 1024 | 0.4381 | 2.8 | kernel
+cell      comparison | UInt16 | USMALLINT | const/flat | 0 | 1024 | 0.3734 | 2.5 | kernel
+cell      arithmetic | UInt16 | USMALLINT | const/flat | 0 | 1024 | 0.4360 | 4.6 | kernel
+cell      comparison | UInt16 | USMALLINT | dict/const | 0 | 1024 | 1.3315 | 14.6 | kernel
+cell      arithmetic | UInt16 | USMALLINT | dict/const | 0 | 1024 | 89.6941 | 11.7 | oracle
+cell      comparison | UInt16 | USMALLINT | dict/flat | 0 | 1024 | 72.4325 | 6.0 | oracle
+cell      arithmetic | UInt16 | USMALLINT | dict/flat | 0 | 1024 | 91.5570 | 7.5 | oracle
+cell      comparison | UInt16 | USMALLINT | flat/flat | 1 | 1024 | 1.3969 | 9.6 | kernel
+cell      arithmetic | UInt16 | USMALLINT | flat/flat | 1 | 1024 | 1.6784 | 5.7 | kernel
+cell      comparison | UInt16 | USMALLINT | flat/const | 1 | 1024 | 1.4534 | 23.6 | kernel
+cell      arithmetic | UInt16 | USMALLINT | flat/const | 1 | 1024 | 1.8676 | 3.4 | kernel
+cell      comparison | UInt16 | USMALLINT | const/flat | 1 | 1024 | 1.7274 | 2.1 | kernel
+cell      arithmetic | UInt16 | USMALLINT | const/flat | 1 | 1024 | 1.8097 | 1.5 | kernel
+cell      comparison | UInt16 | USMALLINT | dict/const | 1 | 1024 | 1.5744 | 11.3 | kernel
+cell      arithmetic | UInt16 | USMALLINT | dict/const | 1 | 1024 | 92.5637 | 7.7 | oracle
+cell      comparison | UInt16 | USMALLINT | dict/flat | 1 | 1024 | 79.3784 | 16.1 | oracle
+cell      arithmetic | UInt16 | USMALLINT | dict/flat | 1 | 1024 | 89.8213 | 0.9 | oracle
+cell      comparison | UInt16 | USMALLINT | flat/flat | 50 | 1024 | 1.5306 | 1.2 | kernel
+cell      arithmetic | UInt16 | USMALLINT | flat/flat | 50 | 1024 | 1.7022 | 3.4 | kernel
+cell      comparison | UInt16 | USMALLINT | flat/const | 50 | 1024 | 1.5346 | 3.0 | kernel
+cell      arithmetic | UInt16 | USMALLINT | flat/const | 50 | 1024 | 1.8105 | 6.2 | kernel
+cell      comparison | UInt16 | USMALLINT | const/flat | 50 | 1024 | 1.7205 | 4.5 | kernel
+cell      arithmetic | UInt16 | USMALLINT | const/flat | 50 | 1024 | 2.4794 | 12.8 | kernel
+cell      comparison | UInt16 | USMALLINT | dict/const | 50 | 1024 | 1.5888 | 4.9 | kernel
+cell      arithmetic | UInt16 | USMALLINT | dict/const | 50 | 1024 | 84.9258 | 6.1 | oracle
+cell      comparison | UInt16 | USMALLINT | dict/flat | 50 | 1024 | 63.9919 | 6.3 | oracle
+cell      arithmetic | UInt16 | USMALLINT | dict/flat | 50 | 1024 | 79.0928 | 7.9 | oracle
+cell      comparison | UInt32 | UINTEGER | flat/flat | 0 | 1024 | 0.4349 | 23.6 | kernel
+cell      arithmetic | UInt32 | UINTEGER | flat/flat | 0 | 1024 | 0.4727 | 15.7 | kernel
+cell      comparison | UInt32 | UINTEGER | flat/const | 0 | 1024 | 0.4500 | 2.5 | kernel
+cell      arithmetic | UInt32 | UINTEGER | flat/const | 0 | 1024 | 0.6134 | 4.7 | kernel
+cell      comparison | UInt32 | UINTEGER | const/flat | 0 | 1024 | 0.4563 | 6.2 | kernel
+cell      arithmetic | UInt32 | UINTEGER | const/flat | 0 | 1024 | 0.5278 | 3.6 | kernel
+cell      comparison | UInt32 | UINTEGER | dict/const | 0 | 1024 | 1.3869 | 3.1 | kernel
+cell      arithmetic | UInt32 | UINTEGER | dict/const | 0 | 1024 | 85.0988 | 4.6 | oracle
+cell      comparison | UInt32 | UINTEGER | dict/flat | 0 | 1024 | 79.5808 | 4.2 | oracle
+cell      arithmetic | UInt32 | UINTEGER | dict/flat | 0 | 1024 | 99.9920 | 5.7 | oracle
+cell      comparison | UInt32 | UINTEGER | flat/flat | 1 | 1024 | 1.6297 | 2.3 | kernel
+cell      arithmetic | UInt32 | UINTEGER | flat/flat | 1 | 1024 | 1.7060 | 18.1 | kernel
+cell      comparison | UInt32 | UINTEGER | flat/const | 1 | 1024 | 2.3488 | 21.2 | kernel
+cell      arithmetic | UInt32 | UINTEGER | flat/const | 1 | 1024 | 1.9861 | 19.4 | kernel
+cell      comparison | UInt32 | UINTEGER | const/flat | 1 | 1024 | 1.5099 | 10.0 | kernel
+cell      arithmetic | UInt32 | UINTEGER | const/flat | 1 | 1024 | 1.7959 | 10.1 | kernel
+cell      comparison | UInt32 | UINTEGER | dict/const | 1 | 1024 | 1.3142 | 12.6 | kernel
+cell      arithmetic | UInt32 | UINTEGER | dict/const | 1 | 1024 | 80.9280 | 5.7 | oracle
+cell      comparison | UInt32 | UINTEGER | dict/flat | 1 | 1024 | 75.5713 | 9.6 | oracle
+cell      arithmetic | UInt32 | UINTEGER | dict/flat | 1 | 1024 | 87.0818 | 8.8 | oracle
+cell      comparison | UInt32 | UINTEGER | flat/flat | 50 | 1024 | 1.6200 | 4.7 | kernel
+cell      arithmetic | UInt32 | UINTEGER | flat/flat | 50 | 1024 | 1.8891 | 11.7 | kernel
+cell      comparison | UInt32 | UINTEGER | flat/const | 50 | 1024 | 1.7943 | 6.6 | kernel
+cell      arithmetic | UInt32 | UINTEGER | flat/const | 50 | 1024 | 1.8176 | 4.2 | kernel
+cell      comparison | UInt32 | UINTEGER | const/flat | 50 | 1024 | 1.8760 | 11.1 | kernel
+cell      arithmetic | UInt32 | UINTEGER | const/flat | 50 | 1024 | 1.8556 | 4.3 | kernel
+cell      comparison | UInt32 | UINTEGER | dict/const | 50 | 1024 | 1.4179 | 12.5 | kernel
+cell      arithmetic | UInt32 | UINTEGER | dict/const | 50 | 1024 | 80.2912 | 7.1 | oracle
+cell      comparison | UInt32 | UINTEGER | dict/flat | 50 | 1024 | 68.8461 | 11.5 | oracle
+cell      arithmetic | UInt32 | UINTEGER | dict/flat | 50 | 1024 | 76.3696 | 11.7 | oracle
+cell      comparison | UInt64 | UBIGINT | flat/flat | 0 | 1024 | 1.1095 | 11.1 | kernel
+cell      arithmetic | UInt64 | UBIGINT | flat/flat | 0 | 1024 | 1.2268 | 18.3 | kernel
+cell      comparison | UInt64 | UBIGINT | flat/const | 0 | 1024 | 1.2244 | 9.4 | kernel
+cell      arithmetic | UInt64 | UBIGINT | flat/const | 0 | 1024 | 1.1731 | 20.3 | kernel
+cell      comparison | UInt64 | UBIGINT | const/flat | 0 | 1024 | 1.3174 | 14.0 | kernel
+cell      arithmetic | UInt64 | UBIGINT | const/flat | 0 | 1024 | 1.1859 | 10.1 | kernel
+cell      comparison | UInt64 | UBIGINT | dict/const | 0 | 1024 | 1.4608 | 4.8 | kernel
+cell      arithmetic | UInt64 | UBIGINT | dict/const | 0 | 1024 | 98.2340 | 3.6 | oracle
+cell      comparison | UInt64 | UBIGINT | dict/flat | 0 | 1024 | 81.9205 | 5.8 | oracle
+cell      arithmetic | UInt64 | UBIGINT | dict/flat | 0 | 1024 | 96.6253 | 3.0 | oracle
+cell      comparison | UInt64 | UBIGINT | flat/flat | 1 | 1024 | 2.2595 | 6.9 | kernel
+cell      arithmetic | UInt64 | UBIGINT | flat/flat | 1 | 1024 | 2.3829 | 16.1 | kernel
+cell      comparison | UInt64 | UBIGINT | flat/const | 1 | 1024 | 2.2701 | 9.7 | kernel
+cell      arithmetic | UInt64 | UBIGINT | flat/const | 1 | 1024 | 2.3922 | 11.0 | kernel
+cell      comparison | UInt64 | UBIGINT | const/flat | 1 | 1024 | 2.2052 | 8.7 | kernel
+cell      arithmetic | UInt64 | UBIGINT | const/flat | 1 | 1024 | 2.3838 | 8.4 | kernel
+cell      comparison | UInt64 | UBIGINT | dict/const | 1 | 1024 | 1.4967 | 3.5 | kernel
+cell      arithmetic | UInt64 | UBIGINT | dict/const | 1 | 1024 | 89.9965 | 5.1 | oracle
+cell      comparison | UInt64 | UBIGINT | dict/flat | 1 | 1024 | 70.4839 | 8.9 | oracle
+cell      arithmetic | UInt64 | UBIGINT | dict/flat | 1 | 1024 | 89.3978 | 17.8 | oracle
+cell      comparison | UInt64 | UBIGINT | flat/flat | 50 | 1024 | 2.2914 | 5.1 | kernel
+cell      arithmetic | UInt64 | UBIGINT | flat/flat | 50 | 1024 | 2.4239 | 6.6 | kernel
+cell      comparison | UInt64 | UBIGINT | flat/const | 50 | 1024 | 2.3151 | 5.5 | kernel
+cell      arithmetic | UInt64 | UBIGINT | flat/const | 50 | 1024 | 2.5120 | 4.9 | kernel
+cell      comparison | UInt64 | UBIGINT | const/flat | 50 | 1024 | 2.4438 | 15.9 | kernel
+cell      arithmetic | UInt64 | UBIGINT | const/flat | 50 | 1024 | 2.6716 | 8.8 | kernel
+cell      comparison | UInt64 | UBIGINT | dict/const | 50 | 1024 | 1.5821 | 6.8 | kernel
+cell      arithmetic | UInt64 | UBIGINT | dict/const | 50 | 1024 | 79.0769 | 1.5 | oracle
+cell      comparison | UInt64 | UBIGINT | dict/flat | 50 | 1024 | 62.6913 | 11.9 | oracle
+cell      arithmetic | UInt64 | UBIGINT | dict/flat | 50 | 1024 | 77.1927 | 3.5 | oracle
+cell      comparison | UInt128 | UHUGEINT | flat/flat | 0 | 1024 | 1.4159 | 5.2 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | flat/flat | 0 | 1024 | 1.7384 | 3.1 | kernel
+cell      comparison | UInt128 | UHUGEINT | flat/const | 0 | 1024 | 1.2323 | 6.5 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | flat/const | 0 | 1024 | 1.8530 | 7.7 | kernel
+cell      comparison | UInt128 | UHUGEINT | const/flat | 0 | 1024 | 1.5075 | 6.7 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | const/flat | 0 | 1024 | 2.0745 | 24.8 | kernel
+cell      comparison | UInt128 | UHUGEINT | dict/const | 0 | 1024 | 1.6263 | 7.6 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | dict/const | 0 | 1024 | 80.2728 | 9.0 | oracle
+cell      comparison | UInt128 | UHUGEINT | dict/flat | 0 | 1024 | 70.8819 | 10.0 | oracle
+cell      arithmetic | UInt128 | UHUGEINT | dict/flat | 0 | 1024 | 91.2888 | 3.4 | oracle
+cell      comparison | UInt128 | UHUGEINT | flat/flat | 1 | 1024 | 2.8965 | 14.8 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | flat/flat | 1 | 1024 | 2.9205 | 6.5 | kernel
+cell      comparison | UInt128 | UHUGEINT | flat/const | 1 | 1024 | 2.5625 | 6.6 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | flat/const | 1 | 1024 | 2.9986 | 8.6 | kernel
+cell      comparison | UInt128 | UHUGEINT | const/flat | 1 | 1024 | 2.4114 | 5.4 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | const/flat | 1 | 1024 | 2.7673 | 5.7 | kernel
+cell      comparison | UInt128 | UHUGEINT | dict/const | 1 | 1024 | 1.7583 | 10.7 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | dict/const | 1 | 1024 | 85.8087 | 2.3 | oracle
+cell      comparison | UInt128 | UHUGEINT | dict/flat | 1 | 1024 | 120.4283 | 24.8 | oracle
+cell      arithmetic | UInt128 | UHUGEINT | dict/flat | 1 | 1024 | 138.6573 | 16.8 | oracle
+cell      comparison | UInt128 | UHUGEINT | flat/flat | 50 | 1024 | 3.1322 | 3.6 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | flat/flat | 50 | 1024 | 3.4300 | 21.4 | kernel
+cell      comparison | UInt128 | UHUGEINT | flat/const | 50 | 1024 | 2.3311 | 10.8 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | flat/const | 50 | 1024 | 2.7531 | 10.1 | kernel
+cell      comparison | UInt128 | UHUGEINT | const/flat | 50 | 1024 | 2.5796 | 23.6 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | const/flat | 50 | 1024 | 2.8784 | 9.0 | kernel
+cell      comparison | UInt128 | UHUGEINT | dict/const | 50 | 1024 | 1.5877 | 17.2 | kernel
+cell      arithmetic | UInt128 | UHUGEINT | dict/const | 50 | 1024 | 83.0093 | 6.8 | oracle
+cell      comparison | UInt128 | UHUGEINT | dict/flat | 50 | 1024 | 70.0153 | 6.1 | oracle
+cell      arithmetic | UInt128 | UHUGEINT | dict/flat | 50 | 1024 | 86.4444 | 2.8 | oracle
+cell      comparison | Float32 | FLOAT | flat/flat | 0 | 1024 | 0.7573 | 20.5 | kernel
+cell      arithmetic | Float32 | FLOAT | flat/flat | 0 | 1024 | 1.9616 | 16.4 | kernel
+cell      comparison | Float32 | FLOAT | flat/const | 0 | 1024 | 0.6746 | 5.0 | kernel
+cell      arithmetic | Float32 | FLOAT | flat/const | 0 | 1024 | 2.1141 | 9.4 | kernel
+cell      comparison | Float32 | FLOAT | const/flat | 0 | 1024 | 0.7275 | 532.9 | kernel
+cell      arithmetic | Float32 | FLOAT | const/flat | 0 | 1024 | 1.9757 | 1.7 | kernel
+cell      comparison | Float32 | FLOAT | dict/const | 0 | 1024 | 3.1551 | 1.9 | kernel
+cell      arithmetic | Float32 | FLOAT | dict/const | 0 | 1024 | 81.0549 | 1.8 | oracle
+cell      comparison | Float32 | FLOAT | dict/flat | 0 | 1024 | 86.1065 | 3.9 | oracle
+cell      arithmetic | Float32 | FLOAT | dict/flat | 0 | 1024 | 85.3152 | 3.6 | oracle
+cell      comparison | Float32 | FLOAT | flat/flat | 1 | 1024 | 1.7025 | 4.2 | kernel
+cell      arithmetic | Float32 | FLOAT | flat/flat | 1 | 1024 | 3.3273 | 1.8 | kernel
+cell      comparison | Float32 | FLOAT | flat/const | 1 | 1024 | 1.8243 | 2.9 | kernel
+cell      arithmetic | Float32 | FLOAT | flat/const | 1 | 1024 | 3.2555 | 2.9 | kernel
+cell      comparison | Float32 | FLOAT | const/flat | 1 | 1024 | 1.8743 | 9.1 | kernel
+cell      arithmetic | Float32 | FLOAT | const/flat | 1 | 1024 | 3.2515 | 6.3 | kernel
+cell      comparison | Float32 | FLOAT | dict/const | 1 | 1024 | 3.3045 | 11.9 | kernel
+cell      arithmetic | Float32 | FLOAT | dict/const | 1 | 1024 | 94.4684 | 4.2 | oracle
+cell      comparison | Float32 | FLOAT | dict/flat | 1 | 1024 | 89.6957 | 5.6 | oracle
+cell      arithmetic | Float32 | FLOAT | dict/flat | 1 | 1024 | 87.1859 | 3.5 | oracle
+cell      comparison | Float32 | FLOAT | flat/flat | 50 | 1024 | 1.8275 | 9.3 | kernel
+cell      arithmetic | Float32 | FLOAT | flat/flat | 50 | 1024 | 3.3520 | 5.7 | kernel
+cell      comparison | Float32 | FLOAT | flat/const | 50 | 1024 | 3.1856 | 37.1 | kernel
+cell      arithmetic | Float32 | FLOAT | flat/const | 50 | 1024 | 3.4184 | 12.1 | kernel
+cell      comparison | Float32 | FLOAT | const/flat | 50 | 1024 | 2.0702 | 17.6 | kernel
+cell      arithmetic | Float32 | FLOAT | const/flat | 50 | 1024 | 3.5339 | 1.3 | kernel
+cell      comparison | Float32 | FLOAT | dict/const | 50 | 1024 | 3.2449 | 2.9 | kernel
+cell      arithmetic | Float32 | FLOAT | dict/const | 50 | 1024 | 78.4144 | 11.3 | oracle
+cell      comparison | Float32 | FLOAT | dict/flat | 50 | 1024 | 76.6914 | 32.6 | oracle
+cell      arithmetic | Float32 | FLOAT | dict/flat | 50 | 1024 | 79.2107 | 18.4 | oracle
+cell      comparison | Float64 | DOUBLE | flat/flat | 0 | 1024 | 3.5104 | 7.7 | kernel
+cell      arithmetic | Float64 | DOUBLE | flat/flat | 0 | 1024 | 2.0746 | 5.6 | kernel
+cell      comparison | Float64 | DOUBLE | flat/const | 0 | 1024 | 3.1678 | 9.3 | kernel
+cell      arithmetic | Float64 | DOUBLE | flat/const | 0 | 1024 | 0.8054 | 4.7 | kernel
+cell      comparison | Float64 | DOUBLE | const/flat | 0 | 1024 | 2.8028 | 6.2 | kernel
+cell      arithmetic | Float64 | DOUBLE | const/flat | 0 | 1024 | 0.7681 | 10.8 | kernel
+cell      comparison | Float64 | DOUBLE | dict/const | 0 | 1024 | 4.1380 | 15.7 | kernel
+cell      arithmetic | Float64 | DOUBLE | dict/const | 0 | 1024 | 81.5446 | 2.5 | oracle
+cell      comparison | Float64 | DOUBLE | dict/flat | 0 | 1024 | 88.2153 | 3.2 | oracle
+cell      arithmetic | Float64 | DOUBLE | dict/flat | 0 | 1024 | 88.1062 | 4.0 | oracle
+cell      comparison | Float64 | DOUBLE | flat/flat | 1 | 1024 | 4.9858 | 8.8 | kernel
+cell      arithmetic | Float64 | DOUBLE | flat/flat | 1 | 1024 | 3.3935 | 2.1 | kernel
+cell      comparison | Float64 | DOUBLE | flat/const | 1 | 1024 | 4.3374 | 1.1 | kernel
+cell      arithmetic | Float64 | DOUBLE | flat/const | 1 | 1024 | 2.2437 | 4.2 | kernel
+cell      comparison | Float64 | DOUBLE | const/flat | 1 | 1024 | 4.3537 | 2.2 | kernel
+cell      arithmetic | Float64 | DOUBLE | const/flat | 1 | 1024 | 2.1627 | 1.7 | kernel
+cell      comparison | Float64 | DOUBLE | dict/const | 1 | 1024 | 3.9955 | 6.8 | kernel
+cell      arithmetic | Float64 | DOUBLE | dict/const | 1 | 1024 | 101.9500 | 20.4 | oracle
+cell      comparison | Float64 | DOUBLE | dict/flat | 1 | 1024 | 85.3653 | 7.5 | oracle
+cell      arithmetic | Float64 | DOUBLE | dict/flat | 1 | 1024 | 92.1481 | 13.9 | oracle
+cell      comparison | Float64 | DOUBLE | flat/flat | 50 | 1024 | 4.7510 | 3.9 | kernel
+cell      arithmetic | Float64 | DOUBLE | flat/flat | 50 | 1024 | 3.1123 | 3.5 | kernel
+cell      comparison | Float64 | DOUBLE | flat/const | 50 | 1024 | 5.5710 | 29.2 | kernel
+cell      arithmetic | Float64 | DOUBLE | flat/const | 50 | 1024 | 2.1561 | 5.3 | kernel
+cell      comparison | Float64 | DOUBLE | const/flat | 50 | 1024 | 4.8573 | 21.6 | kernel
+cell      arithmetic | Float64 | DOUBLE | const/flat | 50 | 1024 | 3.0353 | 24.0 | kernel
+cell      comparison | Float64 | DOUBLE | dict/const | 50 | 1024 | 4.2062 | 14.1 | kernel
+cell      arithmetic | Float64 | DOUBLE | dict/const | 50 | 1024 | 77.4502 | 4.6 | oracle
+cell      comparison | Float64 | DOUBLE | dict/flat | 50 | 1024 | 78.2756 | 5.9 | oracle
+cell      arithmetic | Float64 | DOUBLE | dict/flat | 50 | 1024 | 95.5945 | 10.8 | oracle
+cell      comparison | Interval | INTERVAL | flat/flat | 0 | 1024 | 1.4601 | 14.9 | kernel
+cell      comparison | Interval | INTERVAL | flat/const | 0 | 1024 | 1.4141 | 6.7 | kernel
+cell      comparison | Interval | INTERVAL | const/flat | 0 | 1024 | 1.6059 | 3.1 | kernel
+cell      comparison | Interval | INTERVAL | dict/const | 0 | 1024 | 1.5286 | 3.5 | kernel
+cell      comparison | Interval | INTERVAL | dict/flat | 0 | 1024 | 72.5995 | 5.1 | oracle
+cell      comparison | Interval | INTERVAL | flat/flat | 1 | 1024 | 2.5368 | 13.9 | kernel
+cell      comparison | Interval | INTERVAL | flat/const | 1 | 1024 | 2.3763 | 4.3 | kernel
+cell      comparison | Interval | INTERVAL | const/flat | 1 | 1024 | 2.7275 | 10.1 | kernel
+cell      comparison | Interval | INTERVAL | dict/const | 1 | 1024 | 1.6262 | 5.9 | kernel
+cell      comparison | Interval | INTERVAL | dict/flat | 1 | 1024 | 73.7715 | 8.2 | oracle
+cell      comparison | Interval | INTERVAL | flat/flat | 50 | 1024 | 2.6140 | 6.3 | kernel
+cell      comparison | Interval | INTERVAL | flat/const | 50 | 1024 | 2.4848 | 2.2 | kernel
+cell      comparison | Interval | INTERVAL | const/flat | 50 | 1024 | 2.7990 | 3.5 | kernel
+cell      comparison | Interval | INTERVAL | dict/const | 50 | 1024 | 1.7282 | 12.6 | kernel
+cell      comparison | Interval | INTERVAL | dict/flat | 50 | 1024 | 69.0635 | 33.4 | oracle
+cell      comparison | Varlen | VARCHAR | flat/flat | 0 | 1024 | 4.9227 | 10.3 | kernel
+cell      comparison | Varlen | VARCHAR | flat/const | 0 | 1024 | 5.6290 | 10.6 | kernel
+cell      comparison | Varlen | VARCHAR | const/flat | 0 | 1024 | 5.2447 | 9.7 | kernel
+cell      comparison | Varlen | VARCHAR | dict/const | 0 | 1024 | 5.4176 | 12.5 | kernel
+cell      comparison | Varlen | VARCHAR | dict/flat | 0 | 1024 | 155.8145 | 0.4 | oracle
+cell      comparison | Varlen | VARCHAR | flat/flat | 1 | 1024 | 6.6174 | 10.4 | kernel
+cell      comparison | Varlen | VARCHAR | flat/const | 1 | 1024 | 6.1130 | 5.3 | kernel
+cell      comparison | Varlen | VARCHAR | const/flat | 1 | 1024 | 7.0451 | 22.0 | kernel
+cell      comparison | Varlen | VARCHAR | dict/const | 1 | 1024 | 5.4922 | 6.3 | kernel
+cell      comparison | Varlen | VARCHAR | dict/flat | 1 | 1024 | 153.6685 | 12.2 | oracle
+cell      comparison | Varlen | VARCHAR | flat/flat | 50 | 1024 | 6.0959 | 3.2 | kernel
+cell      comparison | Varlen | VARCHAR | flat/const | 50 | 1024 | 6.6600 | 12.3 | kernel
+cell      comparison | Varlen | VARCHAR | const/flat | 50 | 1024 | 6.8257 | 4.9 | kernel
+cell      comparison | Varlen | VARCHAR | dict/const | 50 | 1024 | 5.8918 | 7.5 | kernel
+cell      comparison | Varlen | VARCHAR | dict/flat | 50 | 1024 | 103.6017 | 7.4 | oracle
+cell      strings | prefix decides, inline | VARCHAR | flat/flat | 0 | 1024 | 4.9875 | 10.2 | kernel
+cell      strings | prefix decides, inline | VARCHAR | flat/const | 0 | 1024 | 5.3896 | 3.4 | kernel
+cell      strings | prefix decides, inline | VARCHAR | const/flat | 0 | 1024 | 5.1189 | 8.3 | kernel
+cell      strings | prefix decides, inline | VARCHAR | dict/const | 0 | 1024 | 6.3879 | 4.0 | kernel
+cell      strings | prefix decides, inline | VARCHAR | dict/flat | 0 | 1024 | 159.4520 | 1.8 | oracle
+cell      strings | prefix decides, inline | VARCHAR | flat/flat | 1 | 1024 | 6.6698 | 7.7 | kernel
+cell      strings | prefix decides, inline | VARCHAR | flat/const | 1 | 1024 | 6.7208 | 6.7 | kernel
+cell      strings | prefix decides, inline | VARCHAR | const/flat | 1 | 1024 | 6.6616 | 3.8 | kernel
+cell      strings | prefix decides, inline | VARCHAR | dict/const | 1 | 1024 | 5.7663 | 4.8 | kernel
+cell      strings | prefix decides, inline | VARCHAR | dict/flat | 1 | 1024 | 155.5793 | 10.7 | oracle
+cell      strings | prefix decides, inline | VARCHAR | flat/flat | 50 | 1024 | 5.6529 | 3.1 | kernel
+cell      strings | prefix decides, inline | VARCHAR | flat/const | 50 | 1024 | 6.9604 | 5.5 | kernel
+cell      strings | prefix decides, inline | VARCHAR | const/flat | 50 | 1024 | 6.5280 | 5.0 | kernel
+cell      strings | prefix decides, inline | VARCHAR | dict/const | 50 | 1024 | 5.9614 | 7.8 | kernel
+cell      strings | prefix decides, inline | VARCHAR | dict/flat | 50 | 1024 | 103.4744 | 3.7 | oracle
+cell      strings | prefix ties, inline | VARCHAR | flat/flat | 0 | 1024 | 11.9374 | 7.9 | kernel
+cell      strings | prefix ties, inline | VARCHAR | flat/const | 0 | 1024 | 11.9599 | 2.2 | kernel
+cell      strings | prefix ties, inline | VARCHAR | const/flat | 0 | 1024 | 13.0817 | 8.8 | kernel
+cell      strings | prefix ties, inline | VARCHAR | dict/const | 0 | 1024 | 13.0092 | 20.7 | kernel
+cell      strings | prefix ties, inline | VARCHAR | dict/flat | 0 | 1024 | 189.6379 | 11.9 | oracle
+cell      strings | prefix ties, inline | VARCHAR | flat/flat | 1 | 1024 | 22.4124 | 48.4 | kernel
+cell      strings | prefix ties, inline | VARCHAR | flat/const | 1 | 1024 | 15.1805 | 3.0 | kernel
+cell      strings | prefix ties, inline | VARCHAR | const/flat | 1 | 1024 | 13.1169 | 4.4 | kernel
+cell      strings | prefix ties, inline | VARCHAR | dict/const | 1 | 1024 | 11.7929 | 8.1 | kernel
+cell      strings | prefix ties, inline | VARCHAR | dict/flat | 1 | 1024 | 156.6178 | 8.9 | oracle
+cell      strings | prefix ties, inline | VARCHAR | flat/flat | 50 | 1024 | 13.0980 | 7.7 | kernel
+cell      strings | prefix ties, inline | VARCHAR | flat/const | 50 | 1024 | 14.7998 | 9.7 | kernel
+cell      strings | prefix ties, inline | VARCHAR | const/flat | 50 | 1024 | 12.1414 | 9.8 | kernel
+cell      strings | prefix ties, inline | VARCHAR | dict/const | 50 | 1024 | 12.9332 | 15.9 | kernel
+cell      strings | prefix ties, inline | VARCHAR | dict/flat | 50 | 1024 | 126.6592 | 5.8 | oracle
+cell      strings | prefix decides, arena | VARCHAR | flat/flat | 0 | 1024 | 4.9098 | 7.1 | kernel
+cell      strings | prefix decides, arena | VARCHAR | flat/const | 0 | 1024 | 6.2198 | 8.6 | kernel
+cell      strings | prefix decides, arena | VARCHAR | const/flat | 0 | 1024 | 6.0836 | 15.4 | kernel
+cell      strings | prefix decides, arena | VARCHAR | dict/const | 0 | 1024 | 5.9965 | 8.1 | kernel
+cell      strings | prefix decides, arena | VARCHAR | dict/flat | 0 | 1024 | 197.8786 | 10.6 | oracle
+cell      strings | prefix decides, arena | VARCHAR | flat/flat | 1 | 1024 | 6.1421 | 9.5 | kernel
+cell      strings | prefix decides, arena | VARCHAR | flat/const | 1 | 1024 | 6.5799 | 8.1 | kernel
+cell      strings | prefix decides, arena | VARCHAR | const/flat | 1 | 1024 | 6.6142 | 10.5 | kernel
+cell      strings | prefix decides, arena | VARCHAR | dict/const | 1 | 1024 | 5.9001 | 8.5 | kernel
+cell      strings | prefix decides, arena | VARCHAR | dict/flat | 1 | 1024 | 201.0397 | 12.8 | oracle
+cell      strings | prefix decides, arena | VARCHAR | flat/flat | 50 | 1024 | 6.4131 | 9.8 | kernel
+cell      strings | prefix decides, arena | VARCHAR | flat/const | 50 | 1024 | 6.2227 | 11.9 | kernel
+cell      strings | prefix decides, arena | VARCHAR | const/flat | 50 | 1024 | 6.1245 | 3.6 | kernel
+cell      strings | prefix decides, arena | VARCHAR | dict/const | 50 | 1024 | 5.6200 | 7.5 | kernel
+cell      strings | prefix decides, arena | VARCHAR | dict/flat | 50 | 1024 | 131.4348 | 4.8 | oracle
+cell      strings | prefix ties, arena | VARCHAR | flat/flat | 0 | 1024 | 19.9930 | 44.5 | kernel
+cell      strings | prefix ties, arena | VARCHAR | flat/const | 0 | 1024 | 12.9838 | 2.3 | kernel
+cell      strings | prefix ties, arena | VARCHAR | const/flat | 0 | 1024 | 13.2624 | 3.6 | kernel
+cell      strings | prefix ties, arena | VARCHAR | dict/const | 0 | 1024 | 13.9857 | 1.5 | kernel
+cell      strings | prefix ties, arena | VARCHAR | dict/flat | 0 | 1024 | 157.9511 | 12.6 | oracle
+cell      strings | prefix ties, arena | VARCHAR | flat/flat | 1 | 1024 | 13.0925 | 13.5 | kernel
+cell      strings | prefix ties, arena | VARCHAR | flat/const | 1 | 1024 | 15.2474 | 18.7 | kernel
+cell      strings | prefix ties, arena | VARCHAR | const/flat | 1 | 1024 | 14.6351 | 11.6 | kernel
+cell      strings | prefix ties, arena | VARCHAR | dict/const | 1 | 1024 | 12.6252 | 5.3 | kernel
+cell      strings | prefix ties, arena | VARCHAR | dict/flat | 1 | 1024 | 164.7282 | 4.4 | oracle
+cell      strings | prefix ties, arena | VARCHAR | flat/flat | 50 | 1024 | 13.0868 | 5.4 | kernel
+cell      strings | prefix ties, arena | VARCHAR | flat/const | 50 | 1024 | 15.3283 | 3.7 | kernel
+cell      strings | prefix ties, arena | VARCHAR | const/flat | 50 | 1024 | 15.0918 | 5.3 | kernel
+cell      strings | prefix ties, arena | VARCHAR | dict/const | 50 | 1024 | 13.4482 | 10.9 | kernel
+cell      strings | prefix ties, arena | VARCHAR | dict/flat | 50 | 1024 | 121.8813 | 12.1 | oracle
+cell      compaction | 1 bigint | 0.1 | select build | 0 | 3 | 131.9153 | 3.8 | kernel
+cell      compaction | 1 bigint | 0.1 | select pass | 0 | 3 | 89.5238 | 15.7 | kernel
+cell      compaction | 1 bigint | 0.1 | compact build | 0 | 3 | 186.0610 | 9.3 | kernel
+cell      compaction | 1 bigint | 0.1 | compact pass | 0 | 3 | 76.2606 | 5.2 | kernel
+cell      compaction | 1 bigint | 1 | select build | 0 | 11 | 38.1139 | 8.4 | kernel
+cell      compaction | 1 bigint | 1 | select pass | 0 | 11 | 24.1969 | 6.6 | kernel
+cell      compaction | 1 bigint | 1 | compact build | 0 | 11 | 56.4325 | 6.4 | kernel
+cell      compaction | 1 bigint | 1 | compact pass | 0 | 11 | 22.1628 | 7.7 | kernel
+cell      compaction | 1 bigint | 5 | select build | 0 | 49 | 10.1945 | 15.7 | kernel
+cell      compaction | 1 bigint | 5 | select pass | 0 | 49 | 6.1018 | 3.7 | kernel
+cell      compaction | 1 bigint | 5 | compact build | 0 | 49 | 16.3975 | 24.1 | kernel
+cell      compaction | 1 bigint | 5 | compact pass | 0 | 49 | 5.3442 | 12.5 | kernel
+cell      compaction | 1 bigint | 10 | select build | 0 | 100 | 7.1121 | 3.4 | kernel
+cell      compaction | 1 bigint | 10 | select pass | 0 | 100 | 3.8699 | 15.8 | kernel
+cell      compaction | 1 bigint | 10 | compact build | 0 | 100 | 10.2384 | 9.1 | kernel
+cell      compaction | 1 bigint | 10 | compact pass | 0 | 100 | 3.2066 | 7.6 | kernel
+cell      compaction | 1 bigint | 25 | select build | 0 | 255 | 3.6077 | 9.2 | kernel
+cell      compaction | 1 bigint | 25 | select pass | 0 | 255 | 2.4268 | 14.9 | kernel
+cell      compaction | 1 bigint | 25 | compact build | 0 | 255 | 8.2850 | 14.0 | kernel
+cell      compaction | 1 bigint | 25 | compact pass | 0 | 255 | 2.1305 | 12.1 | kernel
+cell      compaction | 1 bigint | 50 | select build | 0 | 514 | 3.6036 | 19.7 | kernel
+cell      compaction | 1 bigint | 50 | select pass | 0 | 514 | 1.5082 | 5.2 | kernel
+cell      compaction | 1 bigint | 50 | compact build | 0 | 514 | 6.0449 | 7.0 | kernel
+cell      compaction | 1 bigint | 50 | compact pass | 0 | 514 | 1.3995 | 9.8 | kernel
+cell      compaction | 1 bigint | 75 | select build | 0 | 765 | 2.7581 | 9.8 | kernel
+cell      compaction | 1 bigint | 75 | select pass | 0 | 765 | 1.5943 | 5.4 | kernel
+cell      compaction | 1 bigint | 75 | compact build | 0 | 765 | 5.3610 | 5.2 | kernel
+cell      compaction | 1 bigint | 75 | compact pass | 0 | 765 | 1.2730 | 6.7 | kernel
+cell      compaction | 1 bigint | 100 | select build | 0 | 1024 | 2.5297 | 5.2 | kernel
+cell      compaction | 1 bigint | 100 | select pass | 0 | 1024 | 1.4321 | 7.6 | kernel
+cell      compaction | 1 bigint | 100 | compact build | 0 | 1024 | 5.6995 | 13.6 | kernel
+cell      compaction | 1 bigint | 100 | compact pass | 0 | 1024 | 1.1513 | 16.2 | kernel
+cell      compaction | 2 bigint | 0.1 | select build | 0 | 3 | 302.0378 | 2.2 | kernel
+cell      compaction | 2 bigint | 0.1 | select pass | 0 | 3 | 175.3283 | 12.8 | kernel
+cell      compaction | 2 bigint | 0.1 | compact build | 0 | 3 | 400.8558 | 4.7 | kernel
+cell      compaction | 2 bigint | 0.1 | compact pass | 0 | 3 | 170.1038 | 12.2 | kernel
+cell      compaction | 2 bigint | 1 | select build | 0 | 11 | 72.3406 | 5.9 | kernel
+cell      compaction | 2 bigint | 1 | select pass | 0 | 11 | 49.3560 | 5.6 | kernel
+cell      compaction | 2 bigint | 1 | compact build | 0 | 11 | 123.1907 | 7.7 | kernel
+cell      compaction | 2 bigint | 1 | compact pass | 0 | 11 | 43.9982 | 11.2 | kernel
+cell      compaction | 2 bigint | 5 | select build | 0 | 49 | 21.8949 | 11.7 | kernel
+cell      compaction | 2 bigint | 5 | select pass | 0 | 49 | 12.4381 | 3.8 | kernel
+cell      compaction | 2 bigint | 5 | compact build | 0 | 49 | 33.6076 | 21.9 | kernel
+cell      compaction | 2 bigint | 5 | compact pass | 0 | 49 | 12.6021 | 25.1 | kernel
+cell      compaction | 2 bigint | 10 | select build | 0 | 100 | 13.6831 | 17.9 | kernel
+cell      compaction | 2 bigint | 10 | select pass | 0 | 100 | 8.7496 | 10.2 | kernel
+cell      compaction | 2 bigint | 10 | compact build | 0 | 100 | 21.7563 | 12.0 | kernel
+cell      compaction | 2 bigint | 10 | compact pass | 0 | 100 | 7.1943 | 6.4 | kernel
+cell      compaction | 2 bigint | 25 | select build | 0 | 255 | 7.0897 | 21.7 | kernel
+cell      compaction | 2 bigint | 25 | select pass | 0 | 255 | 4.9491 | 3.1 | kernel
+cell      compaction | 2 bigint | 25 | compact build | 0 | 255 | 15.2875 | 1.9 | kernel
+cell      compaction | 2 bigint | 25 | compact pass | 0 | 255 | 4.1893 | 11.9 | kernel
+cell      compaction | 2 bigint | 50 | select build | 0 | 514 | 4.9432 | 11.7 | kernel
+cell      compaction | 2 bigint | 50 | select pass | 0 | 514 | 3.4246 | 2.3 | kernel
+cell      compaction | 2 bigint | 50 | compact build | 0 | 514 | 12.7547 | 3.5 | kernel
+cell      compaction | 2 bigint | 50 | compact pass | 0 | 514 | 3.0054 | 8.3 | kernel
+cell      compaction | 2 bigint | 75 | select build | 0 | 765 | 4.3259 | 17.2 | kernel
+cell      compaction | 2 bigint | 75 | select pass | 0 | 765 | 2.9007 | 11.5 | kernel
+cell      compaction | 2 bigint | 75 | compact build | 0 | 765 | 11.8678 | 4.9 | kernel
+cell      compaction | 2 bigint | 75 | compact pass | 0 | 765 | 2.6101 | 11.4 | kernel
+cell      compaction | 2 bigint | 100 | select build | 0 | 1024 | 4.1568 | 10.5 | kernel
+cell      compaction | 2 bigint | 100 | select pass | 0 | 1024 | 2.7727 | 14.2 | kernel
+cell      compaction | 2 bigint | 100 | compact build | 0 | 1024 | 10.2170 | 11.2 | kernel
+cell      compaction | 2 bigint | 100 | compact pass | 0 | 1024 | 2.5823 | 8.8 | kernel
+cell      compaction | 4 bigint | 0.1 | select build | 0 | 3 | 568.9704 | 8.0 | kernel
+cell      compaction | 4 bigint | 0.1 | select pass | 0 | 3 | 319.4296 | 11.4 | kernel
+cell      compaction | 4 bigint | 0.1 | compact build | 0 | 3 | 719.9962 | 10.8 | kernel
+cell      compaction | 4 bigint | 0.1 | compact pass | 0 | 3 | 330.9413 | 3.1 | kernel
+cell      compaction | 4 bigint | 1 | select build | 0 | 11 | 150.8056 | 4.5 | kernel
+cell      compaction | 4 bigint | 1 | select pass | 0 | 11 | 92.9224 | 6.9 | kernel
+cell      compaction | 4 bigint | 1 | compact build | 0 | 11 | 208.1356 | 6.4 | kernel
+cell      compaction | 4 bigint | 1 | compact pass | 0 | 11 | 88.0852 | 18.8 | kernel
+cell      compaction | 4 bigint | 5 | select build | 0 | 49 | 40.9451 | 2.4 | kernel
+cell      compaction | 4 bigint | 5 | select pass | 0 | 49 | 24.9332 | 6.9 | kernel
+cell      compaction | 4 bigint | 5 | compact build | 0 | 49 | 60.7956 | 4.6 | kernel
+cell      compaction | 4 bigint | 5 | compact pass | 0 | 49 | 24.3738 | 9.6 | kernel
+cell      compaction | 4 bigint | 10 | select build | 0 | 100 | 22.5416 | 18.5 | kernel
+cell      compaction | 4 bigint | 10 | select pass | 0 | 100 | 17.3560 | 10.3 | kernel
+cell      compaction | 4 bigint | 10 | compact build | 0 | 100 | 42.1494 | 17.1 | kernel
+cell      compaction | 4 bigint | 10 | compact pass | 0 | 100 | 12.4060 | 3.1 | kernel
+cell      compaction | 4 bigint | 25 | select build | 0 | 255 | 11.7477 | 12.1 | kernel
+cell      compaction | 4 bigint | 25 | select pass | 0 | 255 | 8.6956 | 7.9 | kernel
+cell      compaction | 4 bigint | 25 | compact build | 0 | 255 | 29.6676 | 16.6 | kernel
+cell      compaction | 4 bigint | 25 | compact pass | 0 | 255 | 9.7966 | 1.0 | kernel
+cell      compaction | 4 bigint | 50 | select build | 0 | 514 | 11.7380 | 21.8 | kernel
+cell      compaction | 4 bigint | 50 | select pass | 0 | 514 | 8.0556 | 19.0 | kernel
+cell      compaction | 4 bigint | 50 | compact build | 0 | 514 | 24.6266 | 7.4 | kernel
+cell      compaction | 4 bigint | 50 | compact pass | 0 | 514 | 5.8285 | 5.4 | kernel
+cell      compaction | 4 bigint | 75 | select build | 0 | 765 | 8.1944 | 8.3 | kernel
+cell      compaction | 4 bigint | 75 | select pass | 0 | 765 | 5.9591 | 11.0 | kernel
+cell      compaction | 4 bigint | 75 | compact build | 0 | 765 | 20.8920 | 6.2 | kernel
+cell      compaction | 4 bigint | 75 | compact pass | 0 | 765 | 5.0661 | 3.9 | kernel
+cell      compaction | 4 bigint | 100 | select build | 0 | 1024 | 7.8053 | 6.8 | kernel
+cell      compaction | 4 bigint | 100 | select pass | 0 | 1024 | 6.2010 | 43.8 | kernel
+cell      compaction | 4 bigint | 100 | compact build | 0 | 1024 | 24.0389 | 8.9 | kernel
+cell      compaction | 4 bigint | 100 | compact pass | 0 | 1024 | 5.6046 | 9.3 | kernel
+cell      compaction | 2 bigint + varchar | 0.1 | select build | 0 | 3 | 664.6471 | 13.4 | kernel
+cell      compaction | 2 bigint + varchar | 0.1 | select pass | 0 | 3 | 270.1480 | 13.2 | kernel
+cell      compaction | 2 bigint + varchar | 0.1 | compact build | 0 | 3 | 709.0579 | 12.6 | kernel
+cell      compaction | 2 bigint + varchar | 0.1 | compact pass | 0 | 3 | 232.8457 | 5.5 | kernel
+cell      compaction | 2 bigint + varchar | 1 | select build | 0 | 11 | 147.0447 | 5.6 | kernel
+cell      compaction | 2 bigint + varchar | 1 | select pass | 0 | 11 | 78.0028 | 20.0 | kernel
+cell      compaction | 2 bigint + varchar | 1 | compact build | 0 | 11 | 211.4705 | 3.7 | kernel
+cell      compaction | 2 bigint + varchar | 1 | compact pass | 0 | 11 | 75.7975 | 12.5 | kernel
+cell      compaction | 2 bigint + varchar | 5 | select build | 0 | 49 | 36.1868 | 7.1 | kernel
+cell      compaction | 2 bigint + varchar | 5 | select pass | 0 | 49 | 22.3092 | 6.2 | kernel
+cell      compaction | 2 bigint + varchar | 5 | compact build | 0 | 49 | 70.0766 | 7.0 | kernel
+cell      compaction | 2 bigint + varchar | 5 | compact pass | 0 | 49 | 25.1851 | 39.2 | kernel
+cell      compaction | 2 bigint + varchar | 10 | select build | 0 | 100 | 25.2199 | 7.8 | kernel
+cell      compaction | 2 bigint + varchar | 10 | select pass | 0 | 100 | 17.7756 | 5.2 | kernel
+cell      compaction | 2 bigint + varchar | 10 | compact build | 0 | 100 | 55.1009 | 16.9 | kernel
+cell      compaction | 2 bigint + varchar | 10 | compact pass | 0 | 100 | 16.3514 | 10.8 | kernel
+cell      compaction | 2 bigint + varchar | 25 | select build | 0 | 255 | 11.5608 | 13.3 | kernel
+cell      compaction | 2 bigint + varchar | 25 | select pass | 0 | 255 | 11.6212 | 8.8 | kernel
+cell      compaction | 2 bigint + varchar | 25 | compact build | 0 | 255 | 38.1529 | 6.6 | kernel
+cell      compaction | 2 bigint + varchar | 25 | compact pass | 0 | 255 | 11.2967 | 4.8 | kernel
+cell      compaction | 2 bigint + varchar | 50 | select build | 0 | 514 | 8.6014 | 6.2 | kernel
+cell      compaction | 2 bigint + varchar | 50 | select pass | 0 | 514 | 9.9561 | 5.3 | kernel
+cell      compaction | 2 bigint + varchar | 50 | compact build | 0 | 514 | 32.6273 | 10.9 | kernel
+cell      compaction | 2 bigint + varchar | 50 | compact pass | 0 | 514 | 8.8158 | 9.9 | kernel
+cell      compaction | 2 bigint + varchar | 75 | select build | 0 | 765 | 6.7608 | 9.8 | kernel
+cell      compaction | 2 bigint + varchar | 75 | select pass | 0 | 765 | 8.9395 | 6.4 | kernel
+cell      compaction | 2 bigint + varchar | 75 | compact build | 0 | 765 | 34.3232 | 17.9 | kernel
+cell      compaction | 2 bigint + varchar | 75 | compact pass | 0 | 765 | 7.7302 | 3.6 | kernel
+cell      compaction | 2 bigint + varchar | 100 | select build | 0 | 1024 | 5.7521 | 21.1 | kernel
+cell      compaction | 2 bigint + varchar | 100 | select pass | 0 | 1024 | 8.4221 | 7.5 | kernel
+cell      compaction | 2 bigint + varchar | 100 | compact build | 0 | 1024 | 30.1494 | 6.9 | kernel
+cell      compaction | 2 bigint + varchar | 100 | compact pass | 0 | 1024 | 9.0328 | 0.9 | kernel
+cell      sizes | compare flat/flat | 256 | flat | 0 | 256 | 1.5916 | 11.0 | kernel
+cell      sizes | compare dict/const | 256 | flat | 0 | 256 | 2.4653 | 10.8 | kernel
+cell      sizes | add flat/flat | 256 | flat | 0 | 256 | 2.3505 | 5.1 | kernel
+cell      sizes | select then one pass | 256 | flat | 0 | 131 | 12.7309 | 5.3 | kernel
+cell      sizes | compact then one pass | 256 | flat | 0 | 131 | 22.1233 | 19.1 | kernel
+cell      sizes | compare flat/flat | 512 | flat | 0 | 512 | 1.3663 | 3.8 | kernel
+cell      sizes | compare dict/const | 512 | flat | 0 | 512 | 1.8795 | 3.7 | kernel
+cell      sizes | add flat/flat | 512 | flat | 0 | 512 | 1.7219 | 7.1 | kernel
+cell      sizes | select then one pass | 512 | flat | 0 | 257 | 10.5663 | 7.4 | kernel
+cell      sizes | compact then one pass | 512 | flat | 0 | 257 | 18.2030 | 5.2 | kernel
+cell      sizes | compare flat/flat | 1024 | flat | 0 | 1024 | 1.2316 | 16.7 | kernel
+cell      sizes | compare dict/const | 1024 | flat | 0 | 1024 | 1.4756 | 19.2 | kernel
+cell      sizes | add flat/flat | 1024 | flat | 0 | 1024 | 1.4220 | 9.3 | kernel
+cell      sizes | select then one pass | 1024 | flat | 0 | 514 | 9.6510 | 17.7 | kernel
+cell      sizes | compact then one pass | 1024 | flat | 0 | 514 | 14.8268 | 8.4 | kernel
+cell      sizes | compare flat/flat | 2048 | flat | 0 | 2048 | 1.0708 | 16.2 | kernel
+cell      sizes | compare dict/const | 2048 | flat | 0 | 2048 | 1.3957 | 16.2 | kernel
+cell      sizes | add flat/flat | 2048 | flat | 0 | 2048 | 1.5109 | 11.5 | kernel
+cell      sizes | select then one pass | 2048 | flat | 0 | 1023 | 6.2339 | 7.5 | kernel
+cell      sizes | compact then one pass | 2048 | flat | 0 | 1023 | 11.4906 | 5.2 | kernel
+cell      sizes | compare flat/flat | 4096 | flat | 0 | 4096 | 1.1688 | 4.7 | kernel
+cell      sizes | compare dict/const | 4096 | flat | 0 | 4096 | 1.1199 | 8.1 | kernel
+cell      sizes | add flat/flat | 4096 | flat | 0 | 4096 | 1.1043 | 1.3 | kernel
+cell      sizes | select then one pass | 4096 | flat | 0 | 2051 | 6.1090 | 5.2 | kernel
+cell      sizes | compact then one pass | 4096 | flat | 0 | 2051 | 10.1754 | 14.1 | kernel

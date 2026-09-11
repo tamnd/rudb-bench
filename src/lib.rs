@@ -28,6 +28,7 @@ pub mod answer;
 pub mod data;
 pub mod engine;
 pub mod fleet;
+pub mod kernels;
 pub mod ledger;
 pub mod machine;
 pub mod measure;
