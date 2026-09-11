@@ -159,9 +159,24 @@ fn every_engine_on_this_machine_gets_the_same_file_and_answers_the_same_thing() 
         compared.disagreements()
     );
 
-    // rudb abstains rather than being absent, which is the property that has to survive until the
-    // day it stops abstaining.
-    assert!(compared.skipped.iter().any(|s| s.engine == "rudb"), "{:?}", compared.skipped);
+    // rudb produces numbers on this suite, which is what E0e is for. It is asserted rather than
+    // hoped for, because the failure mode is a row quietly going missing and a table that still
+    // looks complete. A machine with no rudb built on it is a skip with a reason and not a pass.
+    let rudb = compared.results.iter().find(|r| r.engine == "rudb");
+    match rudb {
+        Some(rudb) => {
+            let ran: Vec<&str> = rudb.queries.iter().map(|q| q.name.as_str()).collect();
+            assert_eq!(ran, ["q1", "q2"], "both of the queries this file asks for");
+            assert!(rudb.queries[0].answer.contains("100000"), "{}", rudb.queries[0].answer);
+            assert_eq!(rudb.loaded.took, std::time::Duration::ZERO, "a view is not a load");
+            assert_eq!(rudb.loaded.on_disk, tables[0].bytes, "the source file is the size");
+        }
+        None => assert!(
+            compared.skipped.iter().any(|s| s.engine == "rudb"),
+            "rudb is either a row or an abstention with a reason, never absent: {:?}",
+            compared.skipped
+        ),
+    }
 
     let text = comparison(&compared);
     assert!(text.contains("vs duckdb"), "{text}");
