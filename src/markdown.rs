@@ -525,13 +525,14 @@ fn caveats(compared: &Comparison) -> String {
 
     let disagreements = compared.disagreements();
     let undetermined = compared.undetermined();
+    let diverged = compared.diverged();
     if disagreements.is_empty() && compared.results.len() > 1 {
         let total = compared.results.first().map_or(0, |r| r.queries.len());
         out.push_str(&format!(
             "All {} engines agreed on every answer the data settles, which is {} of {total} \
              queries, to the last significant digit of a double.\n\n",
             compared.results.len(),
-            total - undetermined.len()
+            total - undetermined.len() - diverged.len()
         ));
     }
     for line in &disagreements {
@@ -547,6 +548,16 @@ fn caveats(compared: &Comparison) -> String {
         out.push_str(
             "\nSo they are not checked, and a wrong answer from any engine on one of them would \
              go unnoticed here. Every other query in the suite is checked in full.\n\n",
+        );
+    }
+    if !diverged.is_empty() {
+        out.push_str("These were answered differently and which engine is wrong is settled:\n\n");
+        for (name, why) in &diverged {
+            out.push_str(&format!("- {name}: {why}.\n"));
+        }
+        out.push_str(
+            "\nSo they are a known difference rather than an open one, and the write up is where \
+             to go to disagree with that.\n\n",
         );
     }
 
