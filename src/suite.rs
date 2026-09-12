@@ -275,23 +275,29 @@ const QUOTED: &str = "DataFusion lowercases an unquoted identifier and hits is c
 /// encoded UTF-8 and the two counts are not the same number there.
 const COUNTED: &str = "DuckDB's length counts characters where ClickHouse's counts bytes, and STRLEN is the one that matches";
 
-/// Why rudb is absent from the one ClickBench query that groups by something almost unique.
+/// Why rudb is absent from the two ClickBench queries that group by something almost unique.
 ///
 /// This said eight until tamnd/rudb#269 was found, which was a memory charge taken off the buffer a
 /// group key is read into rather than off the copy that goes into the table. That buffer keeps
 /// whatever the longest string it has held needed, so every group after the first long key was
 /// charged for that key's length, by a factor of forty on q15. Seven of the eight were not out of
-/// memory at all, they were out of budget, and they run now.
+/// memory at all, they were out of budget.
 ///
-/// Measured again on gamingpc against the real ninety nine million row file, one query at a time,
-/// with rudb at the default limit of eighty percent of the machine. Forty two of the forty three
-/// finish. q33 is the one left and it is honest: it groups by `WatchID, ClientIP` over the whole
-/// table, `WatchID` is close to unique, so the table really is about a hundred million groups and
-/// the allocation it dies asking for is fourteen gigabytes in one piece. tamnd/rudb#220 is the fix.
+/// Six of those seven run. The seventh is q19, which finished once and held thirty gigabytes on a
+/// machine with thirty one while the budget said it was under twenty five, and that gap was
+/// tamnd/rudb#272: the rows a group by builds out of its table were not charged at all. Now that
+/// they are, q19 says out of memory at 20.7 GiB of a 25.1 GiB budget, which is the truth about it,
+/// so it is back here until the table can spill.
 ///
-/// Two of the seven that came back are worth watching rather than celebrating. q19 holds thirty
-/// gigabytes on a machine with thirty one and spends most of its hundred and sixty eight seconds
-/// swapping, which is tamnd/rudb#272, and q34 and q35 hold sixteen.
+/// Measured on gamingpc against the real ninety nine million row file, one query at a time, with
+/// rudb at the default limit of eighty percent of the machine. q33 is the other one and it was
+/// never in doubt: it groups by `WatchID, ClientIP` over the whole table, `WatchID` is close to
+/// unique, so the table really is about a hundred million groups and the allocation it dies asking
+/// for is fourteen gigabytes in one piece. tamnd/rudb#220 is the fix for both.
+///
+/// The six that do run hold a good deal less than they did, because the same change gives the table
+/// back before it builds the chunks rather than after. q17 and q18 went from 12.3 GiB to 9.6, q34
+/// from 15.4 to 11.3 and q35 from 16.5 to 13.5.
 const NO_SPILL: &str = "rudb's hash aggregate does not spill and this groups by a key that is \
                         close to unique over a hundred million rows, so the table outgrows the \
                         machine. tamnd/rudb#220, milestone E5";
@@ -549,15 +555,18 @@ pub const CLICKBENCH: &[Query] = &[
         sql: "SELECT UserID, extract(minute FROM EventTime) AS m, SearchPhrase, COUNT(*) FROM hits \
             GROUP BY UserID, m, SearchPhrase ORDER BY COUNT(*) DESC LIMIT 10",
         shape: "group by with an extract",
-        dialects: &[Dialect {
-            engines: &["datafusion"],
-            sql: Some(
-                "SELECT \"UserID\", extract(minute FROM \
+        dialects: &[
+            Dialect {
+                engines: &["datafusion"],
+                sql: Some(
+                    "SELECT \"UserID\", extract(minute FROM \
                     to_timestamp_seconds(\"EventTime\")) AS m, \"SearchPhrase\", COUNT(*) FROM \
                     hits GROUP BY \"UserID\", m, \"SearchPhrase\" ORDER BY COUNT(*) DESC LIMIT 10",
-            ),
-            why: QUOTED,
-        }],
+                ),
+                why: QUOTED,
+            },
+            Dialect { engines: &["rudb"], sql: None, why: NO_SPILL },
+        ],
     },
     Query {
         name: "q20",
@@ -1732,14 +1741,15 @@ mod tests {
     }
 
     #[test]
-    fn rudb_is_short_exactly_the_one_whose_group_by_does_not_fit() {
+    fn rudb_is_short_exactly_the_two_whose_group_by_does_not_fit() {
         // Pinned so that the day one comes back or one goes away, it is a diff somebody reviewed
         // rather than a column that quietly changed shape. It was eight of these until
-        // tamnd/rudb#269, and seven of the eight were a wrong memory charge rather than a real
-        // table that did not fit.
+        // tamnd/rudb#269, and six of the eight were a wrong memory charge rather than a real table
+        // that did not fit. q19 is the seventh and it came back for a day, on a charge that was
+        // missing the rows, which is tamnd/rudb#272.
         let short: Vec<&str> =
             CLICKBENCH.iter().filter(|q| q.sql_for("rudb").is_none()).map(|q| q.name).collect();
-        assert_eq!(short, vec!["q33"]);
+        assert_eq!(short, vec!["q19", "q33"]);
     }
 
     #[test]
