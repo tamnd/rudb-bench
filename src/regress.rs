@@ -724,6 +724,7 @@ mod tests {
                 cold: cost(),
                 hot: cost(),
                 answer: "10000000".to_owned(),
+                internal: None,
             }],
             sample: None,
             rows: None,

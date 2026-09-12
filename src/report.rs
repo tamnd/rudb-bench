@@ -19,6 +19,7 @@ use crate::data::{Dataset, Sample};
 use crate::engine::{BenchError, Engine, Loaded};
 use crate::measure::{Distribution, Runs, show};
 use crate::memory::{Cost, Peak};
+use crate::metrics::Internal;
 use crate::suite::{Query, Suite};
 
 /// How wide a spread has to be before a run is called disturbed rather than measured.
@@ -79,6 +80,16 @@ pub struct QueryResult {
     /// wrong, and taking it from the first one means the comparison holds even when a later run
     /// fails and the suite stops.
     pub answer: String,
+    /// What the engine said about its own execution, for the engine that can be asked.
+    ///
+    /// `None` for the four engines this project drives as black boxes. Reading the internals of
+    /// somebody else's engine and publishing them next to ours would be a table where one column
+    /// is held to a standard the others are not, so the only engine whose breakdown is read is the
+    /// one whose breakdown this project is responsible for.
+    ///
+    /// From the cold run, for the same reason the answer is. [`publishable`] refuses a result
+    /// whose breakdown does not add up to the run it came from.
+    pub internal: Option<Internal>,
 }
 
 impl QueryResult {
@@ -489,7 +500,8 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
     // which four decides whether the gap is worth closing or worth writing down and leaving.
     if !result.missing.is_empty() {
         reasons.push(format!(
-            "{} of the suite has no faithful expression here, so this is not the whole suite rule              three asks for: {}",
+            "{} of the suite has no faithful expression here, so this is not the whole suite rule \
+             three asks for: {}",
             result.missing.len(),
             result.missing.join(", ")
         ));
@@ -531,6 +543,12 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
                  measurement fault and not a result",
                 query.name
             ));
+        }
+        // The cross check. A reason rather than a discarded run, which is how every other rule in
+        // here works: the number still prints, with the sentence saying why it may not be quoted
+        // underneath it, because a measurement nobody can see is a measurement nobody fixes.
+        if let Some(why) = query.internal.as_ref().and_then(|i| i.accounting.why(&query.name)) {
+            reasons.push(why);
         }
     }
     reasons
@@ -617,10 +635,16 @@ pub fn run(
         let mut costs: Vec<Cost> = Vec::with_capacity(hot + 1);
         let mut said: Vec<Option<Duration>> = Vec::with_capacity(hot + 1);
         let mut answer = String::new();
+        let mut breakdown = None;
         let runs = Runs::collect(hot, || {
             let ran = engine.run(sql)?;
             if answer.is_empty() {
                 answer = ran.answer;
+            }
+            // The cold run's, taken on the way past. The hot runs measure the same operators over
+            // the same rows, so keeping every one of them would be sixteen copies of one shape.
+            if breakdown.is_none() {
+                breakdown = ran.metrics.map(|document| (document, ran.cost.cpu));
             }
             costs.push(ran.cost);
             said.push(ran.reported);
@@ -646,6 +670,7 @@ pub fn run(
             cold: cold.clone(),
             hot: together(rest),
             answer,
+            internal: breakdown.map(|(document, cpu)| document.internal(cpu)),
         });
     }
 
@@ -1490,6 +1515,7 @@ mod tests {
                 cold: cost(peak.clone(), Some(4096)),
                 hot: cost(peak, Some(0)),
                 answer: "10000000".to_owned(),
+                internal: None,
             }],
             sample: None,
             rows: None,
