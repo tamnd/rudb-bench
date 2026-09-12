@@ -151,9 +151,12 @@ fn every_engine_on_this_machine_gets_the_same_file_and_answers_the_same_thing() 
     eprintln!("comparing {} engines", engines.len() - 1);
 
     let suite = find("smoke").unwrap();
-    // Three hot runs rather than five, because this is a test of the comparison and not a
-    // measurement, and the publication rules already refuse anything measured here.
-    let compared = compare(&mut engines, suite, QUERIES, &dataset, 3);
+    // One hot run rather than five, because this is a test of the comparison and not a
+    // measurement, and the publication rules already refuse anything measured here. Five engines
+    // times two queries times a cold run and the hot ones is the longest thing the gate does, and
+    // every run after the first tests the same code with a different number in it. The test above
+    // is the one that holds rule two, and it asks for five.
+    let compared = compare(&mut engines, suite, QUERIES, &dataset, 1);
 
     assert!(!compared.results.is_empty(), "DuckDB at least should have produced numbers");
     assert_eq!(compared.results[0].engine, "duckdb", "the reference column is DuckDB");
