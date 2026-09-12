@@ -145,6 +145,7 @@ fn fleet() {
     println!();
     for machine in FLEET {
         println!("{}: {}", machine.name, machine.os);
+        println!("  answers to hostname {}", machine.hostname);
         println!("  {}", machine.cpu);
         println!("  {}", machine.note);
         println!();
@@ -1062,7 +1063,8 @@ fn help() {
     println!("  RUDB_BENCH_DATA         where the corpora live, default ~/rudb-data");
     println!("  RUDB_BENCH_SCRATCH      where a run makes the directory it works in and removes");
     println!("                          afterwards, default the temporary directory");
-    println!("  RUDB_BENCH_MACHINE      what to call this machine in a committed record");
+    println!("  RUDB_BENCH_MACHINE      what to call this machine in a committed record, needed");
+    println!("                          only on a machine the fleet table does not know");
     println!("  RUDB_BENCH_PROGRESS     say which query is running, on stderr, for the suites");
     println!("                          that take hours and otherwise say nothing until the end");
     println!("  RUDB_BENCH_BASELINE     the records file, default baselines/<suite>.txt");

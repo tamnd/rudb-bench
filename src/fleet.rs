@@ -43,8 +43,17 @@ impl Role {
 /// to make the shape of the fleet obvious at a glance, not to be a configuration management system.
 #[derive(Debug, Clone, Copy)]
 pub struct Machine {
-    /// The name it answers to over ssh.
+    /// The name it answers to over ssh, and the name a saved run is filed under.
     pub name: &'static str,
+    /// What `hostname` prints on it, which is usually not the name above.
+    ///
+    /// Two of these machines are provisioned boxes whose hostname is the provider's serial number,
+    /// and two of them are the same desktop seen from two operating systems, so the hostname is
+    /// neither unique nor recognisable. It is here so that [`name_for`] can turn whatever the
+    /// machine says about itself into the name the ledger is keyed by, because a machine that
+    /// files half its history under `server3` and half under `vmi3391933` has split its own series
+    /// and rule seven then forbids comparing the two halves.
+    pub hostname: &'static str,
     /// What it may be used for.
     pub role: Role,
     /// Operating system, as it reports itself.
@@ -77,6 +86,7 @@ pub struct Machine {
 pub const FLEET: &[Machine] = &[
     Machine {
         name: "gamingpc-wsl",
+        hostname: "GamingPC",
         role: Role::Regression,
         os: "Ubuntu 26.04 LTS under WSL2, kernel 6.18.33.2-microsoft-standard-WSL2",
         cpu: "Intel Core i9-13900K",
@@ -100,6 +110,7 @@ pub const FLEET: &[Machine] = &[
     },
     Machine {
         name: "gamingpc",
+        hostname: "GamingPC",
         role: Role::Regression,
         os: "Windows 11 Pro Insider Preview, 10.0.28120",
         cpu: "Intel Core i9-13900K",
@@ -120,6 +131,7 @@ pub const FLEET: &[Machine] = &[
     },
     Machine {
         name: "server3",
+        hostname: "vmi3391933",
         role: Role::Regression,
         os: "Ubuntu 24.04.4 LTS, kernel 6.8.0-106",
         cpu: "AMD EPYC, virtualized",
@@ -142,6 +154,7 @@ pub const FLEET: &[Machine] = &[
     },
     Machine {
         name: "server2",
+        hostname: "vmi3112167",
         role: Role::Correctness,
         os: "Ubuntu 24.04.4 LTS, kernel 6.8.0-136",
         cpu: "AMD EPYC, virtualized",
@@ -158,6 +171,7 @@ pub const FLEET: &[Machine] = &[
     },
     Machine {
         name: "server1",
+        hostname: "doge-01",
         role: Role::Correctness,
         os: "Ubuntu 24.04.4 LTS, kernel 6.8.0-101",
         cpu: "AMD EPYC, virtualized",
@@ -187,9 +201,66 @@ pub const FLEET: &[Machine] = &[
 /// The machine type published numbers come from, which nothing in [`FLEET`] is.
 pub const REPORTING_MACHINE: &str = "c6a.4xlarge, 16 vCPU, 32 GiB, gp2";
 
+/// The fleet name for a machine that says its hostname is `host`, when there is one.
+///
+/// `under_wsl` separates the two rows that share a hostname, which is the desktop seen from Windows
+/// and the same desktop seen from the Linux guest on it. They are different machines for every
+/// purpose this harness has, since one has 63 GiB and the other has 31, so picking either one at
+/// random would be worse than not answering.
+///
+/// `None` for a machine that is not in the fleet, and for an ambiguous hostname that the WSL
+/// question does not settle. The caller keeps the hostname in that case, which is the honest answer
+/// and is what every run before this function did.
+#[must_use]
+pub fn name_for(host: &str, under_wsl: bool) -> Option<&'static str> {
+    let host = host.trim();
+    let answers: Vec<&Machine> =
+        FLEET.iter().filter(|m| m.hostname.eq_ignore_ascii_case(host)).collect();
+    let narrowed: Vec<&Machine> = if answers.len() > 1 {
+        answers.iter().copied().filter(|m| m.name.ends_with("-wsl") == under_wsl).collect()
+    } else {
+        answers
+    };
+    match narrowed[..] {
+        [only] => Some(only.name),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::FLEET;
+    use super::{FLEET, name_for};
+
+    #[test]
+    fn every_machine_is_found_by_the_hostname_it_actually_prints() {
+        // The reason this exists: a run on server3 that did not set the override filed itself
+        // under vmi3391933, and a report named after a provider serial is a report nobody
+        // recognises as the machine the series is on.
+        for machine in FLEET.iter().filter(|m| m.hostname != "GamingPC") {
+            assert_eq!(name_for(machine.hostname, false), Some(machine.name));
+        }
+    }
+
+    #[test]
+    fn the_desktop_and_its_guest_share_a_hostname_and_are_told_apart_anyway() {
+        assert_eq!(name_for("GamingPC", true), Some("gamingpc-wsl"));
+        assert_eq!(name_for("GamingPC", false), Some("gamingpc"));
+    }
+
+    #[test]
+    fn a_hostname_is_matched_however_it_is_capitalised_and_however_it_is_padded() {
+        // hostname on the Windows side prints the name with the capitals it was registered with
+        // and the Linux side prints whatever /etc/hostname holds, and the two have disagreed.
+        assert_eq!(name_for("  gamingpc\n", true), Some("gamingpc-wsl"));
+        assert_eq!(name_for("VMI3391933", false), Some("server3"));
+    }
+
+    #[test]
+    fn a_machine_nobody_added_keeps_its_own_name() {
+        // Not an error. A laptop is allowed to run the harness, it just does not get a fleet name
+        // and its saved runs are filed under whatever it calls itself.
+        assert_eq!(name_for("some-laptop", false), None);
+    }
 
     #[test]
     fn nothing_we_own_may_publish_a_number() {
