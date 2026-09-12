@@ -837,6 +837,11 @@ impl Comparison {
             if crate::suite::unsettled(self.suite.name, &query.name).is_some() {
                 continue;
             }
+            // And a query whose difference is settled the other way, where the answer is determined
+            // and which engine is wrong is written up. `diverged` below names those.
+            if crate::suite::divergence(self.suite.name, &query.name).is_some() {
+                continue;
+            }
             // By name, because a column can be short a query and lining two columns up by position
             // would compare one engine's q29 against another's q30 and report a disagreement that
             // is really an off by one in this loop.
@@ -866,6 +871,35 @@ impl Comparison {
             // Only when they actually differed. A tie that every engine happened to break the same
             // way this time is a query that was checked, and saying otherwise would understate what
             // the run did.
+            let answers: Vec<(String, String)> = self
+                .results
+                .iter()
+                .filter_map(|r| r.find(&query.name).map(|q| (r.engine.clone(), q.answer.clone())))
+                .collect();
+            if !crate::answer::disagreements(&answers).is_empty() {
+                out.push((query.name.clone(), why));
+            }
+        }
+        out
+    }
+
+    /// The queries where the engines answered differently and which one is wrong is settled.
+    ///
+    /// The same shape as [`Comparison::undetermined`] and the opposite reading. There the data does
+    /// not say who is right, here it does and somebody has already gone and found out, so the
+    /// sentence carries where that is written up rather than what is loose about the query. Both
+    /// are printed, because a difference that is dropped rather than explained is a difference the
+    /// next reader has to find again.
+    #[must_use]
+    pub fn diverged(&self) -> Vec<(String, &'static str)> {
+        let mut out = Vec::new();
+        let Some(reference) = self.results.first() else { return out };
+        for query in &reference.queries {
+            let Some(why) = crate::suite::divergence(self.suite.name, &query.name) else {
+                continue;
+            };
+            // Only when they actually differed, as above. On a sample small enough that the bug
+            // does not bite, the two engines agree and the query was checked like any other.
             let answers: Vec<(String, String)> = self
                 .results
                 .iter()
@@ -1115,9 +1149,10 @@ pub fn comparison(compared: &Comparison) -> String {
 
     let disagreements = compared.disagreements();
     let undetermined = compared.undetermined();
+    let diverged = compared.diverged();
     if disagreements.is_empty() && compared.results.len() > 1 {
         let total = compared.results.first().map_or(0, |r| r.queries.len());
-        let checked = total - undetermined.len();
+        let checked = total - undetermined.len() - diverged.len();
         line(
             &mut out,
             &format!(
@@ -1147,6 +1182,17 @@ pub fn comparison(compared: &Comparison) -> String {
             &mut out,
             "would go unnoticed here. Every other query in the suite is checked in full.",
         );
+    }
+    // These are differences with an answer, so they read as the open ones do until the sentence
+    // says where the argument is. Kept apart from the list above for that reason.
+    if !diverged.is_empty() {
+        line(&mut out, "");
+        line(&mut out, "These were answered differently and which engine is wrong is settled:");
+        for (name, why) in &diverged {
+            line(&mut out, &format!("  {name}: {why}."));
+        }
+        line(&mut out, "So they are a known difference rather than an open one, and the");
+        line(&mut out, "write up is where to go to disagree with that.");
     }
     // Two kinds of hot in one table, said once with the names in it rather than as a footnote on
     // the rows it applies to. A reader scanning the ratio row is comparing a number taken with an
@@ -1713,6 +1759,26 @@ mod tests {
         assert!(crate::suite::unsettled("clickbench", "q18").is_some());
         assert!(crate::suite::unsettled("clickbench", "q1").is_none());
         assert!(crate::suite::unsettled("smoke", "q18").is_none(), "smoke checks everything");
+    }
+
+    /// The two lists are different claims, so a query cannot be on both and both have to be real.
+    #[test]
+    fn a_settled_difference_is_kept_apart_from_a_query_the_data_does_not_settle() {
+        let defined = crate::suite::queries("clickbench").expect("clickbench has queries");
+        for (name, why) in crate::suite::CLICKBENCH_DIVERGENCES {
+            assert!(defined.iter().any(|q| q.name == *name), "{name} is not a clickbench query");
+            assert!(why.len() > 50, "{name} needs a reason a reader can check, not a label");
+            assert!(
+                crate::suite::unsettled("clickbench", name).is_none(),
+                "{name} cannot both have no right answer and have a wrong one"
+            );
+        }
+        // q4 is the first entry and the reason it is here rather than there is that the answer is
+        // determined, so the sentence has to say where the argument for that lives.
+        let why = crate::suite::divergence("clickbench", "q4").expect("q4 is a known divergence");
+        assert!(why.contains("14.10.1"), "the entry has to name where it is written up: {why}");
+        assert!(crate::suite::divergence("clickbench", "q1").is_none());
+        assert!(crate::suite::divergence("smoke", "q4").is_none(), "smoke checks everything");
     }
 
     #[test]

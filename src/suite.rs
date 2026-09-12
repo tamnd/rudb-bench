@@ -1620,14 +1620,16 @@ pub fn loading(suite: &str, engine: &str, table: &str) -> Option<Loading> {
 /// the forty three queries are still checked to the last bit of a double.
 ///
 /// Looked at again for milestone E0e, tamnd/rudb#112, now that tamnd/rudb-compat can put rudb and
-/// a real DuckDB to the same file and arbitrate. Not one of the seventeen comes off this list, and
-/// the reason is rule three. Fourteen of them are ties at a `LIMIT`, the only way to settle a tie
+/// a real DuckDB to the same file and arbitrate. Not one of the seventeen becomes a checked query,
+/// and the reason is rule three. Fourteen of them are ties at a `LIMIT`, the only way to settle a tie
 /// is to break it, and breaking it means running text that is not the official text, which is the
 /// one thing a board number may not do. So they are settled in the other repository instead, where
 /// `corpus/clickbench-settled.sql` is the same forty three queries with the tie broken and every
 /// answer compared byte for byte, and they stay unsettled here where the official text runs.
 ///
-/// What that arbitration did change is q4, which turned out not to be a rounding difference.
+/// What that arbitration did change is q4, which turned out not to be a rounding difference and is
+/// not on this list any more. Its answer is determined, one engine is wrong, and which one is
+/// settled, so it is in [`CLICKBENCH_DIVERGENCES`] instead.
 ///
 /// Two more joined the list later, q37 and q38, and they were always the same hazard. The checker
 /// used to read an answer by scanning the whole text for runs of digits, so for a query that groups
@@ -1636,15 +1638,6 @@ pub fn loading(suite: &str, engine: &str, table: &str) -> Option<Loading> {
 /// Reading the fields instead of the text made it visible, which is the checker working rather than
 /// the engines getting worse.
 pub const CLICKBENCH_UNSETTLED: &[(&str, &str)] = &[
-    (
-        "q4",
-        "AVG(UserID) over a hundred million bigints near 10^18, where the engines disagree for two \
-         reasons. The order the partial sums are added in moves the floating point ones further \
-         apart than the one part in a billion this harness calls the same number, and DuckDB is \
-         plainly wrong: it sums the bigint column short by a multiple of 2^64 on this file, where \
-         its own hugeint and decimal paths, rudb, and adding the column up outside a database all \
-         agree. tamnd/rudb-compat#12",
-    ),
     (
         "q16",
         "ORDER BY COUNT(*) DESC LIMIT 10 over user IDs, where the tenth place is a tie between \
@@ -1716,6 +1709,39 @@ pub fn unsettled(suite: &str, query: &str) -> Option<&'static str> {
         return None;
     }
     CLICKBENCH_UNSETTLED.iter().find(|(name, _)| *name == query).map(|(_, why)| *why)
+}
+
+/// The ClickBench queries where the answers differ, the answer is determined, and one engine is
+/// known to be wrong, with a pointer to where that is written down.
+///
+/// This is the opposite of [`CLICKBENCH_UNSETTLED`] and the two are worth keeping apart. A query
+/// there has no right answer to check against, so nobody can be wrong about it. A query here has
+/// one and somebody is wrong about it, and what makes it a settled difference rather than an open
+/// one is that the argument is written up in full somewhere a reader can go and disagree with.
+/// Printing it as an open difference every run is how a report stops being read, and dropping it
+/// silently would be worse, so it is printed with the reason and counted separately.
+///
+/// The bar for an entry is the bar the entry's own ledger sets, which is a reproduction, both
+/// answers, an argument for which is right that does not appeal to our own implementation, and a
+/// note of where it is tracked upstream. An entry that names a document with none of that is a
+/// difference somebody talked their way out of. Per tamnd/rudb#338.
+pub const CLICKBENCH_DIVERGENCES: &[(&str, &str)] = &[(
+    "q4",
+    "AVG(UserID) over a hundred million bigints, where the pinned DuckDB sums the column short by \
+     a multiple of 2^64 and rudb does not. Its own hugeint and decimal paths, the same column \
+     summed out of a table, its own per counter group sums, and adding the column up outside a \
+     database all give rudb's answer, and it reduces to two statements over a 1.3 MB one column \
+     parquet file. Written up as 14.10.1 in tamnd/rudb `spec/14-testing.md`, which is the list of \
+     places where DuckDB is wrong and we are not. tamnd/rudb-compat#12",
+)];
+
+/// Where this query's difference is written up, when it is one somebody has already settled.
+#[must_use]
+pub fn divergence(suite: &str, query: &str) -> Option<&'static str> {
+    if suite != "clickbench" {
+        return None;
+    }
+    CLICKBENCH_DIVERGENCES.iter().find(|(name, _)| *name == query).map(|(_, why)| *why)
 }
 
 /// The queries of a suite, where this harness has them.
