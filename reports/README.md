@@ -6,6 +6,10 @@ Runs are added and never replaced. A number that was true on the day it was meas
 
 | file | suite | machine | engines | size | taken |
 | --- | --- | --- | --- | --- | --- |
+| [run-clickbench-gamingpc-wsl-1m-quiet.md](run-clickbench-gamingpc-wsl-1m-quiet.md) | ClickBench | gamingpc-wsl | 7 | 999975 rows, one in every 100 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-100k-quiet.md](run-clickbench-gamingpc-wsl-100k-quiet.md) | ClickBench | gamingpc-wsl | 7 | 99998 rows, one in every 1000 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-10k-quiet.md](run-clickbench-gamingpc-wsl-10k-quiet.md) | ClickBench | gamingpc-wsl | 7 | 10000 rows, one in every 10000 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-1k-quiet.md](run-clickbench-gamingpc-wsl-1k-quiet.md) | ClickBench | gamingpc-wsl | 7 | 1000 rows, one in every 99998 | 12 September 2026 |
 | [run-clickbench-gamingpc-wsl-1m.md](run-clickbench-gamingpc-wsl-1m.md) | ClickBench | gamingpc-wsl | 7 | 999975 rows, one in every 100 | 12 September 2026 |
 | [run-clickbench-gamingpc-wsl-100k.md](run-clickbench-gamingpc-wsl-100k.md) | ClickBench | gamingpc-wsl | 7 | 99998 rows, one in every 1000 | 12 September 2026 |
 | [run-clickbench-gamingpc-wsl-10k.md](run-clickbench-gamingpc-wsl-10k.md) | ClickBench | gamingpc-wsl | 7 | 10000 rows, one in every 10000 | 12 September 2026 |
@@ -18,6 +22,8 @@ Runs are added and never replaced. A number that was true on the day it was meas
 
 A ladder is one measurement rather than three or four, and the sizes are meant to be read together. A single size cannot tell a fixed cost apart from a per row cost, and which of the two an engine is paying is usually the only thing worth knowing about it. See the top of the [README](../README.md) for what these ladders say.
 
-There are two ladders here because there are two machines, and rule seven says a number from one machine is never compared against a number from another. `gamingpc-wsl` has 32 hardware threads and reaches a million rows. `vmi3391933` has 8 and stops at a hundred thousand. Reading a row off one and a row off the other is the mistake the rule exists to prevent.
+There are ladders from two machines here, and rule seven says a number from one machine is never compared against a number from another. `gamingpc-wsl` has 32 hardware threads and reaches a million rows. `vmi3391933` has 8 and stops at a hundred thousand. Reading a row off one and a row off the other is the mistake the rule exists to prevent.
+
+The four files with `quiet` in the name are a second sweep of the same ladder on `gamingpc-wsl`, taken a few hours after the first. Every engine in them started with the one minute load average under four on a machine with 32 threads, which each report records per engine. The first sweep ran while another agent was building DuckDB from source on the same box, and reading the two against each other is the interesting thing in this directory right now: contention cost DuckDB roughly three times its query time at a million rows and cost rudb less than twice, because DuckDB was trying to use three and a half cores and rudb was using one. The busy sweep is kept rather than replaced, both because runs are always kept and because it is the evidence for that.
 
 `run-clickbench-server3.md` is the odd one out and is kept because runs are kept. It predates rudb running the suite at all, so it is DuckDB against DataFusion and nothing else, and its file name says `server3` where the later ones say the host name the machine actually answers to.
