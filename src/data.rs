@@ -398,9 +398,19 @@ pub fn size_of_tree(path: &Path) -> u64 {
 /// Shared by every engine in [`crate::engine`], because five engines each writing their own version
 /// of this is five places for a failed load to be reported as a very fast load.
 pub(crate) fn output(command: &mut Command, what: &str) -> Result<Vec<u8>, BenchError> {
+    Ok(both(command, what)?.0)
+}
+
+/// The same, keeping the stderr of a run that worked.
+///
+/// Two of the engines report what a query cost them on stderr rather than stdout, which is the
+/// better of the two places for it because it keeps the timing out of the answer without anybody
+/// having to strip it back out. [`output`] throws that half away, so the timed path calls this one
+/// and the apparatus calls that one.
+pub(crate) fn both(command: &mut Command, what: &str) -> Result<(Vec<u8>, Vec<u8>), BenchError> {
     let out = command.output().map_err(|e| BenchError::new(format!("cannot run {what}: {e}")))?;
     if out.status.success() {
-        return Ok(out.stdout);
+        return Ok((out.stdout, out.stderr));
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
     let tail: Vec<&str> = stderr.lines().rev().take(6).collect();

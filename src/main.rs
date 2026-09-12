@@ -294,10 +294,14 @@ fn plan(args: &[String]) -> Result<Plan, String> {
                 let given = rest.next().ok_or("--runs wants a number after it")?;
                 let n: usize =
                     given.parse().map_err(|e| format!("--runs {given} is not a number, {e}"))?;
-                if n < 5 {
-                    return Err(format!(
-                        "--runs {n} is under the five that reporting rule two requires"
-                    ));
+                // One is allowed, and it is not a hole in reporting rule two. A distribution under
+                // five samples already says no to `Distribution::publishable`, so a run this small
+                // cannot reach a published table, cannot be stored by `--store` and carries the
+                // reason in its own report. What it can do is finish in a fifth of the time, which
+                // is what the development loop wants and what a rule that refused it outright was
+                // quietly costing.
+                if n == 0 {
+                    return Err("--runs 0 would measure nothing".to_owned());
                 }
                 runs = Some(n);
                 continue;
@@ -766,7 +770,8 @@ fn help() {
     println!("    --record        replace the committed records for the engines that ran here");
     println!("    --store <layer> add this run to the ledger as the row that closes a layer");
     println!("    --engines a,b   run only these, the rest abstain saying they were left out");
-    println!("    --runs n        hot runs per query, five at least, default five and fifteen");
+    println!("    --runs n        hot runs per query, default five and fifteen. Under five is a");
+    println!("                    development number and cannot be published or stored");
     println!("                    for anything that reads or writes a record");
     println!("    --rows n        run over this many rows instead of the whole table, as 1m or");
     println!("                    200k, for the development loop. Not comparable to anything,");
@@ -808,7 +813,10 @@ fn help() {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::{Gate, plan, scratch_under};
+    use rudb_bench::measure::Distribution;
     use rudb_bench::regress::Watch;
 
     fn args(line: &str) -> Vec<String> {
@@ -864,9 +872,16 @@ mod tests {
     }
 
     #[test]
-    fn fewer_than_five_runs_is_refused_by_name() {
-        let e = plan(&args("smoke --runs 3")).unwrap_err();
-        assert!(e.contains("rule two"), "{e}");
+    fn a_run_smaller_than_rule_two_wants_is_allowed_and_cannot_be_published() {
+        // Allowed, because the development loop wants an answer in a fifth of the time and the
+        // rule is enforced where it matters rather than at the flag. A single run produces a
+        // distribution that says no to `publishable`, so it cannot reach a published table and
+        // cannot be stored, and its own report carries the reason.
+        assert_eq!(plan(&args("smoke --runs 1")).unwrap().runs, 1);
+        assert_eq!(plan(&args("smoke --runs 3")).unwrap().runs, 3);
+        assert!(!Distribution::median(vec![Duration::from_millis(1)]).publishable());
+        // Zero is still refused, because it is not a fast measurement, it is no measurement.
+        assert!(plan(&args("smoke --runs 0")).is_err());
         assert!(plan(&args("smoke --runs")).is_err());
         assert!(plan(&args("smoke --runs many")).is_err());
     }

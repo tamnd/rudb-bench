@@ -237,6 +237,18 @@ The other kind of file in `reports/` is written by the harness rather than by a 
 
 It is a flag and not the default. A run that wrote into the checkout every time is a run people stop starting from the checkout, and `RUDB_BENCH_REPORTS` moves the directory for a run somewhere without one. A report that cannot be written warns and does not fail the run, because the numbers are already on the terminal by then and the alternative is throwing away an hour of ClickBench over a directory that was read only. The generated markdown is checked against the same prose rules as everything else here, in a unit test over the generator rather than only in the test that walks the committed files, so a generator that started emitting em dashes fails on the commit that changed it rather than on the build after somebody committed a report.
 
+### Two clocks, and which one to read
+
+Every number in a report comes from one of two clocks and the report always shows both.
+
+The wall clock is this harness's. It starts before the engine's process does and stops after the process has exited, so it pays for the fork, the dynamic linker, opening the database, running the query and printing the answer. The query time is the engine's own. Each engine is asked in its own way: DuckDB and rudb get `.timer on` and print `Run Time (s): real`, both ClickHouses get `--time`, `datafusion-cli` prints `Elapsed` when it is not told to be quiet, and the Polars script times itself around the execute and the sink because Polars has no shell to ask. That is the number the public ClickBench board publishes, and asking for it is what makes a column here comparable to a column there.
+
+They can be very far apart. A ClickBench `COUNT(*)` over a hundred thousand rows is two milliseconds by DuckDB's own clock and about fifty by ours, so 96 percent of the wall clock is a process starting. That would be harmless if it were the same for everybody, and it is not: DuckDB starts in about forty milliseconds, `clickhouse local` in about three hundred, and Polars has to boot a Python and import itself before it can look at the query. A table of wall clocks over a small sample partly ranks process startup and calls it a ranking of query engines, which is the specific mistake this pair of columns exists to stop.
+
+So compare engines on query time and read the wall clock to know what a run costs to sit through. Every ratio and both throughput columns are taken against query time wherever every engine reported one. The `overhead` column is the gap as a fraction of the query time, and it is the number that tells you how much of a wall clock you are allowed to believe: under about a tenth it does not matter, over one and most of the wall clock column is this harness.
+
+Nothing is netted out. Subtracting an estimate of overhead from a measurement is how a harness starts reporting what its author expected, so both clocks are printed and neither is adjusted by the other.
+
 ## The reporting rules
 
 These apply to the README, release notes, the dashboard, any talk, any post, and any conversation. They are in the engine's specification in full and this is the short version.
@@ -244,6 +256,8 @@ These apply to the README, release notes, the dashboard, any talk, any post, and
 **State the comparison exactly.** Which rudb commit, which DuckDB version, which ClickHouse version, which machine, which kernel, which filesystem, which settings. "10x faster than DuckDB" is not a claim, it is a mood.
 
 **Report the distribution, not the best run.** Median of at least five runs with the interquartile range. Never a minimum, never a single run. ClickBench's own convention of best-of-three is used for ClickBench because comparability with the public board matters more than rigor there, and any number in that form is labelled as ClickBench-convention.
+
+`--runs 1` exists and does not break that rule. The rule is enforced where the number would be published rather than at the flag: a distribution of fewer than five samples says no to `publishable`, so a run that small cannot go into a record, cannot be stored in the ledger, and carries the reason in its own report. What it can do is finish in a fifth of the time, which is what you want while you are changing the engine and not what you want on the day you write something down.
 
 **Report the whole suite including the losses.** Every query, in a table, including the ones where we are slower. A geometric mean with no per-query table is not a result.
 
