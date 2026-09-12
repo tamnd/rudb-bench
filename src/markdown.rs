@@ -269,7 +269,7 @@ fn engines(compared: &Comparison) -> String {
 
 /// The summary row per engine, which is the table most readers stop at.
 fn totals(compared: &Comparison) -> String {
-    let base = compared.results.first().map(|r| r.hot_total().as_secs_f64()).filter(|s| *s > 0.0);
+    let base = compared.results.first().map(|r| r.best_total().as_secs_f64()).filter(|s| *s > 0.0);
     let reference = compared.results.first().map_or("nothing", |r| r.engine.as_str());
     let rows: Vec<Vec<String>> = compared
         .results
@@ -277,7 +277,10 @@ fn totals(compared: &Comparison) -> String {
         .map(|r| {
             vec![
                 r.engine.clone(),
+                r.reported_total().map_or_else(|| "not read".to_owned(), show),
                 show(r.hot_total()),
+                r.overhead()
+                    .map_or_else(|| "not read".to_owned(), |o| format!("{:+.0}%", o * 100.0)),
                 show(r.cold_total()),
                 r.hot_cpu().map_or_else(|| "not read".to_owned(), show),
                 r.cores_used().map_or_else(|| "not read".to_owned(), |c| format!("{c:.2}")),
@@ -287,7 +290,7 @@ fn totals(compared: &Comparison) -> String {
                 bytes_rate(r.bytes_per_second(compared.source_bytes)),
                 base.map_or_else(
                     || "n/a".to_owned(),
-                    |b| format!("{:.2}x", r.hot_total().as_secs_f64() / b),
+                    |b| format!("{:.2}x", r.best_total().as_secs_f64() / b),
                 ),
             ]
         })
@@ -295,7 +298,9 @@ fn totals(compared: &Comparison) -> String {
     let mut out = table(
         &[
             "engine",
-            "hot total",
+            "query time",
+            "wall time",
+            "overhead",
             "cold total",
             "hot cpu",
             "cores",
@@ -307,9 +312,27 @@ fn totals(compared: &Comparison) -> String {
         ],
         &rows,
     );
+    out.push_str(
+        "Query time is what the engine itself says the queries took, added up over the hot runs. \
+         Every engine here was asked, each in its own way, and it is the same number the public \
+         ClickBench board publishes. Wall time is the clock this harness holds around the whole \
+         subprocess, so it also pays for starting a process, linking it, opening a database and \
+         printing the answer. Overhead is the difference as a fraction of the query time, and it is \
+         the number that says how much of the wall clock column is this harness rather than the \
+         engine.\n\n",
+    );
+    out.push_str(
+        "Read the query time column when comparing engines and the wall time column when asking \
+         what the run costs to sit through. They rank engines differently and that is the point: \
+         the overhead is not the same for each engine, because a DuckDB starts in about forty \
+         milliseconds, a `clickhouse local` in about three hundred, and Polars has to boot a Python \
+         and import itself. On a small sample the wall clock column partly ranks process startup. \
+         The ratio and both throughput columns are taken against query time wherever every engine \
+         reported one.\n\n",
+    );
     out.push_str(&format!(
         "The two throughput columns are the whole table read once per query, so the row count and \
-         the file size times the {} queries over the hot total. It is a rate for the run and not a rate any one query reached, and it \
+         the file size times the {} queries over the total. It is a rate for the run and not a rate any one query reached, and it \
          is not comparable to the same number from a suite with a different number of queries. \
          Cores is CPU seconds over wall seconds, which is how many of this machine's threads the \
          engine actually kept busy, and it is the number that says whether two wall clocks on two \
@@ -339,7 +362,12 @@ fn per_query(compared: &Comparison) -> String {
         let mut row = vec![query.name.clone(), query.shape.clone()];
         for result in &compared.results {
             row.push(match result.find(&query.name) {
-                Some(q) => show(q.runs.hot.headline()),
+                // The engine's own, falling back to the wall clock for an engine that would not
+                // say. A cell is one or the other and the per engine tables below carry both, so a
+                // reader who needs to know which this was has one place to look.
+                Some(q) => {
+                    show(q.reported.as_ref().map_or(q.runs.hot.headline(), |r| r.hot.headline()))
+                }
                 None if result.missing.contains(&query.name) => "no dialect".to_owned(),
                 None => "did not run".to_owned(),
             });
@@ -349,8 +377,9 @@ fn per_query(compared: &Comparison) -> String {
     let head: Vec<&str> = header.iter().map(String::as_str).collect();
     let mut out = table(&head, &rows);
     out.push_str(
-        "The hot figure for each query. The spread that belongs next to it is in the per engine \
-         tables below, one of which is the whole distribution for every query.\n\n",
+        "The engine's own hot figure for each query, which is the one that compares across \
+         columns. The wall clock, the spread and everything else are in the per engine tables \
+         below, one of which is the whole distribution for every query.\n\n",
     );
     out
 }
@@ -364,6 +393,9 @@ fn detail(result: &SuiteResult, source_bytes: u64) -> String {
             vec![
                 q.name.clone(),
                 q.shape.clone(),
+                q.reported
+                    .as_ref()
+                    .map_or_else(|| "not read".to_owned(), |r| show(r.hot.headline())),
                 show(q.runs.cold),
                 show(q.runs.hot.headline()),
                 spread_cell(&q.runs.hot),
@@ -382,6 +414,7 @@ fn detail(result: &SuiteResult, source_bytes: u64) -> String {
         &[
             "query",
             "shape",
+            "query time",
             "cold",
             "hot",
             "IQR",
@@ -397,11 +430,13 @@ fn detail(result: &SuiteResult, source_bytes: u64) -> String {
         &rows,
     );
     out.push_str(&format!(
-        "{} {} over {} of {} queries. Total {} hot and {} cold, {} of CPU, peak {}, {} and {}.\n\n",
+        "{} {} over {} of {} queries. Total {} by its own clock and {} by ours, {} cold, {} of \
+         CPU, peak {}, {} and {}.\n\n",
         result.engine,
         result.version,
         result.queries.len(),
         result.queries.len() + result.missing.len(),
+        result.reported_total().map_or_else(|| "no reading".to_owned(), show),
         show(result.hot_total()),
         show(result.cold_total()),
         result.hot_cpu().map_or_else(|| "no reading".to_owned(), show),
@@ -409,6 +444,14 @@ fn detail(result: &SuiteResult, source_bytes: u64) -> String {
         rows_rate(result.rows_per_second()),
         bytes_rate(result.bytes_per_second(source_bytes)),
     ));
+    if let Some(overhead) = result.overhead() {
+        out.push_str(&format!(
+            "Running it cost {:.0}% on top of the queries themselves. That is process start, \
+             linking, opening the data and printing the answer, and it is in every wall clock \
+             figure in this section.\n\n",
+            overhead * 100.0
+        ));
+    }
     if let Some(spread) = result.shape_spread() {
         out.push_str(&format!(
             "Its slowest query is {spread:.2}x its fastest. A column much flatter than that is \
@@ -643,6 +686,12 @@ mod tests {
             name: name.to_owned(),
             shape: "count".to_owned(),
             runs: Runs { cold: Duration::from_millis(90), hot: ms(hot) },
+            // The engine's own clock, always a little under the wall clock beside it, because the
+            // wall clock also paid for a process to start.
+            reported: Some(Runs {
+                cold: Duration::from_millis(70),
+                hot: ms(&hot.iter().map(|n| n.saturating_sub(20)).collect::<Vec<_>>()),
+            }),
             cold: Cost {
                 peak: Peak::Bytes(1 << 20),
                 cpu: Some(Duration::from_millis(120)),
@@ -721,7 +770,9 @@ mod tests {
     fn every_metric_reaches_the_report() {
         let text = render(&compared(), &facts(), "testbox");
         for wanted in [
-            "hot total",
+            "query time",
+            "wall time",
+            "overhead",
             "cold total",
             "hot cpu",
             "cores",
@@ -743,6 +794,44 @@ mod tests {
         ] {
             assert!(text.contains(wanted), "{wanted} is not in the report:\n{text}");
         }
+    }
+
+    /// The two clocks are both in the file, and the ratio is taken against the engine's own.
+    #[test]
+    fn the_engines_own_clock_is_the_one_the_comparison_is_made_on() {
+        let text = render(&compared(), &facts(), "testbox");
+        // The helper builds each hot run twenty milliseconds under the wall clock, over two
+        // queries, so the engine's total is forty milliseconds under and the overhead is the
+        // difference over the engine's own total rather than over the wall clock.
+        let duckdb = &compared().results[0];
+        assert_eq!(
+            duckdb.hot_total() - duckdb.reported_total().expect("a reading"),
+            Duration::from_millis(40)
+        );
+        let overhead = duckdb.overhead().expect("a reading");
+        let wanted = 0.040 / duckdb.reported_total().expect("a reading").as_secs_f64();
+        assert!((overhead - wanted).abs() < 1e-9, "{overhead} against {wanted}");
+        // And the report says which of the two a reader is comparing on.
+        assert!(text.contains("what the engine itself says"), "{text}");
+        assert!(text.contains("taken against query time"), "{text}");
+    }
+
+    /// An engine that would not say what a query cost it leaves a gap rather than a zero.
+    #[test]
+    fn an_engine_with_no_clock_of_its_own_falls_back_to_the_wall_clock() {
+        let mut compared = compared();
+        for query in &mut compared.results[1].queries {
+            query.reported = None;
+        }
+        let quiet = &compared.results[1];
+        assert_eq!(quiet.reported_total(), None);
+        assert_eq!(quiet.overhead(), None);
+        // A zero here would make it the fastest engine in the table. The wall clock is the honest
+        // fallback, because it is a number that was actually measured.
+        assert_eq!(quiet.best_total(), quiet.hot_total());
+        assert!(!quiet.total_is_reported());
+        let text = render(&compared, &facts(), "testbox");
+        assert!(text.contains("not read"), "{text}");
     }
 
     /// An engine that did not run is a sentence and never a blank, in the file as in the terminal.

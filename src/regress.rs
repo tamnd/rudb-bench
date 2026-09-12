@@ -717,6 +717,7 @@ mod tests {
                 cpu: Some(Duration::from_secs(3)),
             },
             queries: vec![QueryResult {
+                reported: None,
                 name: "q1".to_owned(),
                 shape: "count".to_owned(),
                 runs: Runs { cold: Duration::from_millis(40), hot: ms(millis) },

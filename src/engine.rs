@@ -45,7 +45,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::data::{Table, output, size_of_tree};
+use crate::data::{Table, both, output, size_of_tree};
 use crate::memory::{Cost, Timer};
 use crate::suite::{Fixup, Loading, Suite, loading, sorting_key};
 
@@ -140,8 +140,124 @@ pub struct Loaded {
 pub struct Ran {
     /// Peak, CPU and bytes read.
     pub cost: Cost,
+    /// What the engine itself says the query took, where it will say.
+    ///
+    /// This is the number the public ClickBench board publishes, and it is not the wall clock the
+    /// caller takes around this call. The wall clock includes starting a process, linking it,
+    /// opening a database and printing a result, and on a small enough dataset that is most of it:
+    /// a ClickBench `COUNT(*)` over a hundred thousand rows is two milliseconds by DuckDB's own
+    /// clock and fifty by ours. Neither number is wrong and they answer different questions, so
+    /// both are reported and rule ten's end to end number is the wall clock as it always was.
+    ///
+    /// The reason it matters more than an accounting detail is that the overhead is not the same
+    /// for each engine. DuckDB starts in about forty milliseconds and `clickhouse local` in about
+    /// three hundred, and Polars has to boot a Python and import itself. A table of wall clocks
+    /// over a small sample ranks process startup and calls it a ranking of query engines.
+    ///
+    /// `None` when the engine was not asked or did not answer, never a zero, because a zero would
+    /// average into a total as a very fast query.
+    pub reported: Option<Duration>,
     /// Whatever the engine printed, kept so that two engines answering differently is visible.
     pub answer: String,
+}
+
+/// How an engine says what a query cost it.
+///
+/// Every engine here can be asked, and no two of them answer the same way, so the difference lives
+/// in one enum rather than in six `run` methods. The parse also takes the timing back out of the
+/// answer where the engine put it on stdout, because the answer comparison reads numbers out of
+/// whatever text came back and a duration is a number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reported {
+    /// `Run Time (s): real 0.008 user 0.008 sys 0.000` on stdout, under `.timer on`.
+    ///
+    /// DuckDB's, and rudb's, which prints it in the same shape because rudb's shell is DuckDB's
+    /// shell. One line per statement, so the last one is the query and the ones before it are the
+    /// setup.
+    RunTime,
+    /// A bare count of seconds on stderr, one line, which is what `--time` gets out of either
+    /// ClickHouse.
+    Seconds,
+    /// `Elapsed 0.022 seconds.` on stdout, from a `datafusion-cli` that was not given `-q`.
+    Elapsed,
+    /// `took 0.0219` on stderr, printed by the Polars script.
+    ///
+    /// Polars has no shell to ask, so the script that runs the query times it around the execute
+    /// and the sink and says so. That is the same span the other four report: the query, not the
+    /// interpreter starting.
+    Took,
+}
+
+impl Reported {
+    /// The duration the engine reported, and the answer with the reporting taken out of it.
+    fn parse(self, stdout: &str, stderr: &str) -> (Option<Duration>, String) {
+        let (from, mine): (&str, fn(&str) -> Option<Duration>) = match self {
+            Self::RunTime => (stdout, run_time),
+            Self::Seconds => (stderr, seconds),
+            Self::Elapsed => (stdout, elapsed),
+            Self::Took => (stderr, took),
+        };
+        // The last one, not the first. Three of these run setup statements in front of the query in
+        // the same process, and each of those prints a line too, so the first is a `CREATE VIEW`.
+        let found = from.lines().filter_map(mine).next_back();
+        let answer = match self {
+            // Only when the engine put it on stdout is there anything to take out. The two that use
+            // stderr never had it in the answer.
+            Self::RunTime | Self::Elapsed => {
+                stdout.lines().filter(|l| mine(l).is_none() && !noise(l)).collect::<Vec<_>>()
+            }
+            Self::Seconds | Self::Took => stdout.lines().collect(),
+        };
+        (found, answer.join("\n").trim().to_owned())
+    }
+}
+
+/// `Run Time (s): real 0.008 user 0.008832 sys 0.000000`, the real half of it.
+fn run_time(line: &str) -> Option<Duration> {
+    let rest = line.trim().strip_prefix("Run Time (s):")?;
+    let mut words = rest.split_whitespace();
+    // `real` then the number. Reading the word rather than taking the first number keeps this from
+    // returning the user time on a build that reorders them.
+    while let Some(word) = words.next() {
+        if word == "real" {
+            return words.next().and_then(|n| n.parse().ok()).map(Duration::from_secs_f64);
+        }
+    }
+    None
+}
+
+/// A line that is nothing but a count of seconds, which is all `--time` prints.
+fn seconds(line: &str) -> Option<Duration> {
+    let trimmed = line.trim();
+    // A bare float and nothing else. ClickHouse also writes progress and warnings to stderr, and a
+    // warning that happened to end in a number would otherwise be read as a timing.
+    if trimmed.is_empty() || !trimmed.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+        return None;
+    }
+    trimmed.parse().ok().map(Duration::from_secs_f64)
+}
+
+/// `Elapsed 0.022 seconds.`
+fn elapsed(line: &str) -> Option<Duration> {
+    let rest = line.trim().strip_prefix("Elapsed ")?;
+    let number = rest.split_whitespace().next()?;
+    number.parse().ok().map(Duration::from_secs_f64)
+}
+
+/// `took 0.0219`, from the Polars script.
+fn took(line: &str) -> Option<Duration> {
+    let rest = line.trim().strip_prefix("took ")?;
+    rest.trim().parse().ok().map(Duration::from_secs_f64)
+}
+
+/// Lines a shell prints around an answer that are not the answer.
+///
+/// `datafusion-cli` without `-q` prints a banner and a row count, and both of them are digits that
+/// would land in the answer comparison as data. `-q` used to suppress all of it, and it suppressed
+/// the timing too, which is why this exists instead.
+fn noise(line: &str) -> bool {
+    let trimmed = line.trim();
+    trimmed.starts_with("DataFusion CLI v") || trimmed.ends_with("row(s) fetched.")
 }
 
 /// An engine a suite can be run against.
@@ -225,11 +341,14 @@ pub fn keeping() -> bool {
 struct Runner {
     timer: Result<Timer, String>,
     report: PathBuf,
+    /// How this engine says what the query cost it, which is a different number from the one the
+    /// timer above takes and is the one the public board publishes.
+    reported: Reported,
 }
 
 impl Runner {
-    fn new(scratch: &Path, name: &str) -> Self {
-        Self { timer: Timer::find(), report: scratch.join(format!("{name}-time.txt")) }
+    fn new(scratch: &Path, name: &str, reported: Reported) -> Self {
+        Self { timer: Timer::find(), report: scratch.join(format!("{name}-time.txt")), reported }
     }
 
     /// A command that will be timed, or a plain one when there is no timer here.
@@ -242,12 +361,17 @@ impl Runner {
 
     /// Run it, and read back what it cost and what it printed.
     fn go(&self, mut command: Command, what: &str) -> Result<Ran, BenchError> {
-        let stdout = output(&mut command, what)?;
+        let (stdout, stderr) = both(&mut command, what)?;
         let cost = match &self.timer {
             Ok(_) => Timer::read(&self.report),
             Err(why) => Cost::unavailable(why.clone()),
         };
-        Ok(Ran { cost, answer: String::from_utf8_lossy(&stdout).trim().to_owned() })
+        // The timer writes its own report to a file rather than to stderr, so what is on stderr
+        // here is the engine's and the parse below does not have to tell the two apart.
+        let (reported, answer) = self
+            .reported
+            .parse(&String::from_utf8_lossy(&stdout), &String::from_utf8_lossy(&stderr));
+        Ok(Ran { cost, reported, answer })
     }
 }
 
@@ -281,7 +405,7 @@ impl Duckdb {
             binary,
             version,
             database: scratch.join("bench.duckdb"),
-            runner: Runner::new(scratch, "duckdb"),
+            runner: Runner::new(scratch, "duckdb", Reported::RunTime),
             suite: suite.name,
         })
     }
@@ -331,6 +455,10 @@ impl Duckdb {
         // out of whatever text comes back, which is what lets the fourth one print a bordered table
         // for a reason of its own. See [`crate::answer`] and the note on the datafusion run.
         command.arg("-batch").arg("-csv").arg("-noheader").arg(&self.database);
+        // The engine's own clock, which is the number the ClickBench board publishes and is the one
+        // thing here that does not include starting this process. It prints a line per statement on
+        // stdout and `Reported::RunTime` takes those lines back out of the answer.
+        command.arg("-c").arg(".timer on");
         for statement in statements {
             command.arg("-c").arg(statement);
         }
@@ -454,7 +582,7 @@ impl ClickhouseLocal {
             binary,
             version,
             data: scratch.join("clickhouse"),
-            runner: Runner::new(scratch, "clickhouse"),
+            runner: Runner::new(scratch, "clickhouse", Reported::Seconds),
             suite: suite.name,
         })
     }
@@ -482,6 +610,8 @@ impl ClickhouseLocal {
             .arg(&self.data)
             .arg("--format")
             .arg("CSV")
+            // Its own clock, on stderr, where it stays out of the answer by itself.
+            .arg("--time")
             .arg("--query")
             .arg(sql);
         self.runner.go(command, "clickhouse local")
@@ -742,6 +872,21 @@ impl ClickhouseServer {
         Ok(String::from_utf8_lossy(&out).trim().to_owned())
     }
 
+    /// The same, also asking the server how long it took.
+    ///
+    /// This is the one row in the table whose reported time is exactly what the public ClickBench
+    /// board measures, because the board drives a running ClickHouse through this same client with
+    /// this same flag. The wall clock beside it is the client's, and the client is a process that
+    /// starts, connects over a socket and prints a result set, none of which the server spent.
+    fn timed(&self, sql: &str) -> Result<(String, Option<Duration>), BenchError> {
+        let mut command = self.client();
+        command.arg("--format").arg("CSV").arg("--time").arg("--query").arg(sql);
+        let (stdout, stderr) = both(&mut command, "clickhouse client")?;
+        let (reported, answer) = Reported::Seconds
+            .parse(&String::from_utf8_lossy(&stdout), &String::from_utf8_lossy(&stderr));
+        Ok((answer, reported))
+    }
+
     /// The column list a Parquet file implies, as ClickHouse would write it.
     ///
     /// Read out of the file rather than declared, because this harness runs suites whose schemas it
@@ -878,7 +1023,8 @@ impl Engine for ClickhouseServer {
 
     fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
         self.start()?;
-        Ok(Ran { cost: Cost::unavailable(NOT_THE_SERVER), answer: self.exec(sql)? })
+        let (answer, reported) = self.timed(sql)?;
+        Ok(Ran { cost: Cost::unavailable(NOT_THE_SERVER), reported, answer })
     }
 
     fn unload(&mut self) {
@@ -1046,7 +1192,7 @@ impl Datafusion {
             version,
             ddl: Vec::new(),
             source_bytes: 0,
-            runner: Runner::new(scratch, "datafusion"),
+            runner: Runner::new(scratch, "datafusion", Reported::Elapsed),
             suite: suite.name,
         })
     }
@@ -1108,8 +1254,11 @@ impl Engine for Datafusion {
 
     fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
         let mut command = self.runner.command(&self.binary);
-        // Quiet, because without it every result is followed by a line saying how many rows were
-        // fetched and how long it took, and those digits land in the answer comparison as data.
+        // Not quiet. `-q` used to be here, because without it every result is followed by a banner,
+        // a line saying how many rows were fetched and a line saying how long it took, and those
+        // digits land in the answer comparison as data. It also suppressed the only statement this
+        // engine makes about its own query time, which is the number the board publishes, so the
+        // banner and the row count are stripped out of the answer by `Reported::Elapsed` instead.
         //
         // The table format rather than csv, which is the odd one out among the four engines here
         // and is not a preference. `datafusion-cli` 55.0.0 truncates its streaming output formats.
@@ -1124,7 +1273,7 @@ impl Engine for Datafusion {
         // This is the answer check earning its place on the first day it existed. Without it the
         // datafusion column would have been a fast wrong answer on two of the six smoke queries
         // and nothing would have said so.
-        command.arg("-q").arg("--format").arg("table").arg("--maxrows").arg("inf");
+        command.arg("--format").arg("table").arg("--maxrows").arg("inf");
         for statement in &self.ddl {
             command.arg("-c").arg(statement);
         }
@@ -1185,7 +1334,7 @@ impl Polars {
             // was.
             version: format!("{version} in sink mode"),
             tables: Vec::new(),
-            runner: Runner::new(scratch, "polars"),
+            runner: Runner::new(scratch, "polars", Reported::Took),
             script: scratch.join("polars-run.py"),
             suite: suite.name,
         })
@@ -1198,6 +1347,7 @@ impl Polars {
 /// interpreter and the query, and putting a program in there too makes a failure impossible to
 /// reproduce by hand from the log.
 const POLARS_SCRIPT: &str = r#"import sys
+import time
 import polars as pl
 
 sql = sys.argv[1]
@@ -1209,12 +1359,18 @@ for triple in sys.argv[2:]:
     if columns:
         frame = frame.with_columns(eval(columns))
     ctx.register(name, frame)
+# The clock starts after the scans are registered and stops when the sink is done, which is the
+# same span the other engines report: the query, and not the interpreter starting or the import.
+# Registering a scan reads a footer and nothing else, so it is setup rather than work.
+start = time.perf_counter()
 ctx.execute(sql).sink_csv(
     sys.stdout,
     include_header=False,
     maintain_order=True,
     engine="streaming",
 )
+sys.stdout.flush()
+print("took %.6f" % (time.perf_counter() - start), file=sys.stderr)
 "#;
 
 impl Engine for Polars {
@@ -1298,7 +1454,7 @@ impl Rudb {
             version: found.unwrap_or_else(|_| "not built".to_owned()),
             ddl: Vec::new(),
             source_bytes: 0,
-            runner: Runner::new(scratch, "rudb"),
+            runner: Runner::new(scratch, "rudb", Reported::RunTime),
             suite: suite.name,
         }
     }
@@ -1377,6 +1533,9 @@ impl Engine for Rudb {
         };
         let mut command = self.runner.command(&binary);
         command.arg("-batch").arg("-csv").arg("-noheader");
+        // `.timer on` and the same `Run Time (s):` line DuckDB prints, because rudb's shell is
+        // DuckDB's shell. One more place the drop in claim is tested rather than asserted.
+        command.arg("-c").arg(".timer on");
         for statement in &self.ddl {
             command.arg("-c").arg(statement);
         }
@@ -1428,7 +1587,12 @@ fn on_path(name: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{Ability, Duckdb, Engine, POLARS_SCRIPT, Rudb, Runner, on_path};
+    use std::time::Duration;
+
+    use super::{
+        Ability, Duckdb, Engine, POLARS_SCRIPT, Reported, Rudb, Runner, elapsed, on_path, run_time,
+        seconds, took,
+    };
     use crate::data::Table;
     use crate::suite::{Suite, find};
 
@@ -1444,7 +1608,7 @@ mod tests {
             version: "under test".to_owned(),
             ddl: Vec::new(),
             source_bytes: 0,
-            runner: Runner::new(&scratch("rudb"), "rudb"),
+            runner: Runner::new(&scratch("rudb"), "rudb", Reported::RunTime),
             suite: suite.name,
         }
     }
@@ -1461,7 +1625,7 @@ mod tests {
         };
         let loaded =
             rudb.load(std::slice::from_ref(&hits)).expect("declaring a view is not a load");
-        assert_eq!(loaded.took, std::time::Duration::ZERO, "nothing was converted so nothing took");
+        assert_eq!(loaded.took, Duration::ZERO, "nothing was converted so nothing took");
         assert_eq!(loaded.on_disk, hits.bytes, "the source file is the on disk number");
         assert!(!loaded.converted);
         assert!(loaded.on_disk_is.contains("Parquet"), "{}", loaded.on_disk_is);
@@ -1600,5 +1764,84 @@ mod tests {
         let got = duckdb.run("SELECT nope FROM nothing");
         assert!(got.is_err(), "a missing table should not time successfully");
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn the_polars_driver_times_the_query_and_not_the_interpreter_starting() {
+        // The clock has to start after the scans are registered and stop after the sink, because
+        // the other five engines report the query and an import of polars is about a fifth of a
+        // second. A timing that included it would make this row look slow for a reason that is not
+        // the engine.
+        let (setup, timed) =
+            POLARS_SCRIPT.split_once("start = time.perf_counter()").expect("a clock");
+        assert!(setup.contains("ctx.register"), "{POLARS_SCRIPT}");
+        assert!(setup.contains("import polars"), "{POLARS_SCRIPT}");
+        assert!(timed.contains("sink_csv"), "{POLARS_SCRIPT}");
+        // After the flush, so the number covers writing the answer out rather than handing it to a
+        // buffer.
+        let (before, after) = timed.split_once("print(\"took").expect("a report");
+        assert!(before.contains("stdout.flush()"), "{POLARS_SCRIPT}");
+        assert!(after.contains("stderr"), "the timing goes where it cannot land in the answer");
+    }
+
+    #[test]
+    fn each_engine_is_read_the_way_that_engine_reports_itself() {
+        assert_eq!(
+            run_time("Run Time (s): real 0.008 user 0.008832 sys 0.000000"),
+            Some(Duration::from_micros(8000))
+        );
+        // rudb prints the real half and stops, which has to parse the same way.
+        assert_eq!(run_time("Run Time (s): real 0.002"), Some(Duration::from_micros(2000)));
+        assert_eq!(seconds("0.046"), Some(Duration::from_micros(46000)));
+        assert_eq!(elapsed("Elapsed 0.022 seconds."), Some(Duration::from_micros(22000)));
+        assert_eq!(took("took 0.021900"), Some(Duration::from_micros(21900)));
+        // Each one reads its own shape and nothing else, so a line that drifted would go missing
+        // rather than becoming a wrong number.
+        for line in ["", "42", "Run Time (s): user 0.5", "Elapsed", "ERROR: code 62"] {
+            assert_eq!(run_time(line).and(elapsed(line)).and(took(line)), None, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_bare_number_is_a_timing_and_a_sentence_ending_in_one_is_not() {
+        // ClickHouse writes warnings and progress to the same stderr the timing goes to, and a
+        // warning that happened to end in digits would otherwise be read as how long the query
+        // took.
+        assert_eq!(seconds("Code: 62. DB::Exception: 0.046"), None);
+        assert_eq!(seconds(""), None);
+        assert_eq!(seconds("   1.5  "), Some(Duration::from_millis(1500)));
+    }
+
+    #[test]
+    fn the_timing_comes_out_of_the_answer_when_the_engine_put_it_on_stdout() {
+        // The last of them, because the setup statements in front of a query each print one too.
+        let (found, answer) = Reported::RunTime.parse(
+            "Run Time (s): real 0.100\n99998\nRun Time (s): real 0.008 user 0.1 sys 0.0",
+            "",
+        );
+        assert_eq!(found, Some(Duration::from_micros(8000)));
+        assert_eq!(answer, "99998", "a duration left in here is read as data by the answer check");
+
+        // datafusion-cli without `-q` also prints a banner and a row count, and both are digits.
+        let (found, answer) = Reported::Elapsed.parse(
+            "DataFusion CLI v55.0.0\n+---+\n| 1 |\n+---+\n1 row(s) fetched. \nElapsed 0.022 seconds.",
+            "",
+        );
+        assert_eq!(found, Some(Duration::from_micros(22000)));
+        assert_eq!(answer, "+---+\n| 1 |\n+---+");
+
+        // The two that use stderr never had it in the answer, so nothing is taken out.
+        let (found, answer) = Reported::Seconds.parse("99998", "0.046");
+        assert_eq!(found, Some(Duration::from_micros(46000)));
+        assert_eq!(answer, "99998");
+    }
+
+    #[test]
+    fn an_engine_that_said_nothing_reports_nothing_rather_than_zero() {
+        // A zero would average into a total as a very fast query, which is the one wrong answer
+        // here that nobody would notice.
+        let (found, answer) = Reported::RunTime.parse("99998", "");
+        assert_eq!(found, None);
+        assert_eq!(answer, "99998");
     }
 }

@@ -59,8 +59,16 @@ pub struct QueryResult {
     pub name: String,
     /// The shape, so a row is readable without the SQL.
     pub shape: String,
-    /// The cold run and the hot distribution.
+    /// The cold run and the hot distribution, by the clock this harness holds around the engine.
     pub runs: Runs,
+    /// The same two, by the engine's own clock, where the engine will say.
+    ///
+    /// The difference between this and `runs` is everything that is not the query: starting a
+    /// process, linking it, opening a database, printing a result. It is worth its own column
+    /// because it is the number the public ClickBench board publishes, and because the gap is
+    /// different for each engine, so a table of wall clocks over a small sample partly ranks
+    /// process startup. `None` for an engine that does not report one.
+    pub reported: Option<Runs>,
     /// What the cold run cost besides time, which is where the bytes read number is worth reading.
     pub cold: Cost,
     /// The hot runs together: the worst peak, the median CPU and the median bytes read.
@@ -148,6 +156,62 @@ impl SuiteResult {
     #[must_use]
     pub fn cold_total(&self) -> Duration {
         self.queries.iter().map(|q| q.runs.cold).sum()
+    }
+
+    /// Sum of the hot runs by the engine's own clock, when every query reported one.
+    ///
+    /// This is the total that is comparable to the public ClickBench board, and the gap between it
+    /// and [`Self::hot_total`] is what this harness costs to run a query rather than what the query
+    /// costs. `None` when any query in the column went unreported, because a total missing a query
+    /// is the most flattering number in the table.
+    #[must_use]
+    pub fn reported_total(&self) -> Option<Duration> {
+        let mut total = Duration::ZERO;
+        for query in &self.queries {
+            total += query.reported.as_ref()?.hot.headline();
+        }
+        Some(total)
+    }
+
+    /// The same over only the queries named here, for a ratio between two ragged columns.
+    #[must_use]
+    pub fn reported_total_over(&self, names: &[String]) -> Option<Duration> {
+        let mut total = Duration::ZERO;
+        for name in names {
+            total += self.find(name)?.reported.as_ref()?.hot.headline();
+        }
+        Some(total)
+    }
+
+    /// The total every rate and every ratio in a report is taken against.
+    ///
+    /// The engine's own where there is one, and the wall clock where there is not. Those are two
+    /// different quantities and the report prints both of them in their own columns, so nothing is
+    /// hidden by preferring one here. What preferring one buys is that a ratio between two engines
+    /// is a ratio between two query times rather than between two process lifetimes, and on a
+    /// sample small enough to iterate on, a process lifetime is mostly the process.
+    #[must_use]
+    pub fn best_total(&self) -> Duration {
+        self.reported_total().unwrap_or_else(|| self.hot_total())
+    }
+
+    /// Whether [`Self::best_total`] is the engine's own number or this harness's.
+    #[must_use]
+    pub fn total_is_reported(&self) -> bool {
+        self.reported_total().is_some()
+    }
+
+    /// What this harness added to the queries, as a fraction of what the engine said they cost.
+    ///
+    /// The one number that says whether a table of wall clocks is measuring engines or measuring
+    /// process startup. Under about a tenth it does not matter. Over one it means most of every
+    /// number in the wall clock column is this harness, which is what a small sample does, and the
+    /// report says so in words rather than leaving a reader to divide two columns.
+    #[must_use]
+    pub fn overhead(&self) -> Option<f64> {
+        let said = self.reported_total()?.as_secs_f64();
+        let wall = self.hot_total().as_secs_f64();
+        (said > 0.0).then_some((wall - said) / said)
     }
 
     /// One query by the name the suite gave it.
@@ -262,7 +326,7 @@ impl SuiteResult {
     #[must_use]
     pub fn rows_per_second(&self) -> Option<f64> {
         let rows = self.rows?;
-        let seconds = self.hot_total().as_secs_f64();
+        let seconds = self.best_total().as_secs_f64();
         #[expect(
             clippy::cast_precision_loss,
             reason = "a row count at f64 precision is exact to 9 PB"
@@ -278,7 +342,7 @@ impl SuiteResult {
     /// half the size does not get half the throughput for the same work.
     #[must_use]
     pub fn bytes_per_second(&self, source_bytes: u64) -> Option<f64> {
-        let seconds = self.hot_total().as_secs_f64();
+        let seconds = self.best_total().as_secs_f64();
         #[expect(
             clippy::cast_precision_loss,
             reason = "a byte count at f64 precision is exact to 9 PB"
@@ -463,6 +527,7 @@ pub fn run(
             continue;
         };
         let mut costs: Vec<Cost> = Vec::with_capacity(hot + 1);
+        let mut said: Vec<Option<Duration>> = Vec::with_capacity(hot + 1);
         let mut answer = String::new();
         let runs = Runs::collect(hot, || {
             let ran = engine.run(sql)?;
@@ -470,6 +535,7 @@ pub fn run(
                 answer = ran.answer;
             }
             costs.push(ran.cost);
+            said.push(ran.reported);
             Ok::<(), BenchError>(())
         })?;
         // The first entry is the cold run, by the order `Runs::collect` calls the closure in.
@@ -488,6 +554,7 @@ pub fn run(
             name: query.name.to_owned(),
             shape: query.shape.to_owned(),
             runs,
+            reported: said_runs(&said),
             cold: cold.clone(),
             hot: together(rest),
             answer,
@@ -505,6 +572,25 @@ pub fn run(
         keeps_state: engine.keeps_state(),
         missing,
     })
+}
+
+/// What the engine said about each run, as a cold number and a hot distribution.
+///
+/// All of them or none of them. An engine either reports its own query time or it does not, and a
+/// distribution built from the subset of runs that happened to print a line would be a median over
+/// a different set of runs than the wall clock next to it, which is the kind of number that is
+/// wrong in a way nobody can see. So one missing answer makes the whole column missing for that
+/// query, the same way a missing CPU half makes a load's CPU missing.
+fn said_runs(said: &[Option<Duration>]) -> Option<Runs> {
+    let mut every = Vec::with_capacity(said.len());
+    for one in said {
+        every.push((*one)?);
+    }
+    let (cold, hot) = every.split_first()?;
+    if hot.is_empty() {
+        return None;
+    }
+    Some(Runs { cold: *cold, hot: Distribution::median(hot.to_vec()) })
 }
 
 /// A set of runs of one query as one cost.
@@ -1258,6 +1344,7 @@ mod tests {
                 cpu: Some(Duration::from_secs(3)),
             },
             queries: vec![QueryResult {
+                reported: None,
                 name: "q1".to_owned(),
                 shape: "count".to_owned(),
                 runs: Runs { cold: Duration::from_millis(40), hot: Distribution::median(samples) },
