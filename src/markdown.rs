@@ -231,6 +231,10 @@ fn engines(compared: &Comparison) -> String {
                 bytes(r.loaded.on_disk),
                 r.loaded.on_disk_is.clone(),
                 if r.loaded.converted { "its own".to_owned() } else { "the Parquet".to_owned() },
+                r.load.map_or_else(
+                    || "not read".to_owned(),
+                    |(before, after)| format!("{before:.2} to {after:.2}"),
+                ),
             ]
         })
         .collect();
@@ -244,10 +248,21 @@ fn engines(compared: &Comparison) -> String {
             "n/a".to_owned(),
             "n/a".to_owned(),
             "n/a".to_owned(),
+            "n/a".to_owned(),
         ]);
     }
     let mut out = table(
-        &["engine", "version", "state", "load", "load cpu", "on disk", "that size is", "format"],
+        &[
+            "engine",
+            "version",
+            "state",
+            "load",
+            "load cpu",
+            "on disk",
+            "that size is",
+            "format",
+            "machine load",
+        ],
         &rows,
     );
     let reading: Vec<&str> = compared
@@ -262,6 +277,26 @@ fn engines(compared: &Comparison) -> String {
              empty load column and a decode inside every query, in the column being compared, \
              which the other engines paid for once at load time.\n\n",
             reading.join(", ")
+        ));
+    }
+    let threads = crate::machine::threads_here();
+    #[expect(clippy::cast_precision_loss, reason = "core counts are small integers")]
+    let room = threads as f64 / 2.0;
+    let busy: Vec<&str> = compared
+        .results
+        .iter()
+        .filter(|r| r.busiest().is_some_and(|l| l > room))
+        .map(|r| r.engine.as_str())
+        .collect();
+    if !busy.is_empty() {
+        out.push_str(&format!(
+            "The machine load column is the one minute load average before and after that \
+             engine's suite, on a machine with {threads} hardware threads. These engines ran while \
+             it was above half of that, which means they were measured against somebody else's \
+             work rather than on an idle box: {}. Their numbers are inflated by an amount nothing \
+             here can recover, and by a different amount each, depending on how much of the column \
+             was CPU bound.\n\n",
+            busy.join(", ")
         ));
     }
     out
@@ -734,6 +769,7 @@ mod tests {
             sample: None,
             rows: Some(10_000_000),
             keeps_state: false,
+            load: None,
         }
     }
 

@@ -59,6 +59,10 @@ const PREAMBLE: &str = "\
 #
 # Reporting rule seven still applies, which is why the machine is in the filename. These are not
 # comparable to anybody's board and they are not comparable to the same file from another machine.
+#
+# `loadavg` is the one minute load average before and after that engine's suite, on a shared fleet
+# where the usual reason two runs disagree is that one of them had the machine to itself. `load` a
+# few lines further down is a different thing, the time the load step took.
 ";
 
 /// Add this result to the file, replacing whatever that engine had there before.
@@ -189,6 +193,16 @@ fn value<'a>(block: &'a str, key: &str) -> Option<&'a str> {
     block.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix(' ').map(str::trim_start))
 }
 
+/// The two load readings out of the line that holds them.
+///
+/// Both or neither. Half a pair would have to be written down as a load that was read once, and
+/// the whole reason there are two is that one of them cannot tell a run that got busy halfway from
+/// a run that was busy throughout.
+fn loadavg(text: &str) -> Option<(f64, f64)> {
+    let (before, after) = text.split_once(' ')?;
+    Some((before.trim().parse().ok()?, after.trim().parse().ok()?))
+}
+
 /// Microseconds, as this file writes them.
 fn micros(d: Duration) -> u128 {
     d.as_micros()
@@ -298,6 +312,11 @@ fn write_one(result: &SuiteResult, machine: &str, source_bytes: u64) -> String {
     let _ = writeln!(out, "saved     {}", crate::regress::today());
     let _ = writeln!(out, "source    {source_bytes}");
     let _ = writeln!(out, "state     {}", if result.keeps_state { "kept" } else { "fresh" });
+    // Not `load`, which is the load time. This is how busy the machine was, and it is written next
+    // to the engine's name rather than with the timings because it qualifies all of them at once.
+    if let Some((before, after)) = result.load {
+        let _ = writeln!(out, "loadavg   {before} {after}");
+    }
     if let Some(rows) = result.rows {
         let _ = writeln!(out, "rows      {rows}");
     }
@@ -404,6 +423,7 @@ fn read_one(engine: &str, block: &str) -> Result<(SuiteResult, u64), String> {
             sample,
             rows: value(block, "rows").and_then(|r| r.parse().ok()),
             keeps_state: need("state")? == "kept",
+            load: value(block, "loadavg").and_then(loadavg),
         },
         source_bytes,
     ))
@@ -511,6 +531,7 @@ mod tests {
             sample: None,
             rows: Some(99_998),
             keeps_state: false,
+            load: None,
         }
     }
 
@@ -523,6 +544,21 @@ mod tests {
         let (after, bytes) = read_one("duckdb", &text).unwrap();
         assert_eq!(before, after);
         assert_eq!(bytes, 15_848_298);
+    }
+
+    #[test]
+    fn how_busy_the_machine_was_survives_the_file() {
+        // It qualifies every number in the block, so losing it in the round trip would mean the
+        // assembled table silently drops the one thing that says a column is not comparable.
+        let mut before = result();
+        before.load = Some((0.31, 18.75));
+        let after = read_one("duckdb", &write_one(&before, "here", 1)).unwrap().0;
+        assert_eq!(after.load, Some((0.31, 18.75)));
+
+        // And a machine that does not publish one comes back as not published rather than as idle.
+        let mut quiet = result();
+        quiet.load = None;
+        assert_eq!(read_one("duckdb", &write_one(&quiet, "here", 1)).unwrap().0.load, None);
     }
 
     #[test]

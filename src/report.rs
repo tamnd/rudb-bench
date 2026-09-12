@@ -97,7 +97,11 @@ impl QueryResult {
 }
 
 /// What a whole suite cost on one engine.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `PartialEq` without `Eq` because the load average is a float. That is the system's own format,
+/// it is read as text and parsed, and rounding it to an integer here to keep a derive would throw
+/// away the difference between a quiet machine and one with a job or two on it.
+#[derive(Debug, Clone, PartialEq)]
 pub struct SuiteResult {
     /// The suite that ran.
     pub suite: &'static Suite,
@@ -143,9 +147,26 @@ pub struct SuiteResult {
     /// quantity as everybody else's hot number. A table that printed one sentence about warmth over
     /// both kinds would be wrong about one of them, so the sentence is per result.
     pub keeps_state: bool,
+
+    /// The one minute load average before this engine's suite started and after it finished.
+    ///
+    /// `None` on a machine with no `/proc/loadavg`. See [`crate::machine::load_now`] for why a
+    /// benchmark harness reads this at all. The short version is that the fleet is shared, a suite
+    /// measured while somebody else's compiler holds every core is a measurement of the compiler,
+    /// and nothing else in the artifact would say so.
+    ///
+    /// Two readings rather than one because a run that started quiet and ended busy is a run where
+    /// the late queries are slow and the early ones are not, which reads as a regression in
+    /// whichever queries happen to be at the end of the file.
+    pub load: Option<(f64, f64)>,
 }
 
 impl SuiteResult {
+    /// The worse of the two load readings, which is the one a reader should be warned about.
+    #[must_use]
+    pub fn busiest(&self) -> Option<f64> {
+        self.load.map(|(before, after)| f64::max(before, after))
+    }
     /// Sum of the hot headline over every query, which is the diagnostic total.
     #[must_use]
     pub fn hot_total(&self) -> Duration {
@@ -406,6 +427,21 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
             sample.sentence()
         ));
     }
+    // A busy machine is the reason this harness has thrown away more measurements than any bug in
+    // it has. The threshold is half the hardware threads, which is generous: a suite that runs one
+    // engine at a time on an otherwise idle box sits near zero, and anything approaching the core
+    // count means the run was sharing the machine with work that wanted all of it.
+    if let Some(busiest) = result.busiest() {
+        let threads = crate::machine::threads_here();
+        #[expect(clippy::cast_precision_loss, reason = "core counts are small integers")]
+        let room = threads as f64 / 2.0;
+        if busiest > room {
+            reasons.push(format!(
+                "the one minute load average reached {busiest:.2} on a machine with {threads} \
+                 hardware threads, so this was measured against somebody else's work"
+            ));
+        }
+    }
     // A peak that is missing everywhere is missing for one reason, and printing that reason once
     // per query would bury the reasons that really are per query underneath forty copies of it.
     // The tuned ClickHouse server row is the case: the timer wraps a client and the work happens in
@@ -510,6 +546,9 @@ pub fn run(
     if progress() {
         eprintln!("{}: loading {}", engine.name(), suite.name);
     }
+    // Before the load rather than before the first query, because the load is timed too and a
+    // machine that was busy through it reports a load cost that belongs to somebody else.
+    let before = crate::machine::load_now();
     let loaded = engine.load(&dataset.tables)?;
 
     // Taken before the loop because the loop borrows the engine mutably, and needed inside it
@@ -571,6 +610,7 @@ pub fn run(
         rows: dataset.rows,
         keeps_state: engine.keeps_state(),
         missing,
+        load: before.zip(crate::machine::load_now()),
     })
 }
 
@@ -804,7 +844,10 @@ pub struct Abstention {
 }
 
 /// One suite, run on every engine that could run it.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `PartialEq` without `Eq` for the same reason [`SuiteResult`] is, which is the load average it
+/// holds one of per engine.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Comparison {
     /// The suite that ran.
     pub suite: &'static Suite,
@@ -1402,6 +1445,7 @@ mod tests {
             rows: None,
             keeps_state: false,
             missing: Vec::new(),
+            load: None,
         }
     }
 
@@ -1452,6 +1496,23 @@ mod tests {
     fn a_result_from_a_machine_we_own_can_never_be_published() {
         let reasons = publishable(&result(Peak::Bytes(1024), 5));
         assert!(reasons.iter().any(|r| r.contains("c6a.4xlarge")), "{reasons:?}");
+    }
+
+    #[test]
+    fn a_run_taken_while_the_machine_was_busy_says_so() {
+        // The fleet is shared, and a suite measured against somebody else's compiler is a table
+        // that looks exactly like a table. The threshold is half the hardware threads, so the
+        // number here is well past it on any machine this runs on.
+        let mut busy = result(Peak::Bytes(1024), 5);
+        busy.load = Some((0.4, 512.0));
+        let reasons = publishable(&busy);
+        assert!(reasons.iter().any(|r| r.contains("load average")), "{reasons:?}");
+
+        // An idle machine gets no such line, and neither does one that will not say.
+        let mut idle = result(Peak::Bytes(1024), 5);
+        idle.load = Some((0.0, 0.0));
+        assert!(!publishable(&idle).iter().any(|r| r.contains("load average")));
+        assert!(!publishable(&result(Peak::Bytes(1024), 5)).iter().any(|r| r.contains("load ave")));
     }
 
     #[test]

@@ -112,6 +112,26 @@ pub fn threads_here() -> usize {
     std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
 }
 
+/// The one minute load average, where the system publishes one.
+///
+/// This exists because the fleet is shared. Three of the four machines have other people's work on
+/// them at any hour, and a suite measured while a compiler is using every core is a measurement of
+/// the compiler. That has already happened here often enough to throw a full sweep away over, and
+/// the failure mode is the bad one: the table comes out looking exactly like a table, every column
+/// is inflated by a different amount depending on how much of it was CPU bound, and there is
+/// nothing in the artifact that says so. So the load is read before and after every engine's suite
+/// and travels with the result, and [`crate::report::publishable`] refuses a run taken while the
+/// machine was busy.
+///
+/// One minute rather than five or fifteen, because the useful question is what was happening during
+/// this run rather than during the afternoon. `None` on a system with no `/proc/loadavg`, which
+/// includes macOS, and a missing reading is reported as missing rather than as zero.
+#[must_use]
+pub fn load_now() -> Option<f64> {
+    let text = std::fs::read_to_string("/proc/loadavg").ok()?;
+    text.split_whitespace().next()?.parse().ok()
+}
+
 /// What to call this machine in a file that gets committed.
 ///
 /// The hostname, unless `RUDB_BENCH_MACHINE` says otherwise. The override exists for CI, where the
