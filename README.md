@@ -153,6 +153,14 @@ Both ClickHouse rows get the column types out of the official `create.sql`, and 
 
 Reading the server's on-disk number needs care, and getting it wrong is easy. `OPTIMIZE TABLE ... FINAL` writes a new part and leaves the parts it replaced on disk as inactive until `old_parts_lifetime` expires, which is eight minutes by default, so a directory size taken straight after the load counts the data roughly twice. That first read said 128.03 MiB and would have been published as the sorting key costing 2.6x. Both ClickHouse rows now ask ClickHouse instead, with `select sum(bytes_on_disk) from system.parts where active`, and fall back to the directory only when that answer does not parse.
 
+### DuckDB is two rows, for a different reason
+
+There are two DuckDBs in this table and they are not the same program. The `duckdb` row is whatever DuckDB is released, which is what a person would install and is the rival on the public board. The `duckdb-pinned` row is the build rudb's compatibility is actually stated against, which is a commit on the v2.0 development branch recorded in `crates/rudb-parse/grammar/VENDOR` in the rudb checkout.
+
+That distinction is not a detail. The two builds speak different languages: the pinned one accepts `ORDER BY x ASCENDING`, which a released 1.5 rejects, and a released 1.5 reads `[1, 2] <-> [3, 4]` as a single token, which the pinned one does not. Every compatibility number this project publishes is against the pinned build. A performance table that only ever measured the released one would be reporting how we do against something other than the thing we are matching, and the gap between the two is ours to know rather than ours to assume.
+
+The pinned row has to be pointed at its binary with `RUDB_BENCH_DUCKDB_PINNED`. There is no release at that commit, so nothing on a `PATH` is reliably it, and a row that guessed would sooner or later measure the released DuckDB twice and print the second column as if it meant something. `scripts/oracle` in the rudb checkout is what puts the binary on a machine. When the variable is not set the row abstains and says so, and when it resolves to the same build as the `duckdb` row the run is refused, because two identical columns is not a comparison.
+
 ### A column that is flat is not a column about the queries
 
 The tuned server row came back with q1 count at 222ms, q2 at 268ms, q3 at 267ms, q4 at 280ms, q5 at 296ms and the q6 self join at 378ms. A count and a self join over ten million rows do not cost the same, so that column is not measuring the queries: whatever all six have in common is bigger than the difference between them, and here it is `clickhouse client` starting up and connecting. This is the same finding as the interquartile ranges below, arrived at from the other direction, and it is worth catching by machine rather than by eye.

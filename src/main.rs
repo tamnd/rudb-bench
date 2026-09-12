@@ -265,8 +265,15 @@ struct Plan {
 }
 
 /// Every engine this harness knows how to drive, in the order [`discover`] builds them.
-const ENGINES: [&str; 6] =
-    ["duckdb", "clickhouse-local", "datafusion", "polars", "clickhouse-server", "rudb"];
+const ENGINES: [&str; 7] = [
+    "duckdb",
+    "duckdb-pinned",
+    "clickhouse-local",
+    "datafusion",
+    "polars",
+    "clickhouse-server",
+    "rudb",
+];
 
 /// Read the arguments after `run`.
 ///
@@ -683,6 +690,7 @@ fn discover(
     }
 
     consider!("duckdb", Duckdb::discover(scratch, suite));
+    consider!("duckdb-pinned", Duckdb::discover_pinned(scratch, suite));
     consider!("clickhouse-local", ClickhouseLocal::discover(scratch, suite));
     consider!("datafusion", Datafusion::discover(scratch, suite));
     consider!("polars", Polars::discover(scratch, suite));
@@ -968,6 +976,18 @@ mod tests {
         for name in super::ENGINES {
             assert!(plan(&args(&format!("tpch --engines {name}"))).is_ok(), "{name}");
         }
-        assert_eq!(super::ENGINES.len(), 6);
+        assert_eq!(super::ENGINES.len(), 7);
+    }
+
+    #[test]
+    fn duckdb_is_two_rows_because_the_released_one_is_not_the_one_we_match() {
+        // The released DuckDB is the rival. The pinned one is the compatibility target, which is a
+        // build off the v2.0 branch with a different grammar. A table with only the first in it is
+        // comparing against something other than the thing being matched, so both are askable and
+        // both are askable on their own.
+        assert!(plan(&args("clickbench --engines duckdb")).is_ok());
+        assert!(plan(&args("clickbench --engines duckdb-pinned")).is_ok());
+        let both = plan(&args("clickbench --engines duckdb,duckdb-pinned")).unwrap();
+        assert_eq!(both.engines.unwrap().len(), 2);
     }
 }

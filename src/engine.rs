@@ -378,6 +378,8 @@ impl Runner {
 /// A real DuckDB, driven as a subprocess.
 #[derive(Debug, Clone)]
 pub struct Duckdb {
+    /// What the table calls this row, because there are two of them.
+    name: &'static str,
     binary: PathBuf,
     version: String,
     database: PathBuf,
@@ -385,6 +387,9 @@ pub struct Duckdb {
     /// Which suite is running, so the table can be built the way this engine's own entry builds it.
     suite: &'static str,
 }
+
+/// The environment variable naming the DuckDB the grammar is vendored from.
+const PINNED: &str = "RUDB_BENCH_DUCKDB_PINNED";
 
 impl Duckdb {
     /// Find a DuckDB and set up a database file for it under `scratch`.
@@ -399,13 +404,71 @@ impl Duckdb {
     pub fn discover(scratch: &Path, suite: &'static Suite) -> Result<Self, BenchError> {
         let binary =
             std::env::var_os("RUDB_BENCH_DUCKDB").map_or_else(|| on_path("duckdb"), PathBuf::from);
-        let version = version_of(&binary, &["--version"], "RUDB_BENCH_DUCKDB")?;
+        Self::at("duckdb", binary, "RUDB_BENCH_DUCKDB", scratch, suite)
+    }
+
+    /// The same, for the DuckDB rudb's compatibility is actually measured against.
+    ///
+    /// Two rows rather than one, for the same reason ClickHouse is two rows: they are two different
+    /// systems wearing one name. The `duckdb` row above is whatever DuckDB is released, which is
+    /// the rival on the public board and the thing a user would install. This row is the build
+    /// `crates/rudb-parse/grammar/VENDOR` in the rudb checkout pins, which is a commit on the v2.0
+    /// development branch and is a different language: it accepts `ORDER BY x ASCENDING`, which a
+    /// released 1.5 rejects, and it cannot read `[1, 2] <-> [3, 4]` as one token, which a released
+    /// 1.5 can. Every compatibility number this project states is against that build, so a
+    /// performance table that only ever measured the released one would be comparing against
+    /// something other than the thing being matched.
+    ///
+    /// It has to be named. There is no release at that commit and nothing on a `PATH` is reliably
+    /// it, so a row that guessed would sooner or later measure the released DuckDB twice and print
+    /// the second column as if it meant something. `scripts/oracle` in the rudb checkout is what
+    /// puts the binary on a machine.
+    ///
+    /// # Errors
+    ///
+    /// When the variable is not set, when the binary is missing or does not answer `--version`, or
+    /// when it turns out to be the same build as the `duckdb` row.
+    pub fn discover_pinned(scratch: &Path, suite: &'static Suite) -> Result<Self, BenchError> {
+        let Some(binary) = std::env::var_os(PINNED) else {
+            return Err(BenchError::new(format!(
+                "set {PINNED} to the DuckDB the grammar is vendored from. `scripts/oracle` in the \
+                 rudb checkout installs it, and there is no release at that commit to look up"
+            )));
+        };
+        let found = Self::at("duckdb-pinned", PathBuf::from(binary), PINNED, scratch, suite)?;
+        // Two columns of the same binary is not a comparison, and it is the failure this row is
+        // most likely to have: both variables pointing at whatever `duckdb` means today. Comparing
+        // the version strings rather than the paths, because two paths can be one file through a
+        // symlink and `scripts/oracle` installs it as exactly that.
+        if Self::discover(scratch, suite).is_ok_and(|release| release.version == found.version) {
+            return Err(BenchError::new(format!(
+                "{PINNED} is {}, which is the same build as the duckdb row. Point it at the \
+                 vendored commit or leave it unset",
+                found.version
+            )));
+        }
+        Ok(found)
+    }
+
+    /// One of the two, once something has decided which binary it is.
+    fn at(
+        name: &'static str,
+        binary: PathBuf,
+        env: &str,
+        scratch: &Path,
+        suite: &'static Suite,
+    ) -> Result<Self, BenchError> {
+        let version = version_of(&binary, &["--version"], env)?;
         make(scratch)?;
         Ok(Self {
+            name,
             binary,
             version,
-            database: scratch.join("bench.duckdb"),
-            runner: Runner::new(scratch, "duckdb", Reported::RunTime),
+            // Named after the row, because the two run one after the other in the same scratch
+            // directory and a shared filename would have the second one open the first one's
+            // database and report a load of nothing at all.
+            database: scratch.join(format!("bench-{name}.duckdb")),
+            runner: Runner::new(scratch, name, Reported::RunTime),
             suite: suite.name,
         })
     }
@@ -462,13 +525,13 @@ impl Duckdb {
         for statement in statements {
             command.arg("-c").arg(statement);
         }
-        self.runner.go(command, "duckdb")
+        self.runner.go(command, self.name)
     }
 }
 
 impl Engine for Duckdb {
     fn name(&self) -> &str {
-        "duckdb"
+        self.name
     }
 
     fn version(&self) -> &str {
@@ -488,6 +551,9 @@ impl Engine for Duckdb {
         // ClickBench run on gamingpc-wsl produced no DuckDB column at all.
         let mut statements: Vec<String> = Vec::with_capacity(tables.len() * 2);
         for t in tables {
+            // "duckdb" and not `self.name`, because both rows are DuckDB and the published entry
+            // is the same one. The pinned row is a different build of the same engine, not a
+            // different engine, so it loads the table the way the board says DuckDB loads it.
             match loading(self.suite, "duckdb", &t.name) {
                 Some(Loading {
                     columns: Some(schema),
@@ -1590,8 +1656,8 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        Ability, Duckdb, Engine, POLARS_SCRIPT, Reported, Rudb, Runner, elapsed, on_path, run_time,
-        seconds, took,
+        Ability, Duckdb, Engine, PINNED, POLARS_SCRIPT, Reported, Rudb, Runner, elapsed, on_path,
+        run_time, seconds, took,
     };
     use crate::data::Table;
     use crate::suite::{Suite, find};
@@ -1764,6 +1830,37 @@ mod tests {
         let got = duckdb.run("SELECT nope FROM nothing");
         assert!(got.is_err(), "a missing table should not time successfully");
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+
+    #[test]
+    fn the_two_duckdb_rows_do_not_share_a_database_file() {
+        // They run one after the other in one scratch directory. When they shared a filename the
+        // second one would open the first one's database, find the table already loaded, and
+        // report a load of nothing at all next to a query time that never read Parquet.
+        let at = scratch("two-duckdbs");
+        let suite = find("clickbench").unwrap();
+        // `echo` rather than a DuckDB, because what is under test is the naming and not the engine,
+        // and a test that needs DuckDB installed would be skipped on the machine that breaks this.
+        let one = Duckdb::at("duckdb", "/bin/echo".into(), "A", &at, suite).unwrap();
+        let two = Duckdb::at("duckdb-pinned", "/bin/echo".into(), "B", &at, suite).unwrap();
+        assert_ne!(one.name(), two.name());
+        assert_ne!(one.database, two.database);
+    }
+
+    #[test]
+    fn the_pinned_row_that_is_not_installed_says_what_installs_it() {
+        // An engine that is simply absent is a row that reads "not found", and the person reading
+        // it has to go and work out what the thing even is. There is no release at the vendored
+        // commit, so this one has to carry its own instructions.
+        if std::env::var_os(PINNED).is_some() {
+            // Somebody set it, which is the good case and not something to fail over.
+            return;
+        }
+        let at = scratch("no-pinned-duckdb");
+        let suite = find("clickbench").unwrap();
+        let said = Duckdb::discover_pinned(&at, suite).unwrap_err().to_string();
+        assert!(said.contains("RUDB_BENCH_DUCKDB_PINNED"), "{said}");
+        assert!(said.contains("scripts/oracle"), "{said}");
     }
 
     #[test]
