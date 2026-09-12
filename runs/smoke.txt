@@ -121,3 +121,64 @@ peak      -
 read      -
 load      1325339
 disk      53368679
+
+[run]
+suite     smoke
+machine   gamingpc-wsl
+layer     F0 the skeleton and the seams
+commit    01c462a
+recorded  2026-09-12
+[engine]
+name      duckdb
+version   v2.0.0-dev84237 (Development Version) cc7e7bac7f
+hot       205744
+cpu       440000
+peak      161406976
+read      0
+load      157183
+disk      96481280
+[engine]
+name      clickhouse-local
+version   26.9.1.1162
+hot       944451
+cpu       1580000
+peak      457068544
+read      0
+load      265132
+disk      51935599
+[engine]
+name      datafusion
+version   datafusion-cli 55.1.0
+hot       200751
+cpu       1290000
+peak      454762496
+read      0
+load      0
+disk      10920898
+[engine]
+name      polars
+version   1.44.2 in sink mode
+hot       684124
+cpu       1500000
+peak      307064832
+read      0
+load      0
+disk      10920898
+[engine]
+name      clickhouse-server
+version   26.9.1.1162
+hot       242619
+cpu       -
+peak      -
+read      -
+load      1393881
+disk      53807491
+[engine]
+name      rudb
+version   rudb 0.2.36
+hot       1025403
+cpu       970000
+peak      8105984
+read      0
+load      0
+disk      10920898
