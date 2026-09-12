@@ -204,11 +204,17 @@ pub fn drop_caches() -> Result<(), String> {
 
 /// What to call this machine in a file that gets committed.
 ///
-/// The hostname, unless `RUDB_BENCH_MACHINE` says otherwise. The override exists for CI, where the
+/// The fleet name when the hostname belongs to a machine in [`crate::fleet::FLEET`], the hostname
+/// otherwise, and `RUDB_BENCH_MACHINE` ahead of both. The override exists for CI, where the
 /// hostname is a different random string on every run and the useful name is the runner image. It
 /// is not a way to pretend one machine is another: the committed record carries whatever this
 /// returned, the scheduled check refuses to compare two records whose names differ, and somebody
 /// who lies to it here is lying to a file with their name on the commit.
+///
+/// The fleet lookup is here because the ledger is keyed by this string and rule seven turns a name
+/// that moves into two series that may not be compared. Three of the four machines print a hostname
+/// nobody would recognise, so before this the only thing standing between a run and a row filed
+/// under `vmi3391933` was remembering to export a variable.
 ///
 /// `unknown` when the system will not say, which is a name like any other and sorts to one place,
 /// rather than an empty string that would silently match the next machine that also would not say.
@@ -220,7 +226,20 @@ pub fn name_here() -> String {
             return named;
         }
     }
-    read_command("hostname", &[]).unwrap_or_else(|| "unknown".to_owned())
+    let Some(host) = read_command("hostname", &[]) else {
+        return "unknown".to_owned();
+    };
+    crate::fleet::name_for(&host, under_wsl()).map_or(host, ToOwned::to_owned)
+}
+
+/// Whether this is a Linux guest under WSL rather than the Windows side of the same desktop.
+///
+/// The two are one machine to the person sitting at it and two machines to this harness, because
+/// the guest sees 31 of the 63 GiB and its /tmp is a tmpfs. `/proc/version` carries `microsoft` in
+/// the kernel string there and nowhere else, which is the same test everything else uses.
+fn under_wsl() -> bool {
+    std::fs::read_to_string("/proc/version")
+        .is_ok_and(|text| text.to_ascii_lowercase().contains("microsoft"))
 }
 
 /// Installed memory.
