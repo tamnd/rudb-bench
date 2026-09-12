@@ -43,11 +43,14 @@ pub struct Document {
     /// The execute step on its own, which is the span the operators below are inside of.
     pub execute: Duration,
     /// CPU the engine measured around building and running the tree.
-    ///
-    /// This is the denominator of the cross check. It is the engine's own measurement of the same
-    /// span the operators are inside, so the two are answering the same question in two ways, and
-    /// that is what makes disagreeing between them mean something.
     pub cpu: Duration,
+    /// The part of `cpu` that went on building the tree rather than on running it.
+    ///
+    /// Off the denominator of the cross check, because no pipeline can ever account for it.
+    /// Opening the file, reading its schema and allocating the tree all happen before there is a
+    /// pipeline to charge, so a check that left this in would read the whole of it as time that
+    /// went missing, and on a query short enough to be interesting it is a real share of the run.
+    pub build: Duration,
     /// The most the engine says it was holding at once, in bytes.
     ///
     /// Not the resident set of the process, which is what [`crate::memory::Peak`] holds. This is
@@ -135,6 +138,7 @@ impl Document {
             total: nanos(timing, "total_ns"),
             execute: nanos(timing, "execute_ns"),
             cpu: nanos(resource, "cpu_ns"),
+            build: nanos(resource, "build_cpu_ns"),
             peak_bytes: count(resource, "peak_bytes"),
             bytes_read: count(resource, "bytes_read"),
             bytes_spilled: count(resource, "bytes_spilled"),
@@ -205,6 +209,16 @@ impl Document {
         if self.pipelines.is_empty() { self.operator_cpu() } else { self.pipeline_cpu() }
     }
 
+    /// The CPU the engine measured around running the tree, with the build taken off.
+    ///
+    /// This is the denominator of the cross check. It is the engine's own measurement of the same
+    /// span the pipelines are inside, so the two are answering the same question in two ways, and
+    /// that is what makes disagreeing between them mean something.
+    #[must_use]
+    pub fn executed_cpu(&self) -> Duration {
+        self.cpu.saturating_sub(self.build)
+    }
+
     /// How many operators ran a reference implementation.
     #[must_use]
     pub fn reference_impls(&self) -> usize {
@@ -214,7 +228,12 @@ impl Document {
     /// The accounted CPU against the measured CPU, and against the process, where there is one.
     #[must_use]
     pub fn accounting(&self, process: Option<Duration>) -> Accounting {
-        Accounting { accounted: self.accounted_cpu(), measured: self.cpu, process }
+        Accounting {
+            accounted: self.accounted_cpu(),
+            measured: self.executed_cpu(),
+            build: self.build,
+            process,
+        }
     }
 
     /// The part of the document a run record keeps.
@@ -290,11 +309,11 @@ impl Operator {
 /// Does the breakdown add up to the run it came from.
 ///
 /// Three numbers for the same span, taken three ways, from the inside out. `accounted` is what the
-/// operators say they spent, `measured` is what the engine measured around all of them, and
+/// pipelines say they spent, `measured` is what the engine measured around running them, and
 /// `process` is what the operating system charged the whole command including starting it.
 ///
 /// The rule is on the first two. They are measurements of the same span, so they are meant to
-/// agree, and when they do not it is either time going somewhere no operator accounts for or the
+/// agree, and when they do not it is either time going somewhere no pipeline accounts for or the
 /// same time being charged twice, and both of those make the breakdown misleading.
 ///
 /// The third is carried and reported and is not a rule, because there is no tolerance at which it
@@ -309,10 +328,12 @@ impl Operator {
 /// paragraph was reaching for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Accounting {
-    /// The sum of the per operator CPU.
+    /// The sum of the per pipeline CPU.
     pub accounted: Duration,
-    /// The CPU the engine measured around building and running the tree.
+    /// The CPU the engine measured around running the tree, with the build taken off.
     pub measured: Duration,
+    /// The CPU the engine spent building the tree, which is the part of it no pipeline can own.
+    pub build: Duration,
     /// The CPU the operating system charged the whole process, where it was measured.
     pub process: Option<Duration>,
 }
@@ -345,10 +366,12 @@ impl Accounting {
     ///
     /// Starting, linking, opening the database, declaring the views, printing the answer. It is
     /// the reason the wall clock column and the reported column differ, in CPU rather than in wall
-    /// clock, and on a small enough dataset it is most of what the harness timed.
+    /// clock, and on a small enough dataset it is most of what the harness timed. Building the
+    /// tree is off it as well as off the execution, because the engine reports that separately and
+    /// a number that appeared in two columns would be read as two numbers.
     #[must_use]
     pub fn unattributed(&self) -> Option<Duration> {
-        self.process.map(|process| process.saturating_sub(self.measured))
+        self.process.map(|process| process.saturating_sub(self.measured).saturating_sub(self.build))
     }
 
     /// Why this breakdown may not be published, when it may not be.
@@ -357,7 +380,7 @@ impl Accounting {
         let drift = self.drift().filter(|drift| *drift > TOLERANCE)?;
         Some(format!(
             "{query} accounts for {:?} of cpu in its breakdown and the engine measured {:?} around \
-             the whole execution, which is {:.1}% apart and the cross check wants under {:.0}%",
+             the execution, which is {:.1}% apart and the cross check wants under {:.0}%",
             self.accounted,
             self.measured,
             drift * 100.0,
@@ -740,6 +763,7 @@ mod tests {
         let close = Accounting {
             accounted: Duration::from_nanos(980),
             measured: Duration::from_nanos(1000),
+            build: Duration::ZERO,
             process: None,
         };
         assert!(close.agrees());
@@ -749,6 +773,7 @@ mod tests {
         let off = Accounting {
             accounted: Duration::from_nanos(500),
             measured: Duration::from_nanos(1000),
+            build: Duration::ZERO,
             process: None,
         };
         assert!(!off.agrees());
@@ -761,8 +786,12 @@ mod tests {
     fn a_query_too_fast_to_charge_any_cpu_has_nothing_to_disagree_about() {
         // Not a fault. An engine that measured no cpu around an execution has no denominator, and
         // reporting that as a hundred percent off would put a reason under every fast query.
-        let nothing =
-            Accounting { accounted: Duration::ZERO, measured: Duration::ZERO, process: None };
+        let nothing = Accounting {
+            accounted: Duration::ZERO,
+            measured: Duration::ZERO,
+            build: Duration::ZERO,
+            process: None,
+        };
         assert_eq!(nothing.drift(), None);
         assert!(nothing.agrees());
         assert!(nothing.why("q1").is_none());
@@ -776,10 +805,15 @@ mod tests {
         let accounting = Accounting {
             accounted: Duration::from_millis(20),
             measured: Duration::from_millis(20),
+            build: Duration::from_millis(5),
             process: Some(Duration::from_millis(70)),
         };
         assert!(accounting.agrees());
-        assert_eq!(accounting.unattributed(), Some(Duration::from_millis(50)));
+        assert_eq!(
+            accounting.unattributed(),
+            Some(Duration::from_millis(45)),
+            "the build is time the process spent and the execution did not, so it comes off too"
+        );
     }
 
     #[test]
