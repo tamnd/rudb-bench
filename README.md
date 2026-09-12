@@ -252,6 +252,28 @@ So the check has two kinds of finding and only one of them has a threshold. A ce
 
 Which machine the check runs on matters more than the threshold rule does, and the record now says so with a number. Over the 682 cells the mean interquartile range is 1.8 percent on `gamingpc-wsl` and 17.3 percent on `server3`, the worst cell is 54.4 percent against 235.3, and one cell on `gamingpc-wsl` is over 50 percent where 38 cells on `server3` are. A threshold widened by a spread of 235 percent is a threshold of six times, which is not a gate, it is a cell the gate has given up on. The one bad cell on `gamingpc-wsl` is the first filter cell that runs, the whole variant of the one conjunct predicate, and it is bad on both machines, which is what a cell that is paying for a cold start rather than measuring a loop looks like. So the widening keeps a bad measurement from failing an innocent change, and running the check where the measurements are not bad is what makes it catch anything. `server3` is the gate machine because it is the one that is always free, and it stays the machine the full build runs on, but the kernel check belongs on `gamingpc-wsl`.
 
+### Sweeping a seam
+
+A seam is a place in rudb where more than one implementation is defensible. The hash table, the sort, the way a column carries its values, the scheduler. There are twenty seven of them and `rudb_strategies()` is the engine's own list, which is also what `EXPLAIN` reads when it marks a node. The argument for having a registry of them at all is that the choice becomes a measurement rather than an opinion, and that argument only cashes out if there is a command that runs the same suite over the same files on the same machine with one seam moved and nothing else.
+
+That command is `rudb-bench sweep --seam <seam> --suite <suite>`, and `rudb-bench seams` prints what there is to sweep. It is rudb only, which is not a gap: no other engine here has a seam to move and a column that is the same number in every row is not a column.
+
+Today every sweep prints one row. Nothing has been registered at any of the twenty seven seams yet, so the only thing to run is the reference implementation, which is the slow one kept for differential testing. That is the apparatus working rather than a missing result, and it is the reason to build it now instead of on the afternoon somebody needs it. The day a second hash table lands, finding out whether it is faster is a command that already exists and already holds everything else fixed, rather than an afternoon of shell scripts whose results nobody else can reproduce.
+
+```
+$ rudb-bench sweep --seam hash.table --suite smoke --runs 3
+
+seam      hash.table (F5)
+          the hash table itself
+suite     smoke, 6 queries
+engine    rudb 0.2.36
+
+implementation        hot total     hot cpu     peak RSS   worst IQR   vs first
+reference                1.375s      1.240s    35.31 MiB      10.5%      1.00x
+```
+
+The reference always runs first, whatever order the engine lists the implementations in, because the ratio column is against the first row and a ratio against whichever implementation happened to be registered first would change meaning when somebody reorders a registration file. A variant that will not run is a row saying so rather than an abandoned sweep, since the interesting case is exactly the one where a new implementation is wrong on one query.
+
 ### The attribution ledger
 
 Section 2.8 of the engine specification asks for a series rather than a table. Each layer of the engine closes with a row, the row carries the before and the after on total time, CPU seconds, peak resident and bytes read on the same machine, and the release notes are written from it. The argument for it is that a release note claiming the hash table made joins faster and unable to point at a row is a release note that is guessing.

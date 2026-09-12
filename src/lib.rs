@@ -39,6 +39,7 @@ pub mod regress;
 pub mod report;
 pub mod saved;
 pub mod suite;
+pub mod sweep;
 
 pub use fleet::{FLEET, Machine, REPORTING_MACHINE, Role};
 
