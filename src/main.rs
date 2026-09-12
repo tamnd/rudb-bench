@@ -68,7 +68,8 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Some("load" | "report") => {
+        Some("report") => report_saved(args.get(1).map_or("clickbench", String::as_str)),
+        Some("load") => {
             eprintln!("rudb-bench: not built yet, see spec/15-rudb-bench.md in tamnd/rudb");
             ExitCode::FAILURE
         }
@@ -262,6 +263,14 @@ struct Plan {
     /// read next week, which is the difference between a measurement and a number somebody
     /// remembers.
     report: bool,
+    /// Whether to add what this run measured to the saved file for this machine.
+    ///
+    /// The flag that makes one engine at a time a workable way to benchmark. A full ClickBench is
+    /// hours per engine and six engines in one command is a day that fails on the fifth one and
+    /// leaves nothing behind. With this, each engine is measured on its own and written down, and
+    /// `rudb-bench report <suite>` builds the cross engine table afterwards out of everything that
+    /// has been saved so far.
+    save: bool,
 }
 
 /// Every engine this harness knows how to drive, in the order [`discover`] builds them.
@@ -291,6 +300,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     let mut engines = None;
     let mut rows = None;
     let mut report = false;
+    let mut save = false;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let wanted = match arg.as_str() {
@@ -333,6 +343,10 @@ fn plan(args: &[String]) -> Result<Plan, String> {
             }
             "--report" => {
                 report = true;
+                continue;
+            }
+            "--save" => {
+                save = true;
                 continue;
             }
             "--engines" => {
@@ -397,7 +411,39 @@ fn plan(args: &[String]) -> Result<Plan, String> {
         engines,
         rows,
         report,
+        save,
     })
+}
+
+/// Build the cross engine table out of the runs saved on this machine.
+///
+/// The other half of `--save`. Each engine is measured on its own, which for ClickBench is the
+/// difference between a command that finishes and one that falls over four hours in, and this is
+/// what puts the columns back in one table afterwards. It measures nothing itself, so an engine that
+/// is not saved is an abstention naming the command that would save it rather than a missing column.
+fn report_saved(suite: &str) -> ExitCode {
+    let here = machine::name_here();
+    let compared = match rudb_bench::saved::restore(suite, &here, &ENGINES) {
+        Ok(compared) => compared,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    print!("{}", comparison(&compared));
+    // No machine facts. Those are read off the machine as it is now and the saved runs were taken
+    // over days, so printing today's governor next to Tuesday's numbers would be a claim about
+    // Tuesday that nobody made. The per run reports keep theirs.
+    match rudb_bench::markdown::write(&compared, &[], &here) {
+        Ok(at) => {
+            println!("\nwrote {}", at.display());
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("rudb-bench: could not write the report: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
 /// Run a suite against every engine that can run it, and print the table.
@@ -447,6 +493,18 @@ fn run(plan: &Plan) -> ExitCode {
         println!();
     }
     print!("{}", comparison(&compared));
+
+    // Saved before the report is written, so that a run which saved and then could not write its
+    // markdown has still kept the hours of measurement it just did.
+    if plan.save {
+        let here = machine::name_here();
+        for result in &compared.results {
+            match rudb_bench::saved::save(result, &here, compared.source_bytes) {
+                Ok(at) => println!("saved {} to {}", result.engine, at.display()),
+                Err(e) => eprintln!("rudb-bench: could not save {}: {e}", result.engine),
+            }
+        }
+    }
 
     // Before the scratch directory goes, because the filesystem fact the machine record wants is
     // the one under the data and not the one under the binary, and on most of the fleet those are
@@ -784,6 +842,9 @@ fn help() {
     println!("    --rows n        run over this many rows instead of the whole table, as 1m or");
     println!("                    200k, for the development loop. Not comparable to anything,");
     println!("                    and not allowed with the flags that write a record");
+    println!("    --save          add what each engine measured to reports/saved-<suite>-");
+    println!("                    <machine>.txt, so that engines run on separate days end up");
+    println!("                    in one table. Re-running an engine replaces its block");
     println!("    --report        also write the whole run to reports/run-<suite>-<machine>.md,");
     println!("                    which keeps every metric the terminal table has to drop");
     println!("  ledger        print what each layer bought, from the committed runs");
@@ -794,10 +855,15 @@ fn help() {
         "    --check         fail on a cell {FACTOR:.0}x slower, and on any cell that lost its loop"
     );
     println!("  load          load a suite's data into each engine and time it");
-    println!("  report        write the published status page from the last run");
+    println!("  report [suite] build the cross engine table out of the saved runs on this");
+    println!("                machine, for the engines measured one at a time with --save");
     println!("  -V, --version print the version and exit");
     println!();
     println!("  RUDB_BENCH_DUCKDB       the DuckDB binary, which is the reference column");
+    println!("  RUDB_BENCH_DUCKDB_PINNED  the DuckDB the grammar is vendored from, which is the");
+    println!("                          compatibility target and is a second row. There is no");
+    println!("                          release at that commit, so scripts/oracle in the rudb");
+    println!("                          checkout is what installs it");
     println!("  RUDB_BENCH_CLICKHOUSE   the ClickHouse binary, driven both as `local` and as a");
     println!("                          real server with a sorting key, which are two rows");
     println!("  RUDB_BENCH_DATAFUSION   the datafusion-cli binary");

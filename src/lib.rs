@@ -36,6 +36,7 @@ pub mod measure;
 pub mod memory;
 pub mod regress;
 pub mod report;
+pub mod saved;
 pub mod suite;
 
 pub use fleet::{FLEET, Machine, REPORTING_MACHINE, Role};
