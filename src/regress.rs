@@ -724,6 +724,7 @@ mod tests {
                 hot: cost(),
                 answer: "10000000".to_owned(),
             }],
+            sample: None,
             keeps_state: false,
             missing: Vec::new(),
         }

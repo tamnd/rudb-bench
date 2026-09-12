@@ -308,6 +308,21 @@ impl Duckdb {
         Ok(())
     }
 
+    /// Run one statement with no database and no timer, and read what it printed.
+    ///
+    /// The reading half of [`Self::plain`], for the apparatus questions that have an answer rather
+    /// than an effect, such as how many rows a Parquet file holds. Nothing timed goes through here.
+    ///
+    /// # Errors
+    ///
+    /// When DuckDB could not be started or the statement failed.
+    pub fn ask(&self, statement: &str) -> Result<String, BenchError> {
+        let mut command = Command::new(&self.binary);
+        command.arg("-batch").arg("-csv").arg("-noheader").arg("-c").arg(statement);
+        let out = output(&mut command, "duckdb")?;
+        Ok(String::from_utf8_lossy(&out).trim().to_owned())
+    }
+
     /// Run statements against the database, under the timer.
     fn exec(&self, statements: &[&str]) -> Result<Ran, BenchError> {
         let mut command = self.runner.command(&self.binary);

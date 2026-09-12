@@ -15,7 +15,7 @@
 //! whatever is there and say what they took. A test that demanded all five would be a test that is
 //! skipped on every laptop and therefore never run.
 
-use rudb_bench::data::Table;
+use rudb_bench::data::{Dataset, Table};
 use rudb_bench::engine::{ClickhouseLocal, Datafusion, Duckdb, Engine, Polars, Rudb};
 use rudb_bench::report::{compare, comparison, publishable, run, table};
 use rudb_bench::suite::{Query, find};
@@ -39,7 +39,7 @@ fn scratch(name: &str) -> std::path::PathBuf {
 ///
 /// Written by DuckDB, which is also one of the engines being compared. That is worth saying and it
 /// is not worth avoiding: the output is a Parquet file with no DuckDB left in it.
-fn small(duckdb: &Duckdb, at: &std::path::Path) -> Vec<Table> {
+fn small(duckdb: &Duckdb, at: &std::path::Path) -> Dataset {
     std::fs::create_dir_all(at).unwrap();
     let path = at.join("t.parquet");
     duckdb
@@ -50,7 +50,7 @@ fn small(duckdb: &Duckdb, at: &std::path::Path) -> Vec<Table> {
         )])
         .expect("writing a parquet should work");
     let bytes = std::fs::metadata(&path).unwrap().len();
-    vec![Table { name: "t".to_owned(), path, bytes }]
+    Dataset { tables: vec![Table { name: "t".to_owned(), path, bytes }], sample: None }
 }
 
 #[test]
@@ -60,10 +60,10 @@ fn the_whole_measurement_path_produces_a_table_a_person_can_read() {
         eprintln!("skipping, no DuckDB on this machine");
         return;
     };
-    let tables = small(&duckdb, &at);
+    let dataset = small(&duckdb, &at);
     let suite = find("smoke").unwrap();
     let result =
-        run(&mut duckdb, suite, QUERIES, &tables, 5).expect("a real engine should measure");
+        run(&mut duckdb, suite, QUERIES, &dataset, 5).expect("a real engine should measure");
 
     assert_eq!(result.queries.len(), 2, "the whole suite, losses included");
     assert!(result.loaded.on_disk > 0, "a loaded database takes space");
@@ -91,10 +91,10 @@ fn a_number_measured_here_can_never_be_published() {
         eprintln!("skipping, no DuckDB on this machine");
         return;
     };
-    let tables = small(&duckdb, &at);
+    let dataset = small(&duckdb, &at);
     let suite = find("smoke").unwrap();
     let result =
-        run(&mut duckdb, suite, QUERIES, &tables, 5).expect("a real engine should measure");
+        run(&mut duckdb, suite, QUERIES, &dataset, 5).expect("a real engine should measure");
 
     // Two reasons at least: no machine here is a c6a.4xlarge, and smoke is comparable to nothing.
     // This assertion is the one that has to fail before anybody publishes anything, which is the
@@ -113,11 +113,11 @@ fn a_query_that_does_not_run_stops_the_suite_rather_than_scoring_zero() {
         eprintln!("skipping, no DuckDB on this machine");
         return;
     };
-    let tables = small(&duckdb, &at);
+    let dataset = small(&duckdb, &at);
     let suite = find("smoke").unwrap();
     let broken: &[Query] =
         &[Query { name: "q1", sql: "SELECT nope FROM t", shape: "not a column", dialects: &[] }];
-    let got = run(&mut duckdb, suite, broken, &tables, 5);
+    let got = run(&mut duckdb, suite, broken, &dataset, 5);
     assert!(got.is_err(), "a failing query is a broken run and not a fast one");
 
     let _ = std::fs::remove_dir_all(&at);
@@ -130,7 +130,7 @@ fn every_engine_on_this_machine_gets_the_same_file_and_answers_the_same_thing() 
         eprintln!("skipping, no DuckDB on this machine");
         return;
     };
-    let tables = small(&duckdb, &at);
+    let dataset = small(&duckdb, &at);
 
     let mut engines: Vec<Box<dyn Engine>> = vec![Box::new(duckdb)];
     let smoke = find("smoke").expect("smoke is a suite");
@@ -149,7 +149,7 @@ fn every_engine_on_this_machine_gets_the_same_file_and_answers_the_same_thing() 
     let suite = find("smoke").unwrap();
     // Three hot runs rather than five, because this is a test of the comparison and not a
     // measurement, and the publication rules already refuse anything measured here.
-    let compared = compare(&mut engines, suite, QUERIES, &tables, 3);
+    let compared = compare(&mut engines, suite, QUERIES, &dataset, 3);
 
     assert!(!compared.results.is_empty(), "DuckDB at least should have produced numbers");
     assert_eq!(compared.results[0].engine, "duckdb", "the reference column is DuckDB");
@@ -169,7 +169,7 @@ fn every_engine_on_this_machine_gets_the_same_file_and_answers_the_same_thing() 
             assert_eq!(ran, ["q1", "q2"], "both of the queries this file asks for");
             assert!(rudb.queries[0].answer.contains("100000"), "{}", rudb.queries[0].answer);
             assert_eq!(rudb.loaded.took, std::time::Duration::ZERO, "a view is not a load");
-            assert_eq!(rudb.loaded.on_disk, tables[0].bytes, "the source file is the size");
+            assert_eq!(rudb.loaded.on_disk, dataset.tables[0].bytes, "the source file is the size");
         }
         None => assert!(
             compared.skipped.iter().any(|s| s.engine == "rudb"),

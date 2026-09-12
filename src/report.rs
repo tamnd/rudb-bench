@@ -15,7 +15,7 @@
 
 use std::time::Duration;
 
-use crate::data::Table;
+use crate::data::{Dataset, Sample};
 use crate::engine::{BenchError, Engine, Loaded};
 use crate::measure::{Distribution, Runs, show};
 use crate::memory::{Cost, Peak};
@@ -112,6 +112,13 @@ pub struct SuiteResult {
     /// A column with anything in here is not the whole suite, which rule three asks for, so it
     /// cannot be published and [`publishable`] says so.
     pub missing: Vec<String>,
+
+    /// How the data was cut down before this ran, when it was.
+    ///
+    /// `None` is the suite as the board runs it. Anything else is a development loop, and it is on
+    /// the result rather than only on the [`Comparison`] so that [`publishable`] can refuse it and
+    /// so that a single engine's table carries the sentence too.
+    pub sample: Option<Sample>,
 
     /// Whether this engine carried state from one query into the next.
     ///
@@ -267,6 +274,16 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
     if !result.suite.comparable {
         reasons.push(format!("the {} suite is not comparable to any board", result.suite.name));
     }
+    // First among the reasons that are about this run rather than about the fleet, because it is
+    // the one a reader is most likely to have forgotten. A smaller run prints the same table with
+    // the same columns and every number in it is smaller, which is exactly what a real improvement
+    // looks like, and the only thing standing between the two readings is this line.
+    if let Some(sample) = result.sample {
+        reasons.push(format!(
+            "this ran over {}, which is a development loop rather than the suite",
+            sample.sentence()
+        ));
+    }
     // A peak that is missing everywhere is missing for one reason, and printing that reason once
     // per query would bury the reasons that really are per query underneath forty copies of it.
     // The tuned ClickHouse server row is the case: the timer wraps a client and the work happens in
@@ -357,7 +374,7 @@ pub fn run(
     engine: &mut dyn Engine,
     suite: &'static Suite,
     queries: &[Query],
-    tables: &[Table],
+    dataset: &Dataset,
     hot: usize,
 ) -> Result<SuiteResult, BenchError> {
     let ability = engine.can_run(suite);
@@ -371,7 +388,7 @@ pub fn run(
     if progress() {
         eprintln!("{}: loading {}", engine.name(), suite.name);
     }
-    let loaded = engine.load(tables)?;
+    let loaded = engine.load(&dataset.tables)?;
 
     // Taken before the loop because the loop borrows the engine mutably, and needed inside it
     // because which text a query has is a question about the engine.
@@ -425,6 +442,7 @@ pub fn run(
         version: engine.version().to_owned(),
         loaded,
         queries: results,
+        sample: dataset.sample,
         keeps_state: engine.keeps_state(),
         missing,
     })
@@ -492,6 +510,9 @@ pub fn table(result: &SuiteResult) -> String {
         ),
     );
     line(&mut out, &format!("on disk  is {}", result.loaded.on_disk_is));
+    if let Some(sample) = result.sample {
+        line(&mut out, &format!("data     {}", sample.sentence()));
+    }
     line(&mut out, "");
     // The header goes through the same format string as the rows, because a header written out by
     // hand is a header that drifts by one space the first time a column gets wider, and a column
@@ -636,6 +657,8 @@ pub struct Comparison {
     pub suite: &'static Suite,
     /// What the source Parquet takes, which every engine's on disk number is read against.
     pub source_bytes: u64,
+    /// How the data was cut down before any of this ran, when it was.
+    pub sample: Option<Sample>,
     /// The engines that produced numbers, in the order they were given.
     pub results: Vec<SuiteResult>,
     /// The engines that did not, and why.
@@ -759,7 +782,7 @@ pub fn compare(
     engines: &mut [Box<dyn Engine>],
     suite: &'static Suite,
     queries: &[Query],
-    tables: &[Table],
+    dataset: &Dataset,
     hot: usize,
 ) -> Comparison {
     let mut results = Vec::new();
@@ -775,7 +798,7 @@ pub fn compare(
             });
             continue;
         }
-        match run(engine.as_mut(), suite, queries, tables, hot) {
+        match run(engine.as_mut(), suite, queries, dataset, hot) {
             Ok(result) => results.push(result),
             Err(e) => skipped.push(Abstention {
                 engine: engine.name().to_owned(),
@@ -791,7 +814,7 @@ pub fn compare(
         engine.unload();
     }
 
-    Comparison { suite, source_bytes: tables.iter().map(|t| t.bytes).sum(), results, skipped }
+    Comparison { suite, source_bytes: dataset.bytes(), sample: dataset.sample, results, skipped }
 }
 
 /// The cross engine table: one column per engine, one row per query, and the supporting rows.
@@ -818,6 +841,9 @@ pub fn comparison(compared: &Comparison) -> String {
             if compared.suite.tables.len() == 1 { "" } else { "s" }
         ),
     );
+    if let Some(sample) = compared.sample {
+        line(&mut out, &format!("sample   {}", sample.sentence()));
+    }
     for result in &compared.results {
         line(&mut out, &format!("engine   {} {}", result.engine, result.version));
     }
@@ -1161,6 +1187,7 @@ mod tests {
                 hot: cost(peak, Some(0)),
                 answer: "10000000".to_owned(),
             }],
+            sample: None,
             keeps_state: false,
             missing: Vec::new(),
         }
@@ -1202,6 +1229,7 @@ mod tests {
         Comparison {
             suite: find("smoke").unwrap(),
             source_bytes: 92 * 1024 * 1024,
+            sample: None,
             results,
             skipped,
         }
