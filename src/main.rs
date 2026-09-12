@@ -61,6 +61,8 @@ fn main() -> ExitCode {
         }
         Some("ledger") => ledger(),
         Some("kernels") => kernels(&args[1..]),
+        Some("sweep") => sweep(&args[1..]),
+        Some("seams") => seams(),
         Some("run") => match plan(&args[1..]) {
             Ok(plan) => run(&plan),
             Err(e) => {
@@ -709,6 +711,188 @@ fn kernels(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Where the rudb binary is, or the sentence naming the override.
+fn rudb_binary() -> Result<std::path::PathBuf, String> {
+    let found =
+        std::env::var_os("RUDB_BENCH_RUDB").map(std::path::PathBuf::from).or_else(|| which("rudb"));
+    found.ok_or_else(|| "no rudb on PATH, set RUDB_BENCH_RUDB".to_owned())
+}
+
+/// The first entry of `PATH` that holds an executable of this name.
+fn which(name: &str) -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path).map(|dir| dir.join(name)).find(|at| at.is_file())
+}
+
+/// Every seam the engine has, and what is registered at each of them.
+///
+/// A listing rather than a measurement, and the thing somebody runs before a sweep to find out what
+/// there is to sweep. It asks the engine rather than holding a copy of the list, because a harness
+/// with its own idea of what the seams are is a harness that sweeps a seam the engine renamed.
+fn seams() -> ExitCode {
+    let binary = match rudb_binary() {
+        Ok(at) => at,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let all = match rudb_bench::sweep::seams(&binary) {
+        Ok(all) => all,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!("seam                  milestone  registered  what it is");
+    for seam in &all {
+        let registered = if seam.implementations.is_empty() {
+            "reference".to_owned()
+        } else {
+            seam.implementations.iter().map(|i| i.name.as_str()).collect::<Vec<_>>().join(", ")
+        };
+        println!(
+            "{:<20}  {:<9}  {:<10}  {}",
+            seam.id, seam.milestone, registered, seam.description
+        );
+    }
+    println!();
+    println!(
+        "`reference` in the registered column means nothing has been registered there yet and"
+    );
+    println!(
+        "the engine runs the slow implementation kept for differential testing. A sweep of one"
+    );
+    println!(
+        "of those prints one row, which is the apparatus working rather than a missing result."
+    );
+    println!();
+    println!("Sweep one with `rudb-bench sweep --seam <seam> --suite <suite>`.");
+    ExitCode::SUCCESS
+}
+
+/// Run one suite once per registered implementation of one seam, with everything else held fixed.
+///
+/// The command the strategy registry exists for. Every other subcommand here compares engines, and
+/// this one compares the engine against itself with a single decision moved, which is the only shape
+/// of measurement that can say what a decision was worth.
+///
+/// rudb only, and that is not a gap. No other engine here has a seam to move, and a sweep that ran
+/// DuckDB alongside would be running a column that is the same number in every row.
+fn sweep(args: &[String]) -> ExitCode {
+    let mut seam = None;
+    let mut suite_name = "smoke".to_owned();
+    let mut runs = 5usize;
+    let mut rows = None;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--seam" => match rest.next() {
+                Some(name) => seam = Some(name.clone()),
+                None => {
+                    eprintln!(
+                        "rudb-bench: --seam wants a seam name after it, try `rudb-bench seams`"
+                    );
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--suite" => match rest.next() {
+                Some(name) => suite_name = name.clone(),
+                None => {
+                    eprintln!("rudb-bench: --suite wants a suite name after it");
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--runs" => match rest.next().map(|n| n.parse::<usize>()) {
+                Some(Ok(n)) if n > 0 => runs = n,
+                _ => {
+                    eprintln!("rudb-bench: --runs wants a number above zero after it");
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--rows" => match rest.next().map(|given| Rows::parse(given)) {
+                Some(Ok(parsed)) => rows = Some(parsed),
+                Some(Err(e)) => {
+                    eprintln!("rudb-bench: {e}");
+                    return ExitCode::FAILURE;
+                }
+                None => {
+                    eprintln!("rudb-bench: --rows wants a row count after it, such as `--rows 1m`");
+                    return ExitCode::FAILURE;
+                }
+            },
+            other => {
+                eprintln!("rudb-bench: unknown argument {other}");
+                eprintln!("rudb-bench: sweep --seam <seam> --suite <suite> [--runs n] [--rows n]");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let Some(wanted) = seam else {
+        eprintln!("rudb-bench: sweep needs --seam, and `rudb-bench seams` lists them");
+        return ExitCode::FAILURE;
+    };
+    let binary = match rudb_binary() {
+        Ok(at) => at,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let all = match rudb_bench::sweep::seams(&binary) {
+        Ok(all) => all,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let found = match rudb_bench::sweep::find(&all, &wanted) {
+        Ok(found) => found.clone(),
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let Some(suite) = rudb_bench::suite::find(&suite_name) else {
+        eprintln!("rudb-bench: no suite called {suite_name}");
+        eprintln!("rudb-bench: try `rudb-bench suites`");
+        return ExitCode::FAILURE;
+    };
+    let Some(queries) = queries(&suite_name) else {
+        eprintln!("rudb-bench: the {suite_name} suite needs {}", suite.needs);
+        return ExitCode::FAILURE;
+    };
+    let scratch = match scratch() {
+        Ok(at) => at,
+        Err(e) => {
+            eprintln!("rudb-bench: cannot make the scratch directory: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    // One dataset for every row, made once and handed to each of them. Making it per row would be
+    // the same bytes in a different order on the device, which is exactly the kind of difference a
+    // sweep is supposed to be free of.
+    let dataset = match rudb_bench::data::prepare(suite, &scratch, rows.as_ref()) {
+        Ok(dataset) => dataset,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            let _ = std::fs::remove_dir_all(&scratch);
+            return ExitCode::FAILURE;
+        }
+    };
+    for file in &dataset.tables {
+        println!("{:<10}  {}", file.name, file.path.display());
+    }
+    println!();
+    let swept = rudb_bench::sweep::sweep(&found, suite, queries, &dataset, &scratch, runs);
+    print!("{}", rudb_bench::sweep::table(&swept));
+    let _ = std::fs::remove_dir_all(&scratch);
+    if swept.rows.iter().all(|row| row.result.is_err()) {
+        return ExitCode::FAILURE;
+    }
+    ExitCode::SUCCESS
+}
+
 /// Every engine on this machine, and a sentence for every one that is not.
 ///
 /// DuckDB first, because it is the reference column of the comparison and the ratio row is stated
@@ -848,6 +1032,12 @@ fn help() {
     println!("    --report        also write the whole run to reports/run-<suite>-<machine>.md,");
     println!("                    which keeps every metric the terminal table has to drop");
     println!("  ledger        print what each layer bought, from the committed runs");
+    println!("  seams         print rudb's seams and what is registered at each of them");
+    println!("  sweep         run a suite once per implementation of one seam, rudb only");
+    println!("    --seam <seam>   the seam to move, from `rudb-bench seams`");
+    println!("    --suite <name>  the suite to hold fixed, default smoke");
+    println!("    --runs n        hot runs per query, default five");
+    println!("    --rows n        run over this many rows instead of the whole table");
     println!("  kernels       measure rudb's own loops in rudb's process, per row");
     println!("    --repo <path>   the rudb checkout, default ../rudb");
     println!("    --record        replace this machine's block in baselines/kernels.txt");

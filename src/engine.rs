@@ -1555,6 +1555,12 @@ pub struct Rudb {
     runner: Runner,
     /// Which suite is running, so the view is declared the way that suite's entry declares it.
     suite: &'static str,
+    /// Seams pinned on the command line, in the order they were asked for.
+    ///
+    /// Empty for every ordinary run, which is what puts rudb in the cross engine table as the
+    /// engine somebody would actually install. A sweep sets one of these and nothing else, so that
+    /// the difference between two of its rows is the seam and not the way the engine was started.
+    pins: Vec<(String, String)>,
 }
 
 impl Rudb {
@@ -1575,7 +1581,18 @@ impl Rudb {
             source_bytes: 0,
             runner: Runner::new(scratch, "rudb", Reported::RunTime).watching(scratch, "rudb"),
             suite: suite.name,
+            pins: Vec::new(),
         }
+    }
+
+    /// Pin one seam to one implementation for every query this engine runs.
+    ///
+    /// `--set` on the command line, which is the process flag of the three surfaces the engine
+    /// offers. The flag rather than a `SET` statement because the harness starts a fresh process per
+    /// run, so a session setting would have to be replayed in front of every query and would be one
+    /// more thing that could be replayed differently between two rows of a sweep.
+    pub fn pin(&mut self, seam: &str, implementation: &str) {
+        self.pins.push((seam.to_owned(), implementation.to_owned()));
     }
 }
 
@@ -1652,6 +1669,11 @@ impl Engine for Rudb {
         };
         let mut command = self.runner.command(&binary);
         command.arg("-batch").arg("-csv").arg("-noheader");
+        // Before the metrics flag and before every statement, because a seam that was pinned after
+        // the tree was built would be a pin that did nothing and said nothing.
+        for (seam, implementation) in &self.pins {
+            command.arg("--set").arg(format!("{seam}={implementation}"));
+        }
         // The one thing here that is not DuckDB's command line, and it is a flag DuckDB has no
         // spelling of rather than a different spelling of one it has. It asks the shell for the
         // breakdown of every statement, one JSON document per line, which is what the cross check
@@ -1736,6 +1758,7 @@ mod tests {
             source_bytes: 0,
             runner: Runner::new(&scratch("rudb"), "rudb", Reported::RunTime),
             suite: suite.name,
+            pins: Vec::new(),
         }
     }
 
