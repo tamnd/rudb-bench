@@ -78,6 +78,16 @@ impl Distribution {
         self.samples.len()
     }
 
+    /// Every run, sorted.
+    ///
+    /// For the one caller that has to write the measurement down rather than summarize it. A saved
+    /// run that kept only the median could never be recombined with another engine's run without
+    /// losing the interquartile range, and rule two says the spread travels with the median.
+    #[must_use]
+    pub fn samples(&self) -> &[Duration] {
+        &self.samples
+    }
+
     /// The headline number, which depends on the convention.
     #[must_use]
     pub fn headline(&self) -> Duration {

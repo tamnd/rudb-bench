@@ -169,11 +169,18 @@ pub struct Ran {
 /// whatever text came back and a duration is a number.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Reported {
-    /// `Run Time (s): real 0.008 user 0.008 sys 0.000` on stdout, under `.timer on`.
+    /// `Run Time (s): real 0.008 user 0.008 sys 0.000` under `.timer on`.
     ///
     /// DuckDB's, and rudb's, which prints it in the same shape because rudb's shell is DuckDB's
     /// shell. One line per statement, so the last one is the query and the ones before it are the
     /// setup.
+    ///
+    /// Both streams are searched, stdout first, because the shape is the same and the stream is
+    /// not: DuckDB prints it on stdout and rudb prints it on stderr. That difference is not visible
+    /// anywhere else, so a variant that only read stdout left rudb with no clock of its own, and a
+    /// table that read DuckDB's internal time against rudb's wall clock was comparing a query
+    /// against a query plus a process start. It is exactly the unfairness this enum exists to fix,
+    /// pointing the other way.
     RunTime,
     /// A bare count of seconds on stderr, one line, which is what `--time` gets out of either
     /// ClickHouse.
@@ -188,18 +195,22 @@ enum Reported {
     Took,
 }
 
+/// Reads one line and says what duration it holds, when it holds one.
+type ReadsALine = fn(&str) -> Option<Duration>;
+
 impl Reported {
     /// The duration the engine reported, and the answer with the reporting taken out of it.
     fn parse(self, stdout: &str, stderr: &str) -> (Option<Duration>, String) {
-        let (from, mine): (&str, fn(&str) -> Option<Duration>) = match self {
-            Self::RunTime => (stdout, run_time),
-            Self::Seconds => (stderr, seconds),
-            Self::Elapsed => (stdout, elapsed),
-            Self::Took => (stderr, took),
+        let (from, mine): (&[&str], ReadsALine) = match self {
+            Self::RunTime => (&[stdout, stderr], run_time),
+            Self::Seconds => (&[stderr], seconds),
+            Self::Elapsed => (&[stdout], elapsed),
+            Self::Took => (&[stderr], took),
         };
         // The last one, not the first. Three of these run setup statements in front of the query in
         // the same process, and each of those prints a line too, so the first is a `CREATE VIEW`.
-        let found = from.lines().filter_map(mine).next_back();
+        // Across the streams in order, so an engine that prints on both is read off stdout.
+        let found = from.iter().find_map(|text| text.lines().filter_map(mine).next_back());
         let answer = match self {
             // Only when the engine put it on stdout is there anything to take out. The two that use
             // stderr never had it in the answer.
@@ -1897,6 +1908,22 @@ mod tests {
         for line in ["", "42", "Run Time (s): user 0.5", "Elapsed", "ERROR: code 62"] {
             assert_eq!(run_time(line).and(elapsed(line)).and(took(line)), None, "{line}");
         }
+    }
+
+    #[test]
+    fn a_run_time_line_is_found_on_either_stream_because_duckdb_and_rudb_differ() {
+        // DuckDB puts it on stdout and rudb puts it on stderr, and nothing else about the two
+        // differs. When only stdout was read, rudb had no clock of its own and the table compared
+        // DuckDB's query time against rudb's query time plus a process start, which is the exact
+        // unfairness this whole path exists to remove, pointing the other way.
+        let duck = Reported::RunTime.parse("1\nRun Time (s): real 0.008 user 0.001 sys 0.000", "");
+        assert_eq!(duck, (Some(Duration::from_micros(8000)), "1".to_owned()));
+        let rudb = Reported::RunTime.parse("1", "Run Time (s): real 0.002");
+        assert_eq!(rudb, (Some(Duration::from_micros(2000)), "1".to_owned()));
+        // Stdout first when both have one, so an engine that grew a second copy does not change
+        // which number gets reported.
+        let both = Reported::RunTime.parse("Run Time (s): real 0.008", "Run Time (s): real 0.002");
+        assert_eq!(both.0, Some(Duration::from_micros(8000)));
     }
 
     #[test]
