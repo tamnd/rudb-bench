@@ -22,6 +22,7 @@
 
 use std::process::ExitCode;
 
+use rudb_bench::data::Rows;
 use rudb_bench::engine::{
     BenchError, ClickhouseLocal, ClickhouseServer, Datafusion, Duckdb, Engine, Polars, Rudb,
 };
@@ -247,6 +248,12 @@ struct Plan {
     /// a sentence saying it was left out, not a missing row, because a table that silently has one
     /// fewer column than the one before it is the thing this harness exists to not produce.
     engines: Option<Vec<String>>,
+    /// How many rows of the suite's data to run over, when that is not all of them.
+    ///
+    /// The development loop. A full ClickBench is hours and most changes are asking whether they did
+    /// anything at all, which a million rows answers in minutes. Nothing measured this way is
+    /// comparable to anything and every table printed from it says so.
+    rows: Option<Rows>,
 }
 
 /// Every engine this harness knows how to drive, in the order [`discover`] builds them.
@@ -267,6 +274,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     let mut runs = None;
     let mut store = None;
     let mut engines = None;
+    let mut rows = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let wanted = match arg.as_str() {
@@ -295,6 +303,12 @@ fn plan(args: &[String]) -> Result<Plan, String> {
                     ));
                 }
                 store = Some(given.clone());
+                continue;
+            }
+            "--rows" => {
+                let given =
+                    rest.next().ok_or("--rows wants a row count after it, such as `--rows 1m`")?;
+                rows = Some(Rows::parse(given)?);
                 continue;
             }
             "--engines" => {
@@ -339,12 +353,25 @@ fn plan(args: &[String]) -> Result<Plan, String> {
         }
         gate = wanted;
     }
+    // A committed record or a ledger row taken over a smaller version of the data would be a bar
+    // every later full run clears by an order of magnitude and every later small run holds to a
+    // number from a different file. Neither file says which it was, because a record is per query
+    // and a run is per engine, so the two would sit next to each other looking comparable. The
+    // refusal is here rather than in the files, where it would have to be a third shape of record.
+    if rows.is_some() && (gate != Gate::Nothing || store.is_some()) {
+        return Err("--rows is a development loop and --check, --check-drift, --record and \
+                    --store are the committed history, so they do not go together. A record \
+                    taken over a million rows is a bar that every full run clears without \
+                    trying"
+            .to_owned());
+    }
     Ok(Plan {
         suite: suite.unwrap_or_else(|| "smoke".to_owned()),
         gate,
         runs: runs.unwrap_or_else(|| gate.runs()),
         store,
         engines,
+        rows,
     })
 }
 
@@ -373,7 +400,7 @@ fn run(plan: &Plan) -> ExitCode {
 
     // The data before the engines, because every engine gets the same files and the first thing a
     // reader of a result asks is which files those were.
-    let dataset = match rudb_bench::data::prepare(suite, &scratch) {
+    let dataset = match rudb_bench::data::prepare(suite, &scratch, plan.rows.as_ref()) {
         Ok(dataset) => dataset,
         Err(e) => {
             eprintln!("rudb-bench: {e}");
@@ -387,7 +414,7 @@ fn run(plan: &Plan) -> ExitCode {
     println!();
 
     let mut compared =
-        rudb_bench::report::compare(&mut engines, suite, queries, &dataset.tables, plan.runs);
+        rudb_bench::report::compare(&mut engines, suite, queries, &dataset, plan.runs);
     compared.skipped.extend(missing);
 
     for result in &compared.results {
@@ -706,6 +733,9 @@ fn help() {
     println!("    --engines a,b   run only these, the rest abstain saying they were left out");
     println!("    --runs n        hot runs per query, five at least, default five and fifteen");
     println!("                    for anything that reads or writes a record");
+    println!("    --rows n        run over this many rows instead of the whole table, as 1m or");
+    println!("                    200k, for the development loop. Not comparable to anything,");
+    println!("                    and not allowed with the flags that write a record");
     println!("  ledger        print what each layer bought, from the committed runs");
     println!("  kernels       measure rudb's own loops in rudb's process, per row");
     println!("    --repo <path>   the rudb checkout, default ../rudb");
@@ -841,6 +871,30 @@ mod tests {
         assert!(e.contains("clickhouse-local"), "{e}");
         assert!(plan(&args("tpch --engines")).is_err());
         assert!(plan(&args("tpch --engines ,,")).is_err());
+    }
+
+    #[test]
+    fn a_row_count_is_read_the_way_people_write_one() {
+        assert_eq!(plan(&args("clickbench --rows 1m")).unwrap().rows.unwrap().wanted, 1_000_000);
+        assert_eq!(plan(&args("clickbench")).unwrap().rows, None);
+        assert!(plan(&args("clickbench --rows")).is_err());
+        assert!(plan(&args("clickbench --rows soon")).is_err());
+    }
+
+    /// The committed record and the ledger are a history, and a row of either taken over a million
+    /// rows would sit next to rows taken over a hundred million looking like the same measurement.
+    #[test]
+    fn a_smaller_run_cannot_write_itself_into_the_committed_history() {
+        for line in [
+            "clickbench --rows 1m --record",
+            "clickbench --rows 1m --check",
+            "clickbench --rows 1m --check-drift",
+            "clickbench --rows 1m --store 2b",
+        ] {
+            let e = plan(&args(line)).unwrap_err();
+            assert!(e.contains("development loop"), "{line}: {e}");
+        }
+        assert!(plan(&args("clickbench --rows 1m")).is_ok());
     }
 
     #[test]
