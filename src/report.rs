@@ -120,6 +120,13 @@ pub struct SuiteResult {
     /// so that a single engine's table carries the sentence too.
     pub sample: Option<Sample>,
 
+    /// How many rows this engine was handed, where the suite says.
+    ///
+    /// The denominator of every rate in a report. It is carried rather than looked up, because a
+    /// smaller run hands over a different number of rows than the suite declares and a rate taken
+    /// against the wrong one is off by two orders of magnitude while looking entirely reasonable.
+    pub rows: Option<u64>,
+
     /// Whether this engine carried state from one query into the next.
     ///
     /// False for four of the five engines here, because a fresh process per run is what stops
@@ -240,6 +247,57 @@ impl SuiteResult {
             .iter()
             .filter_map(|q| q.runs.hot.relative_iqr().map(|r| (q.name.as_str(), r)))
             .max_by(|a, b| a.1.total_cmp(&b.1))
+    }
+
+    /// Rows of the source table this engine got through per second, over the whole suite.
+    ///
+    /// Every query in these suites reads the whole table, so the rate is the row count times the
+    /// number of queries divided by the total hot time. That is throughput in the sense a reader
+    /// means it: how much data the engine moved per second of the run. It is not a rate any single
+    /// query achieved and it is not comparable across suites, because a suite of forty three
+    /// queries and a suite of six put different amounts of work on the same rows.
+    ///
+    /// `None` when the suite does not declare a row count, because a rate over a guess is worse
+    /// than no rate.
+    #[must_use]
+    pub fn rows_per_second(&self) -> Option<f64> {
+        let rows = self.rows?;
+        let seconds = self.hot_total().as_secs_f64();
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a row count at f64 precision is exact to 9 PB"
+        )]
+        let scanned = (rows * self.queries.len() as u64) as f64;
+        (seconds > 0.0).then(|| scanned / seconds)
+    }
+
+    /// Bytes of the source Parquet this engine got through per second, over the whole suite.
+    ///
+    /// The same quantity as [`Self::rows_per_second`] in the unit a reader can compare against a
+    /// disk. Source bytes rather than the engine's own format, so that an engine whose format is
+    /// half the size does not get half the throughput for the same work.
+    #[must_use]
+    pub fn bytes_per_second(&self, source_bytes: u64) -> Option<f64> {
+        let seconds = self.hot_total().as_secs_f64();
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "a byte count at f64 precision is exact to 9 PB"
+        )]
+        let scanned = (source_bytes * self.queries.len() as u64) as f64;
+        (seconds > 0.0).then(|| scanned / seconds)
+    }
+
+    /// How many cores the engine actually kept busy, as CPU seconds over wall seconds.
+    ///
+    /// The number that says whether a wall clock on this machine can be read at all. One means the
+    /// engine ran single threaded, and on an eight core machine that is the most important fact
+    /// about the column. It is also the number that catches a wall clock which looks good because
+    /// the engine burned four times the CPU to get it.
+    #[must_use]
+    pub fn cores_used(&self) -> Option<f64> {
+        let cpu = self.hot_cpu()?.as_secs_f64();
+        let wall = self.hot_total().as_secs_f64();
+        (wall > 0.0).then_some(cpu / wall)
     }
 
     /// Bytes read at the block layer over the hot run of every query.
@@ -443,6 +501,7 @@ pub fn run(
         loaded,
         queries: results,
         sample: dataset.sample,
+        rows: dataset.rows,
         keeps_state: engine.keeps_state(),
         missing,
     })
@@ -648,6 +707,14 @@ pub struct Abstention {
     pub version: String,
     /// The sentence that goes where its numbers would have been.
     pub why: String,
+    /// Whether it was left out on purpose rather than being unable to run.
+    ///
+    /// The difference matters to the reproduce command in a report and nowhere else. An engine that
+    /// is not on the machine is left out of the next run too and the command does not have to say
+    /// anything about it, but an engine that was left out by `--engines` comes back the moment
+    /// somebody runs the command without that flag, and a command that gives a different set of
+    /// engines than the report it sits in is not a command that reproduces the report.
+    pub unasked: bool,
 }
 
 /// One suite, run on every engine that could run it.
@@ -659,6 +726,8 @@ pub struct Comparison {
     pub source_bytes: u64,
     /// How the data was cut down before any of this ran, when it was.
     pub sample: Option<Sample>,
+    /// How many rows every engine was handed, where the suite says.
+    pub rows: Option<u64>,
     /// The engines that produced numbers, in the order they were given.
     pub results: Vec<SuiteResult>,
     /// The engines that did not, and why.
@@ -795,6 +864,7 @@ pub fn compare(
                 engine: engine.name().to_owned(),
                 version: engine.version().to_owned(),
                 why: why.to_owned(),
+                unasked: false,
             });
             continue;
         }
@@ -804,6 +874,7 @@ pub fn compare(
                 engine: engine.name().to_owned(),
                 version: engine.version().to_owned(),
                 why: e.to_string(),
+                unasked: false,
             }),
         }
         // Right here, and on the failure path as well as the success one. Everything the report
@@ -814,7 +885,14 @@ pub fn compare(
         engine.unload();
     }
 
-    Comparison { suite, source_bytes: dataset.bytes(), sample: dataset.sample, results, skipped }
+    Comparison {
+        suite,
+        source_bytes: dataset.bytes(),
+        sample: dataset.sample,
+        rows: dataset.rows,
+        results,
+        skipped,
+    }
 }
 
 /// The cross engine table: one column per engine, one row per query, and the supporting rows.
@@ -1188,6 +1266,7 @@ mod tests {
                 answer: "10000000".to_owned(),
             }],
             sample: None,
+            rows: None,
             keeps_state: false,
             missing: Vec::new(),
         }
@@ -1230,6 +1309,7 @@ mod tests {
             suite: find("smoke").unwrap(),
             source_bytes: 92 * 1024 * 1024,
             sample: None,
+            rows: None,
             results,
             skipped,
         }
@@ -1503,6 +1583,7 @@ mod tests {
                 engine: "rudb".to_owned(),
                 version: "0.1.0".to_owned(),
                 why: "no path from a file into a chunk yet".to_owned(),
+                unasked: false,
             }],
         ));
         assert!(text.contains("rudb 0.1.0 did not run"), "{text}");

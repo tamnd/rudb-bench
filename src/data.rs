@@ -98,6 +98,13 @@ pub struct Sample {
     pub rows: u64,
     /// One row was kept out of every this many.
     pub every: u64,
+    /// What `--rows` was asked for, which is not the same as what came out.
+    ///
+    /// One row in every `n` of a hundred million lands near the number somebody asked for and
+    /// almost never on it. A report that told the reader to reproduce it with the count that came
+    /// out would send them to a different `every` and a different file, so the command a report
+    /// prints is built from this rather than from [`Self::rows`].
+    pub asked: u64,
 }
 
 impl Sample {
@@ -121,6 +128,13 @@ pub struct Dataset {
     /// `None` is the suite as the board runs it. Anything else is a development loop and not a
     /// result, and every table printed from it says so.
     pub sample: Option<Sample>,
+    /// How many rows the engines were actually handed, where that is known.
+    ///
+    /// The suite's declared count for a full run and the sample's for a smaller one, which is why
+    /// it lives here rather than being read off the suite wherever a rate is wanted. A report that
+    /// divided the suite's hundred million by the time a million row run took would be off by two
+    /// orders of magnitude and would look entirely plausible.
+    pub rows: Option<u64>,
 }
 
 impl Dataset {
@@ -158,7 +172,7 @@ pub fn prepare(
                  runs in under a minute",
             ));
         }
-        return smoke(scratch);
+        return smoke(scratch, suite);
     }
     if suite.tables.is_empty() {
         return Err(BenchError::new(format!(
@@ -210,7 +224,10 @@ pub fn prepare(
         };
         tables.push(Table { name: (*name).to_owned(), path, bytes });
     }
-    Ok(Dataset { tables, sample })
+    // The sample's count when there is one, because that is the file the engines were handed, and
+    // the suite's declared count otherwise.
+    let rows = sample.map_or(suite.rows, |s| Some(s.rows));
+    Ok(Dataset { tables, sample, rows })
 }
 
 /// Make a smaller version of one Parquet file, or find the one that was made before.
@@ -270,7 +287,7 @@ fn take(
         duckdb.plain(&[&sql])?;
     }
     let kept = count(&duckdb, &at)?;
-    Ok((at, Sample { full, rows: kept, every }))
+    Ok((at, Sample { full, rows: kept, every, asked: rows.wanted }))
 }
 
 /// How many rows a Parquet file holds, out of its footer rather than out of a scan.
@@ -302,7 +319,7 @@ pub fn root() -> PathBuf {
 /// not spend a second regenerating a file that is deterministic. Deleting it is how you regenerate
 /// it, and the name says which version generated it so an old one is not silently reused after the
 /// shape changes.
-fn smoke(scratch: &Path) -> Result<Dataset, BenchError> {
+fn smoke(scratch: &Path, suite: &Suite) -> Result<Dataset, BenchError> {
     let root = root();
     std::fs::create_dir_all(&root)
         .map_err(|e| BenchError::new(format!("cannot make {}: {e}", root.display())))?;
@@ -325,7 +342,11 @@ fn smoke(scratch: &Path) -> Result<Dataset, BenchError> {
     let bytes = std::fs::metadata(&path)
         .map_err(|e| BenchError::new(format!("cannot size {}: {e}", path.display())))?
         .len();
-    Ok(Dataset { tables: vec![Table { name: "smoke".to_owned(), path, bytes }], sample: None })
+    Ok(Dataset {
+        tables: vec![Table { name: "smoke".to_owned(), path, bytes }],
+        sample: None,
+        rows: suite.rows,
+    })
 }
 
 /// The smoke rows.
@@ -403,6 +424,7 @@ mod tests {
                 Table { name: "b".to_owned(), path: PathBuf::from("/b"), bytes: 32 },
             ],
             sample: None,
+            rows: None,
         };
         assert_eq!(set.bytes(), 42);
     }
@@ -427,7 +449,7 @@ mod tests {
 
     #[test]
     fn a_sample_says_what_it_is_a_sample_of() {
-        let sample = Sample { full: 99_997_497, rows: 999_975, every: 100 };
+        let sample = Sample { full: 99_997_497, rows: 999_975, every: 100, asked: 1_000_000 };
         assert_eq!(
             sample.sentence(),
             "999975 rows, one out of every 100 of the 99997497 in the full file"
