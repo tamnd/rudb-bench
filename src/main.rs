@@ -727,6 +727,8 @@ fn help() {
     println!("  RUDB_BENCH_SCRATCH      where a run makes the directory it works in and removes");
     println!("                          afterwards, default the temporary directory");
     println!("  RUDB_BENCH_MACHINE      what to call this machine in a committed record");
+    println!("  RUDB_BENCH_PROGRESS     say which query is running, on stderr, for the suites");
+    println!("                          that take hours and otherwise say nothing until the end");
     println!("  RUDB_BENCH_BASELINE     the records file, default baselines/<suite>.txt");
     println!("  RUDB_BENCH_RUDB_REPO    the rudb checkout the kernel suite measures");
     println!("  RUDB_BENCH_KERNELS      the kernel records file, default baselines/kernels.txt");
