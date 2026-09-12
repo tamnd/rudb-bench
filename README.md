@@ -10,30 +10,40 @@ The design is [`spec/15-rudb-bench.md`](https://github.com/tamnd/rudb/blob/main/
 
 ## Where rudb is, today
 
-rudb runs ClickBench now. Not all of it: 41 of the 43 queries, missing q19 and q33 because its hash aggregate does not spill and those two group by a key that is close to unique ([tamnd/rudb#220](https://github.com/tamnd/rudb/issues/220), milestone E5). Here is the whole table, seven engines, on `vmi3391933`, over three sizes of sample. Query time is what each engine says the queries cost it, which is the number the public board publishes.
+rudb runs ClickBench now. Not all of it: 41 of the 43 queries, missing q19 and q33 because its hash aggregate does not spill and those two group by a key that is close to unique ([tamnd/rudb#220](https://github.com/tamnd/rudb/issues/220), milestone E5). Here is the whole table, seven engines, on `gamingpc-wsl`, which is 32 hardware threads, over four sizes of sample. Query time is what each engine says the queries cost it, which is the number the public board publishes.
 
-| engine | 1k rows | 10k rows | 100k rows |
-| --- | --- | --- | --- |
-| duckdb v1.5.5 | 835ms | 561ms | 1.834s |
-| duckdb-pinned v2.0.0-dev84237 cc7e7bac7f | 895ms | 921ms | 2.040s |
-| clickhouse-server 26.9.1.1138 | 854ms | 896ms | 1.572s |
-| clickhouse-local 26.9.1.1138 | 2.979s | 2.574s | 4.439s |
-| datafusion 55.1.0 | 1.508s | 3.280s | 3.621s |
-| polars 1.44.2 | 3.208s | 3.362s | 6.104s |
-| rudb 0.2.28 | 151ms | 957ms | 4.812s |
+| engine | 1k rows | 10k rows | 100k rows | 1m rows |
+| --- | --- | --- | --- | --- |
+| duckdb v1.5.5 | 92ms | 124ms | 305ms | 1.879s |
+| duckdb-pinned v2.0.0-dev84237 cc7e7bac7f | 128ms | 148ms | 332ms | 1.831s |
+| clickhouse-server 26.9.1.1162 | 162ms | 149ms | 235ms | 670ms |
+| clickhouse-local 26.9.1.1162 | 150ms | 183ms | 455ms | 5.582s |
+| datafusion 55.1.0 | 213ms | 327ms | 565ms | 1.952s |
+| polars 1.44.2 | 577ms | 621ms | 845ms | 2.623s |
+| rudb 0.2.31 | 20ms | 121ms | 1.074s | 17.694s |
 
-Against DuckDB that is 0.18x, 1.71x and 2.62x. The direction of that line is the whole story and it is not a flattering one. rudb wins at a thousand rows because at a thousand rows almost nothing is being measured except what it costs to start, and rudb starts in nearly no memory at all. By a hundred thousand rows the fixed cost has stopped mattering and the throughput is what is left, and there rudb is two and a half times behind the thing it is trying to be twice as fast as. The gap grows with the data, which is the signature of a per-row cost rather than a startup cost, and per-row cost is what milestones E1 onward are for.
+Against DuckDB that is 0.22x, 0.98x, 3.52x and 9.42x. The direction of that line is the whole story and it is not a flattering one. rudb wins at a thousand rows because at a thousand rows almost nothing is being measured except what it costs to start, and rudb starts in nearly no memory at all. By a hundred thousand rows the fixed cost has stopped mattering and the throughput is what is left, and from there the gap doubles every time the data does. A gap that grows with the rows is a per-row cost rather than a startup cost, and per-row cost is what milestones E1 onward are for.
+
+The column that says why is the one nobody puts in a headline, which is how many cores each engine actually used.
+
+| cores used, hot | 1k rows | 10k rows | 100k rows | 1m rows |
+| --- | --- | --- | --- | --- |
+| duckdb v1.5.5 | 0.51 | 0.84 | 0.96 | 2.23 |
+| datafusion 55.1.0 | 1.02 | 3.09 | 2.32 | 2.53 |
+| rudb 0.2.31 | 0.00 | 0.12 | 0.71 | 0.97 |
+
+rudb never gets above one. It is a single threaded engine on a box with 32 threads, and roughly half of the gap at a million rows is that and not the code inside the loop. The other half is the loop.
 
 The memory half of the claim moves the same way and is worth putting next to it, because a time that came out of twice the memory is not the same result.
 
-| peak RSS | 1k rows | 10k rows | 100k rows |
-| --- | --- | --- | --- |
-| duckdb v1.5.5 | 33.50 MiB | 35.75 MiB | 63.75 MiB |
-| rudb 0.2.28 | 5.75 MiB | 19.45 MiB | 158.39 MiB |
+| peak RSS | 1k rows | 10k rows | 100k rows | 1m rows |
+| --- | --- | --- | --- | --- |
+| duckdb v1.5.5 | 36.52 MiB | 38.50 MiB | 65.89 MiB | 265.56 MiB |
+| rudb 0.2.31 | 6.08 MiB | 19.83 MiB | 158.63 MiB | 286.15 MiB |
 
-Five things travel with all of that or it is worth nothing. These are one hot run each rather than the five rule two asks for, so nothing here is publishable and the noise is visible in the table: DuckDB is faster over ten thousand rows than over one thousand, which is not a thing that happens, it is a single run. They are strided samples of the real `hits`, not the file, so nothing here is comparable to the board or to anybody else's number. rudb, DataFusion and Polars read the Parquet where it lies and pay to decode it inside every query, where DuckDB and ClickHouse paid once at load time and are being timed on a format of their own. The rudb column is 41 queries against everybody else's 43 and the ratio is taken over the shared ones. And `clickhouse-server` stayed up across the whole suite with its own caches warm, where every other row is a fresh process, so that row is a different quantity from the rest.
+Six things travel with all of that or it is worth nothing. These are one hot run each rather than the five rule two asks for, so nothing here is publishable and the noise is visible in the table. They are strided samples of the real `hits`, not the file, so nothing here is comparable to the board or to anybody else's number. rudb, DataFusion and Polars read the Parquet where it lies and pay to decode it inside every query, where DuckDB and ClickHouse paid once at load time and are being timed on a format of their own. The rudb column is 41 queries against everybody else's 43 and the ratio is taken over the shared ones. `clickhouse-server` stayed up across the whole suite with its own caches warm, where every other row is a fresh process, so that row is a different quantity from the rest. And the machine was shared with another agent's work for part of the sweep, which the reports say per engine and which is why the million row row is the least trustworthy of the four.
 
-The three runs in full, written by the harness with nothing typed into them by hand, are [1k](reports/run-clickbench-vmi3391933-1k.md), [10k](reports/run-clickbench-vmi3391933-10k.md) and [100k](reports/run-clickbench-vmi3391933-100k.md). Next up the ladder is a million rows and then the file.
+The four runs in full, written by the harness with nothing typed into them by hand, are [1k](reports/run-clickbench-gamingpc-wsl-1k.md), [10k](reports/run-clickbench-gamingpc-wsl-10k.md), [100k](reports/run-clickbench-gamingpc-wsl-100k.md) and [1m](reports/run-clickbench-gamingpc-wsl-1m.md). The same ladder on `vmi3391933`, which is eight threads, is in [reports/](reports/), and the two are not comparable to each other because rule seven says they are not. Next up the ladder is the file itself.
 
 ## Status
 

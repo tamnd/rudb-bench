@@ -6,12 +6,18 @@ Runs are added and never replaced. A number that was true on the day it was meas
 
 | file | suite | machine | engines | size | taken |
 | --- | --- | --- | --- | --- | --- |
+| [run-clickbench-gamingpc-wsl-1m.md](run-clickbench-gamingpc-wsl-1m.md) | ClickBench | gamingpc-wsl | 7 | 999975 rows, one in every 100 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-100k.md](run-clickbench-gamingpc-wsl-100k.md) | ClickBench | gamingpc-wsl | 7 | 99998 rows, one in every 1000 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-10k.md](run-clickbench-gamingpc-wsl-10k.md) | ClickBench | gamingpc-wsl | 7 | 10000 rows, one in every 10000 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-1k.md](run-clickbench-gamingpc-wsl-1k.md) | ClickBench | gamingpc-wsl | 7 | 1000 rows, one in every 99998 | 12 September 2026 |
 | [run-clickbench-vmi3391933-100k.md](run-clickbench-vmi3391933-100k.md) | ClickBench | vmi3391933 | 7 | 99998 rows, one in every 1000 | 12 September 2026 |
 | [run-clickbench-vmi3391933-10k.md](run-clickbench-vmi3391933-10k.md) | ClickBench | vmi3391933 | 7 | 10000 rows, one in every 10000 | 12 September 2026 |
 | [run-clickbench-vmi3391933-1k.md](run-clickbench-vmi3391933-1k.md) | ClickBench | vmi3391933 | 7 | 1000 rows, one in every 99998 | 12 September 2026 |
 | [run-clickbench-server3.md](run-clickbench-server3.md) | ClickBench | vmi3391933 | 2 | 999975 rows, one in every 100 | 11 September 2026 |
 | [m1-the-format-experiment.md](m1-the-format-experiment.md) | storage formats | several | n/a | n/a | September 2026 |
 
-The three sizes are one measurement rather than three, and they are meant to be read together. A single size cannot tell a fixed cost apart from a per row cost, and which of the two an engine is paying is usually the only thing worth knowing about it. See the top of the [README](../README.md) for what this particular ladder says.
+A ladder is one measurement rather than three or four, and the sizes are meant to be read together. A single size cannot tell a fixed cost apart from a per row cost, and which of the two an engine is paying is usually the only thing worth knowing about it. See the top of the [README](../README.md) for what these ladders say.
+
+There are two ladders here because there are two machines, and rule seven says a number from one machine is never compared against a number from another. `gamingpc-wsl` has 32 hardware threads and reaches a million rows. `vmi3391933` has 8 and stops at a hundred thousand. Reading a row off one and a row off the other is the mistake the rule exists to prevent.
 
 `run-clickbench-server3.md` is the odd one out and is kept because runs are kept. It predates rudb running the suite at all, so it is DuckDB against DataFusion and nothing else, and its file name says `server3` where the later ones say the host name the machine actually answers to.
