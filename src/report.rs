@@ -332,6 +332,21 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
     reasons
 }
 
+/// Whether to say what is happening while it happens, on stderr, when `RUDB_BENCH_PROGRESS` is set.
+///
+/// A ClickBench record is forty three queries, sixteen runs of each, two engines, over a file of a
+/// hundred million rows. That is hours in which this prints nothing, and a machine that is working
+/// looks exactly like a machine that has hung. Worse, when the run ends by being killed rather than
+/// by finishing, the query it died on is the one thing worth knowing and it is the one thing not
+/// written down.
+///
+/// Off unless asked for, because the table is the output of this program and a suite that takes a
+/// minute does not want a commentary in front of it. On stderr for the same reason, so that a shell
+/// redirecting the table to a file still shows the commentary and a pipe still gets only the table.
+fn progress() -> bool {
+    std::env::var_os("RUDB_BENCH_PROGRESS").is_some()
+}
+
 /// Load the data, then run every query cold once and hot `hot` times.
 ///
 /// # Errors
@@ -353,6 +368,9 @@ pub fn run(
             suite.name
         )));
     }
+    if progress() {
+        eprintln!("{}: loading {}", engine.name(), suite.name);
+    }
     let loaded = engine.load(tables)?;
 
     // Taken before the loop because the loop borrows the engine mutably, and needed inside it
@@ -361,9 +379,12 @@ pub fn run(
     let mut missing = Vec::new();
 
     let mut results = Vec::with_capacity(queries.len());
-    for query in queries {
+    for (at, query) in queries.iter().enumerate() {
         let Some(sql) = query.sql_for(&who) else {
             missing.push(query.name.to_owned());
+            if progress() {
+                eprintln!("{who}: {} of {}, {}, not run", at + 1, queries.len(), query.name);
+            }
             continue;
         };
         let mut costs: Vec<Cost> = Vec::with_capacity(hot + 1);
@@ -378,6 +399,16 @@ pub fn run(
         })?;
         // The first entry is the cold run, by the order `Runs::collect` calls the closure in.
         let (cold, rest) = costs.split_first().ok_or_else(|| BenchError::new("nothing ran"))?;
+        if progress() {
+            eprintln!(
+                "{who}: {} of {}, {}, cold {}, hot {}",
+                at + 1,
+                queries.len(),
+                query.name,
+                show(runs.cold),
+                show(runs.hot.median_of())
+            );
+        }
         results.push(QueryResult {
             name: query.name.to_owned(),
             shape: query.shape.to_owned(),
