@@ -27,6 +27,7 @@ use crate::data::Sample;
 use crate::engine::Loaded;
 use crate::measure::{Convention, Distribution, Runs};
 use crate::memory::{Cost, Peak};
+use crate::metrics::{Accounting, Internal};
 use crate::report::{Abstention, Comparison, QueryResult, SuiteResult};
 use crate::suite::find;
 
@@ -67,6 +68,13 @@ const PREAMBLE: &str = "\
 # `cold-is` says whether the cold number is a run that had to go to the device, which is `dropped`,
 # or a run that was merely the first one, which is `first`. Dropping the page cache needs root and
 # throws away every other process's working set, so it is asked for rather than assumed.
+#
+# `inside` is what the engine said about its own execution, and only rudb says: the cpu its
+# pipelines charged themselves, the cpu it measured around all of them, the cpu the whole process
+# was charged, the execute step, the cpu the pipelines spent outside any operator, the bytes it
+# says it held at the peak, how many pipelines ran, how many operators ran and how many of those
+# were reference implementations. The first two are the cross check, and a query where they
+# disagree is refused by `publishable` rather than dropped from the file.
 ";
 
 /// Add this result to the file, replacing whatever that engine had there before.
@@ -306,6 +314,60 @@ fn maybe(text: &str) -> Option<&str> {
     (text != "-").then_some(text)
 }
 
+/// What the engine said about its own execution, on one line.
+///
+/// Nine fixed fields, in the order they are read back. Only rudb writes one, so the line is absent
+/// for every other engine rather than being nine dashes.
+fn inside(i: &Internal) -> String {
+    format!(
+        "{} {} {} {} {} {} {} {} {}",
+        micros(i.accounting.accounted),
+        micros(i.accounting.measured),
+        i.accounting.process.map_or_else(|| "-".to_owned(), |d| micros(d).to_string()),
+        micros(i.execute),
+        micros(i.driver),
+        i.peak_bytes,
+        i.pipelines,
+        i.operators,
+        i.reference_impls
+    )
+}
+
+/// Read that back.
+fn uninside(text: &str) -> Result<Internal, String> {
+    let parts: Vec<&str> = text.split_whitespace().collect();
+    let [accounted, measured, process, execute, driver, peak, pipelines, operators, references] =
+        parts[..]
+    else {
+        return Err(format!("an inside line needs nine fields and this has `{text}`"));
+    };
+    let time = |field: &str| -> Result<Duration, String> {
+        field
+            .parse::<u64>()
+            .map(Duration::from_micros)
+            .map_err(|_| format!("{field} is not a number of microseconds"))
+    };
+    let number = |field: &str| -> Result<u64, String> {
+        field.parse::<u64>().map_err(|_| format!("{field} is not a number"))
+    };
+    Ok(Internal {
+        accounting: Accounting {
+            accounted: time(accounted)?,
+            measured: time(measured)?,
+            process: match maybe(process) {
+                Some(field) => Some(time(field)?),
+                None => None,
+            },
+        },
+        execute: time(execute)?,
+        driver: time(driver)?,
+        peak_bytes: number(peak)?,
+        pipelines: number(pipelines)? as usize,
+        operators: number(operators)? as usize,
+        reference_impls: number(references)? as usize,
+    })
+}
+
 /// One result, as the text that goes between two `[result]` markers.
 fn write_one(result: &SuiteResult, machine: &str, source_bytes: u64) -> String {
     let mut out = String::new();
@@ -361,6 +423,9 @@ fn write_one(result: &SuiteResult, machine: &str, source_bytes: u64) -> String {
         }
         let _ = writeln!(out, "  cold    {}", cost(&q.cold));
         let _ = writeln!(out, "  hot     {}", cost(&q.hot));
+        if let Some(i) = &q.internal {
+            let _ = writeln!(out, "  inside  {}", inside(i));
+        }
         let _ = writeln!(out, "  answer  {}", escape(&q.answer));
     }
     out
@@ -478,6 +543,10 @@ fn one_query(engine: &str, piece: &str) -> Result<QueryResult, String> {
         // writes an empty line and reading it back as missing would turn every one of them into a
         // disagreement the first time two engines were compared out of this file.
         answer: value(&body, "answer").map(unescape).unwrap_or_default(),
+        internal: match value(&body, "inside") {
+            Some(text) => Some(uninside(text)?),
+            None => None,
+        },
     })
 }
 
@@ -489,6 +558,7 @@ mod tests {
     use crate::engine::Loaded;
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
+    use crate::metrics::{Accounting, Internal};
     use crate::report::{QueryResult, SuiteResult};
     use crate::suite::find;
 
@@ -519,6 +589,19 @@ mod tests {
                 read: None,
             },
             answer: "1,2\n3,4".to_owned(),
+            internal: Some(Internal {
+                accounting: Accounting {
+                    accounted: Duration::from_micros(38_000),
+                    measured: Duration::from_micros(40_000),
+                    process: Some(Duration::from_micros(95_000)),
+                },
+                execute: Duration::from_micros(41_000),
+                driver: Duration::from_micros(900),
+                peak_bytes: 8192,
+                pipelines: 2,
+                operators: 4,
+                reference_impls: 4,
+            }),
         }
     }
 

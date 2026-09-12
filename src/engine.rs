@@ -47,6 +47,7 @@ use std::time::{Duration, Instant};
 
 use crate::data::{Table, both, output, size_of_tree};
 use crate::memory::{Cost, Timer};
+use crate::metrics::Document;
 use crate::suite::{Fixup, Loading, Suite, loading, sorting_key};
 
 /// Something went wrong with the apparatus, as opposed to a query being slow.
@@ -159,6 +160,13 @@ pub struct Ran {
     pub reported: Option<Duration>,
     /// Whatever the engine printed, kept so that two engines answering differently is visible.
     pub answer: String,
+    /// What the engine said about itself, for the one engine that can be asked.
+    ///
+    /// `None` for the other four, which are black boxes with a clock on the outside, and `None`
+    /// for a rudb that measured nothing. The harness uses it two ways: the per operator breakdown
+    /// goes into the report, and the cross check in [`crate::metrics::Accounting`] decides whether
+    /// the breakdown is worth publishing.
+    pub metrics: Option<Document>,
 }
 
 /// How an engine says what a query cost it.
@@ -355,11 +363,32 @@ struct Runner {
     /// How this engine says what the query cost it, which is a different number from the one the
     /// timer above takes and is the one the public board publishes.
     reported: Reported,
+    /// Where this engine writes its own breakdown, for the one engine that writes one.
+    ///
+    /// `None` for the four black boxes. Set for rudb, which is asked for it with `--metrics` and
+    /// is the only engine here whose internals this project is entitled to read.
+    metrics: Option<PathBuf>,
 }
 
 impl Runner {
     fn new(scratch: &Path, name: &str, reported: Reported) -> Self {
-        Self { timer: Timer::find(), report: scratch.join(format!("{name}-time.txt")), reported }
+        Self {
+            timer: Timer::find(),
+            report: scratch.join(format!("{name}-time.txt")),
+            reported,
+            metrics: None,
+        }
+    }
+
+    /// Ask this engine for its own breakdown, and say where it should be left.
+    fn watching(mut self, scratch: &Path, name: &str) -> Self {
+        self.metrics = Some(scratch.join(format!("{name}-metrics.jsonl")));
+        self
+    }
+
+    /// Where the engine should be told to write its breakdown, when it is asked for one.
+    fn metrics_path(&self) -> Option<&Path> {
+        self.metrics.as_deref()
     }
 
     /// A command that will be timed, or a plain one when there is no timer here.
@@ -372,6 +401,12 @@ impl Runner {
 
     /// Run it, and read back what it cost and what it printed.
     fn go(&self, mut command: Command, what: &str) -> Result<Ran, BenchError> {
+        // Taken away before the run rather than after it, so that a query which measured nothing
+        // reads as nothing. Left behind, the file from the run before would be read as this run's
+        // breakdown, and a stale breakdown that looks plausible is the worst of the three states.
+        if let Some(path) = self.metrics_path() {
+            let _ = std::fs::remove_file(path);
+        }
         let (stdout, stderr) = both(&mut command, what)?;
         let cost = match &self.timer {
             Ok(_) => Timer::read(&self.report),
@@ -382,7 +417,14 @@ impl Runner {
         let (reported, answer) = self
             .reported
             .parse(&String::from_utf8_lossy(&stdout), &String::from_utf8_lossy(&stderr));
-        Ok(Ran { cost, reported, answer })
+        // A breakdown that cannot be read is an error rather than an absence. The engine that
+        // wrote it is this project's own, so a document this cannot parse means the two halves
+        // have drifted apart, and the run that quietly dropped it would hide exactly that.
+        let metrics = match self.metrics_path() {
+            Some(path) => Document::last_in(path).map_err(BenchError::new)?,
+            None => None,
+        };
+        Ok(Ran { cost, reported, answer, metrics })
     }
 }
 
@@ -1101,7 +1143,7 @@ impl Engine for ClickhouseServer {
     fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
         self.start()?;
         let (answer, reported) = self.timed(sql)?;
-        Ok(Ran { cost: Cost::unavailable(NOT_THE_SERVER), reported, answer })
+        Ok(Ran { cost: Cost::unavailable(NOT_THE_SERVER), reported, answer, metrics: None })
     }
 
     fn unload(&mut self) {
@@ -1531,7 +1573,7 @@ impl Rudb {
             version: found.unwrap_or_else(|_| "not built".to_owned()),
             ddl: Vec::new(),
             source_bytes: 0,
-            runner: Runner::new(scratch, "rudb", Reported::RunTime),
+            runner: Runner::new(scratch, "rudb", Reported::RunTime).watching(scratch, "rudb"),
             suite: suite.name,
         }
     }
@@ -1610,6 +1652,13 @@ impl Engine for Rudb {
         };
         let mut command = self.runner.command(&binary);
         command.arg("-batch").arg("-csv").arg("-noheader");
+        // The one thing here that is not DuckDB's command line, and it is a flag DuckDB has no
+        // spelling of rather than a different spelling of one it has. It asks the shell for the
+        // breakdown of every statement, one JSON document per line, which is what the cross check
+        // in `crate::metrics` reads and what puts a per operator column in the report.
+        if let Some(path) = self.runner.metrics_path() {
+            command.arg("--metrics").arg(path);
+        }
         // `.timer on` and the same `Run Time (s):` line DuckDB prints, because rudb's shell is
         // DuckDB's shell. One more place the drop in claim is tested rather than asserted.
         command.arg("-c").arg(".timer on");
