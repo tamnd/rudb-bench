@@ -126,10 +126,43 @@ pub fn threads_here() -> usize {
 /// One minute rather than five or fifteen, because the useful question is what was happening during
 /// this run rather than during the afternoon. `None` on a system with no `/proc/loadavg`, which
 /// includes macOS, and a missing reading is reported as missing rather than as zero.
+///
+/// The reading taken before a suite is the one that answers the question. The one taken after it
+/// counts the engine's own threads, and an engine using every core is the thing being measured
+/// rather than a reason to distrust the measurement. See [`crate::report::SuiteResult::foreign_load`].
 #[must_use]
 pub fn load_now() -> Option<f64> {
     let text = std::fs::read_to_string("/proc/loadavg").ok()?;
     text.split_whitespace().next()?.parse().ok()
+}
+
+/// Wait for the machine to go quiet, when the run asked to be measured on a quiet one.
+///
+/// `RUDB_BENCH_SETTLE` is the one minute load average to wait for, and nothing waits without it. A
+/// harness that refuses a result for a reason sixty seconds of patience would have removed is a
+/// harness that wastes an afternoon per sweep, and the reason is usually not somebody else at all:
+/// the one minute average decays over a minute, so a sweep that runs seven engines back to back
+/// reads the tail of its own previous column as foreign work.
+///
+/// Returns what it waited for, so the caller can say so. `None` where there is no load to read, and
+/// where nothing was asked for. Gives up after an hour and returns the reading anyway rather than
+/// sitting there forever, because a machine that has been busy for an hour is not about to stop and
+/// the run should go ahead and be refused with the number attached.
+pub fn settle(say: impl Fn(&str)) -> Option<f64> {
+    let want: f64 = std::env::var("RUDB_BENCH_SETTLE").ok()?.trim().parse().ok()?;
+    let mut waited = 0;
+    loop {
+        let now = load_now()?;
+        if now <= want || waited >= 60 {
+            if waited > 0 {
+                say(&format!("starting at load {now:.2} after waiting {waited} minutes"));
+            }
+            return Some(now);
+        }
+        say(&format!("waiting for the machine, load is {now:.2} and this run wants {want:.2}"));
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        waited += 1;
+    }
 }
 
 /// Whether this run was asked to make its cold runs actually cold.

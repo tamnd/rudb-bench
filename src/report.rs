@@ -158,6 +158,9 @@ pub struct SuiteResult {
     /// Two readings rather than one because a run that started quiet and ended busy is a run where
     /// the late queries are slow and the early ones are not, which reads as a regression in
     /// whichever queries happen to be at the end of the file.
+    ///
+    /// The two are not the same kind of number and only the first one is a reading of work that was
+    /// not ours. See [`Self::foreign_load`], which is the one the publication rules ask.
     pub load: Option<(f64, f64)>,
     /// Whether the page cache was dropped before every one of this engine's cold runs.
     ///
@@ -174,10 +177,23 @@ pub struct SuiteResult {
 }
 
 impl SuiteResult {
-    /// The worse of the two load readings, which is the one a reader should be warned about.
+    /// How busy the machine was with work that was not this run's.
+    ///
+    /// The reading from before the suite started, and not the larger of the two. The one taken
+    /// afterwards counts the engine's own threads, and an engine that uses every core is supposed
+    /// to use every core: on a thirty two thread box a good parallel scan puts the one minute
+    /// average near thirty two all by itself, so the larger of the two would refuse every engine
+    /// that does the thing being measured. The reading from before is the only one where nothing of
+    /// ours was running.
+    ///
+    /// It is still not clean. The one minute average decays over a minute, so an engine that starts
+    /// straight after the last one inherits the tail of it, and a sweep that runs seven engines back
+    /// to back reads its own previous column as somebody else's work. The way out of that is to let
+    /// the machine settle between engines rather than to make this cleverer, and the number is
+    /// written into the artifact either way so a reader can see the tail for what it is.
     #[must_use]
-    pub fn busiest(&self) -> Option<f64> {
-        self.load.map(|(before, after)| f64::max(before, after))
+    pub fn foreign_load(&self) -> Option<f64> {
+        self.load.map(|(before, _)| before)
     }
     /// Sum of the hot headline over every query, which is the diagnostic total.
     #[must_use]
@@ -440,17 +456,18 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
         ));
     }
     // A busy machine is the reason this harness has thrown away more measurements than any bug in
-    // it has. The threshold is half the hardware threads, which is generous: a suite that runs one
-    // engine at a time on an otherwise idle box sits near zero, and anything approaching the core
-    // count means the run was sharing the machine with work that wanted all of it.
-    if let Some(busiest) = result.busiest() {
+    // it has. The threshold is half the hardware threads, which is generous: a machine with nothing
+    // else on it sits near zero before a suite starts, and anything approaching the core count means
+    // there was already work on it that wanted all of it.
+    if let Some(foreign) = result.foreign_load() {
         let threads = crate::machine::threads_here();
         #[expect(clippy::cast_precision_loss, reason = "core counts are small integers")]
         let room = threads as f64 / 2.0;
-        if busiest > room {
+        if foreign > room {
             reasons.push(format!(
-                "the one minute load average reached {busiest:.2} on a machine with {threads} \
-                 hardware threads, so this was measured against somebody else's work"
+                "the one minute load average was {foreign:.2} before this suite started, on a \
+                 machine with {threads} hardware threads, so this was measured against somebody \
+                 else's work"
             ));
         }
     }
@@ -561,6 +578,13 @@ pub fn run(
     // Read once and carried, rather than read per query, so that a run cannot be half forced
     // because somebody changed the environment under it.
     let forcing_cold = crate::machine::forcing_cold();
+    // Waiting happens before the reading, so that the reading is of the machine this suite actually
+    // ran on rather than of the one it was asked to run on. Nothing waits unless the run said to.
+    crate::machine::settle(|line| {
+        if progress() {
+            eprintln!("{}: {line}", engine.name());
+        }
+    });
     // Before the load rather than before the first query, because the load is timed too and a
     // machine that was busy through it reports a load cost that belongs to somebody else.
     let before = crate::machine::load_now();
@@ -1531,9 +1555,16 @@ mod tests {
         // that looks exactly like a table. The threshold is half the hardware threads, so the
         // number here is well past it on any machine this runs on.
         let mut busy = result(Peak::Bytes(1024), 5);
-        busy.load = Some((0.4, 512.0));
+        busy.load = Some((512.0, 512.0));
         let reasons = publishable(&busy);
         assert!(reasons.iter().any(|r| r.contains("load average")), "{reasons:?}");
+
+        // The reading from after the suite is the engine's own threads. An engine that used every
+        // core did the thing this measures, and refusing it would refuse every engine worth
+        // measuring.
+        let mut worked = result(Peak::Bytes(1024), 5);
+        worked.load = Some((0.1, 512.0));
+        assert!(!publishable(&worked).iter().any(|r| r.contains("load average")));
 
         // An idle machine gets no such line, and neither does one that will not say.
         let mut idle = result(Peak::Bytes(1024), 5);
