@@ -63,6 +63,10 @@ const PREAMBLE: &str = "\
 # `loadavg` is the one minute load average before and after that engine's suite, on a shared fleet
 # where the usual reason two runs disagree is that one of them had the machine to itself. `load` a
 # few lines further down is a different thing, the time the load step took.
+#
+# `cold-is` says whether the cold number is a run that had to go to the device, which is `dropped`,
+# or a run that was merely the first one, which is `first`. Dropping the page cache needs root and
+# throws away every other process's working set, so it is asked for rather than assumed.
 ";
 
 /// Add this result to the file, replacing whatever that engine had there before.
@@ -317,6 +321,9 @@ fn write_one(result: &SuiteResult, machine: &str, source_bytes: u64) -> String {
     if let Some((before, after)) = result.load {
         let _ = writeln!(out, "loadavg   {before} {after}");
     }
+    // Whether the cold column is a run that went to the device or a run that was merely first. A
+    // block written before this line existed reads back as `first`, which is what those runs were.
+    let _ = writeln!(out, "cold-is   {}", if result.cold_forced { "dropped" } else { "first" });
     if let Some(rows) = result.rows {
         let _ = writeln!(out, "rows      {rows}");
     }
@@ -424,6 +431,7 @@ fn read_one(engine: &str, block: &str) -> Result<(SuiteResult, u64), String> {
             rows: value(block, "rows").and_then(|r| r.parse().ok()),
             keeps_state: need("state")? == "kept",
             load: value(block, "loadavg").and_then(loadavg),
+            cold_forced: value(block, "cold-is").is_some_and(|how| how.trim() == "dropped"),
         },
         source_bytes,
     ))
@@ -532,6 +540,7 @@ mod tests {
             rows: Some(99_998),
             keeps_state: false,
             load: None,
+            cold_forced: false,
         }
     }
 
@@ -559,6 +568,23 @@ mod tests {
         let mut quiet = result();
         quiet.load = None;
         assert_eq!(read_one("duckdb", &write_one(&quiet, "here", 1)).unwrap().0.load, None);
+    }
+
+    #[test]
+    fn what_the_cold_column_means_survives_the_file() {
+        // A table assembled a week later has to know whether cold meant off the device or merely
+        // first, and the two differ by the whole cost of reading the file.
+        let mut dropped = result();
+        dropped.cold_forced = true;
+        assert!(read_one("duckdb", &write_one(&dropped, "here", 1)).unwrap().0.cold_forced);
+
+        let warm = result();
+        assert!(!read_one("duckdb", &write_one(&warm, "here", 1)).unwrap().0.cold_forced);
+
+        // A block written before the line existed is read as the weaker of the two, which is what
+        // those runs actually were.
+        let old = write_one(&warm, "here", 1).replace("cold-is   first\n", "");
+        assert!(!read_one("duckdb", &old).unwrap().0.cold_forced);
     }
 
     #[test]

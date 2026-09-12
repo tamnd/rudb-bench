@@ -730,6 +730,7 @@ mod tests {
             keeps_state: false,
             missing: Vec::new(),
             load: None,
+            cold_forced: false,
         }
     }
 

@@ -132,6 +132,43 @@ pub fn load_now() -> Option<f64> {
     text.split_whitespace().next()?.parse().ok()
 }
 
+/// Whether this run was asked to make its cold runs actually cold.
+///
+/// Off unless `RUDB_BENCH_DROP_CACHES` is set to something other than `0` or `no`, which is the
+/// wrong default for a benchmark harness and the right one for this fleet. Dropping the page cache
+/// throws away every other process's working set, and three of the four machines have somebody
+/// else's build on them at any hour. Turning it on for a run that is going to be published is one
+/// environment variable, and the report says which of the two it was either way, so nothing silently
+/// claims a cold number it did not take.
+#[must_use]
+pub fn forcing_cold() -> bool {
+    match std::env::var("RUDB_BENCH_DROP_CACHES") {
+        Ok(set) => !matches!(set.trim(), "" | "0" | "no"),
+        Err(_) => false,
+    }
+}
+
+/// Drop the page cache, so that the next read of the data comes off the device.
+///
+/// `sync` first, because dirty pages cannot be dropped and a write that has not reached the device
+/// stays in memory and gets read back out of it. Then `3` into `drop_caches`, which is the page
+/// cache plus the dentry and inode caches, and it is the whole set because the cost of opening and
+/// stat-ing a file is part of what a first read costs.
+///
+/// # Errors
+///
+/// When there is no `drop_caches`, which is every system that is not Linux, or when this process
+/// cannot write to it, which is every user that is not root. Both come back as a sentence rather
+/// than as a silent warm run under a cold heading.
+pub fn drop_caches() -> Result<(), String> {
+    let synced = Command::new("sync").status().map_err(|e| format!("sync did not run: {e}"))?;
+    if !synced.success() {
+        return Err("sync failed, so dirty pages would have stayed in memory".to_owned());
+    }
+    std::fs::write("/proc/sys/vm/drop_caches", "3\n")
+        .map_err(|e| format!("cannot write to /proc/sys/vm/drop_caches: {e}"))
+}
+
 /// What to call this machine in a file that gets committed.
 ///
 /// The hostname, unless `RUDB_BENCH_MACHINE` says otherwise. The override exists for CI, where the
