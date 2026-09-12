@@ -159,6 +159,18 @@ pub struct SuiteResult {
     /// the late queries are slow and the early ones are not, which reads as a regression in
     /// whichever queries happen to be at the end of the file.
     pub load: Option<(f64, f64)>,
+    /// Whether the page cache was dropped before every one of this engine's cold runs.
+    ///
+    /// The cold column has always been the first run of a query rather than a run that had to go to
+    /// the device, which are two different measurements and only one of them is what the word cold
+    /// means. Official ClickBench drops the cache before each query's first try, and until this
+    /// existed the artifact said cold and meant first.
+    ///
+    /// False is the ordinary case, because dropping the cache throws away every other process's
+    /// working set and this fleet is shared. It is not a defect in the run, it is a fact about what
+    /// the cold column is, and the report prints which of the two it was rather than leaving a
+    /// reader to assume the stronger one.
+    pub cold_forced: bool,
 }
 
 impl SuiteResult {
@@ -546,6 +558,9 @@ pub fn run(
     if progress() {
         eprintln!("{}: loading {}", engine.name(), suite.name);
     }
+    // Read once and carried, rather than read per query, so that a run cannot be half forced
+    // because somebody changed the environment under it.
+    let forcing_cold = crate::machine::forcing_cold();
     // Before the load rather than before the first query, because the load is timed too and a
     // machine that was busy through it reports a load cost that belongs to somebody else.
     let before = crate::machine::load_now();
@@ -565,6 +580,16 @@ pub fn run(
             }
             continue;
         };
+        // Per query rather than once per suite, because the cold column is per query and the run
+        // before this one has just pulled the whole file back into memory. This is what official
+        // ClickBench does between queries and for the same reason.
+        if forcing_cold {
+            if let Err(why) = crate::machine::drop_caches() {
+                return Err(BenchError::new(format!(
+                    "asked for cold runs that are cold, and {why}"
+                )));
+            }
+        }
         let mut costs: Vec<Cost> = Vec::with_capacity(hot + 1);
         let mut said: Vec<Option<Duration>> = Vec::with_capacity(hot + 1);
         let mut answer = String::new();
@@ -611,6 +636,7 @@ pub fn run(
         keeps_state: engine.keeps_state(),
         missing,
         load: before.zip(crate::machine::load_now()),
+        cold_forced: forcing_cold,
     })
 }
 
@@ -1446,6 +1472,7 @@ mod tests {
             keeps_state: false,
             missing: Vec::new(),
             load: None,
+            cold_forced: false,
         }
     }
 

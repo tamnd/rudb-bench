@@ -299,6 +299,35 @@ fn engines(compared: &Comparison) -> String {
             busy.join(", ")
         ));
     }
+    // Said every time rather than only when it is the weaker of the two, because a reader who sees
+    // nothing about the page cache assumes the stronger one, and for most of this project's history
+    // the stronger one was not what happened.
+    let forced = compared.results.iter().filter(|r| r.cold_forced).count();
+    if forced == compared.results.len() && !compared.results.is_empty() {
+        out.push_str(
+            "The cold column is a run that had to go to the device. The page cache was dropped \
+             before each query's first run, the way official ClickBench does it.\n\n",
+        );
+    } else if forced == 0 {
+        out.push_str(
+            "The cold column is the first run of each query rather than a run that had to go to \
+             the device. The page cache was not dropped, so the file was still in memory from \
+             whatever read it last. That makes cold a warm number taken before the others rather \
+             than a measure of what a first pass off the disk costs, and the gap between the two \
+             is the whole of the read. Set `RUDB_BENCH_DROP_CACHES=1` and run as root to get the \
+             other one.\n\n",
+        );
+    } else {
+        let names: Vec<&str> =
+            compared.results.iter().filter(|r| r.cold_forced).map(|r| r.engine.as_str()).collect();
+        out.push_str(&format!(
+            "The cold column means two different things in this table, which is the one way it \
+             should never be read. These engines had the page cache dropped before each query's \
+             first run: {}. The rest were measured with whatever was already in memory, so their \
+             cold numbers are lower for a reason that has nothing to do with the engine.\n\n",
+            names.join(", ")
+        ));
+    }
     out
 }
 
@@ -770,6 +799,7 @@ mod tests {
             rows: Some(10_000_000),
             keeps_state: false,
             load: None,
+            cold_forced: false,
         }
     }
 
