@@ -558,6 +558,7 @@ fn inside(result: &SuiteResult) -> String {
                     None => "nothing to compare".to_owned(),
                 },
                 show(i.driver),
+                show(i.accounting.build),
                 i.accounting.unattributed().map_or_else(|| "not read".to_owned(), show),
                 peak_cell(&Peak::Bytes(i.peak_bytes)),
                 format!("{} of {}", i.reference_impls, i.operators),
@@ -577,6 +578,7 @@ fn inside(result: &SuiteResult) -> String {
             "measured",
             "apart",
             "driver",
+            "build",
             "outside",
             "held",
             "reference",
@@ -585,12 +587,14 @@ fn inside(result: &SuiteResult) -> String {
     ));
     out.push_str(
         "Read from the breakdown the engine wrote for its cold run. `accounted` is what its \
-         pipelines charged themselves and `measured` is what it measured around all of them, so \
+         pipelines charged themselves and `measured` is what it measured around running them, so \
          `apart` is the cross check and anything over five percent is time the breakdown cannot \
          explain. `driver` is the part of `accounted` that was not inside an operator, which is \
-         the scheduling. `outside` is the CPU the process spent before and after the execution, \
-         which is starting, opening the data and printing the answer, and it is the reason the \
-         wall clock column and the query time column differ. `held` is what the operators \
+         the loop that runs a pipeline rather than the operators it calls. `build` is what the \
+         engine spent putting the tree together, which is before there is a pipeline to charge and \
+         is why it is off the right hand side of the check. `outside` is the CPU the process spent \
+         on everything else, which is starting, opening the data and printing the answer, and it \
+         is the reason the wall clock column and the query time column differ. `held` is what the operators \
          reserved, which is not the resident set of the process. `reference` is how many \
          operators ran the reference implementation of their seam, which is the slow path kept \
          for differential testing.\n\n",

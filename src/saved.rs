@@ -70,11 +70,12 @@ const PREAMBLE: &str = "\
 # throws away every other process's working set, so it is asked for rather than assumed.
 #
 # `inside` is what the engine said about its own execution, and only rudb says: the cpu its
-# pipelines charged themselves, the cpu it measured around all of them, the cpu the whole process
+# pipelines charged themselves, the cpu it measured around running them, the cpu the whole process
 # was charged, the execute step, the cpu the pipelines spent outside any operator, the bytes it
-# says it held at the peak, how many pipelines ran, how many operators ran and how many of those
-# were reference implementations. The first two are the cross check, and a query where they
-# disagree is refused by `publishable` rather than dropped from the file.
+# says it held at the peak, how many pipelines ran, how many operators ran, how many of those were
+# reference implementations, and the cpu that went on building the tree before any pipeline
+# existed. The first two are the cross check, and a query where they disagree is refused by
+# `publishable` rather than dropped from the file.
 ";
 
 /// Add this result to the file, replacing whatever that engine had there before.
@@ -316,11 +317,14 @@ fn maybe(text: &str) -> Option<&str> {
 
 /// What the engine said about its own execution, on one line.
 ///
-/// Nine fixed fields, in the order they are read back. Only rudb writes one, so the line is absent
-/// for every other engine rather than being nine dashes.
+/// Ten fixed fields, in the order they are read back. Only rudb writes one, so the line is absent
+/// for every other engine rather than being ten dashes.
+///
+/// The build is last rather than beside the two numbers it belongs with, because it was added
+/// after the line existed and a file written before it is a file somebody still wants to open.
 fn inside(i: &Internal) -> String {
     format!(
-        "{} {} {} {} {} {} {} {} {}",
+        "{} {} {} {} {} {} {} {} {} {}",
         micros(i.accounting.accounted),
         micros(i.accounting.measured),
         i.accounting.process.map_or_else(|| "-".to_owned(), |d| micros(d).to_string()),
@@ -329,17 +333,25 @@ fn inside(i: &Internal) -> String {
         i.peak_bytes,
         i.pipelines,
         i.operators,
-        i.reference_impls
+        i.reference_impls,
+        micros(i.accounting.build)
     )
 }
 
 /// Read that back.
 fn uninside(text: &str) -> Result<Internal, String> {
     let parts: Vec<&str> = text.split_whitespace().collect();
-    let [accounted, measured, process, execute, driver, peak, pipelines, operators, references] =
-        parts[..]
-    else {
-        return Err(format!("an inside line needs nine fields and this has `{text}`"));
+    // Nine fields is a file written before the build was split out of the measured cpu, and zero is
+    // what it meant at the time: everything the engine measured was on the right of the check.
+    let (
+        [accounted, measured, process, execute, driver, peak, pipelines, operators, references],
+        build,
+    ) = match parts[..] {
+        [a, b, c, d, e, f, g, h, i] => ([a, b, c, d, e, f, g, h, i], "0"),
+        [a, b, c, d, e, f, g, h, i, j] => ([a, b, c, d, e, f, g, h, i], j),
+        _ => {
+            return Err(format!("an inside line needs nine or ten fields and this has `{text}`"));
+        }
     };
     let time = |field: &str| -> Result<Duration, String> {
         field
@@ -354,6 +366,7 @@ fn uninside(text: &str) -> Result<Internal, String> {
         accounting: Accounting {
             accounted: time(accounted)?,
             measured: time(measured)?,
+            build: time(build)?,
             process: match maybe(process) {
                 Some(field) => Some(time(field)?),
                 None => None,
@@ -593,6 +606,7 @@ mod tests {
                 accounting: Accounting {
                     accounted: Duration::from_micros(38_000),
                     measured: Duration::from_micros(40_000),
+                    build: Duration::from_micros(1_500),
                     process: Some(Duration::from_micros(95_000)),
                 },
                 execute: Duration::from_micros(41_000),
@@ -636,6 +650,28 @@ mod tests {
         let (after, bytes) = read_one("duckdb", &text).unwrap();
         assert_eq!(before, after);
         assert_eq!(bytes, 15_848_298);
+    }
+
+    #[test]
+    fn a_file_written_before_the_build_was_split_out_still_opens() {
+        // Nine fields is every inside line saved up to now, and refusing to read them would throw
+        // away the history the board is built from to gain a column that is zero in all of it.
+        let before = result();
+        let text = write_one(&before, "here", 1);
+        let older: String = text
+            .lines()
+            .map(|line| match line.strip_prefix("  inside  ") {
+                Some(fields) => {
+                    let nine: Vec<&str> = fields.split_whitespace().collect();
+                    format!("  inside  {}\n", nine[..9].join(" "))
+                }
+                None => format!("{line}\n"),
+            })
+            .collect();
+        let after = read_one("duckdb", &older).unwrap().0;
+        let inside = after.queries[0].internal.as_ref().expect("rudb wrote an inside line");
+        assert_eq!(inside.accounting.build, Duration::ZERO, "no build means none of it was build");
+        assert_eq!(inside.execute, before.queries[0].internal.as_ref().unwrap().execute);
     }
 
     #[test]
