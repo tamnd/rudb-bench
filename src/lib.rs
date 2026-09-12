@@ -31,6 +31,7 @@ pub mod fleet;
 pub mod kernels;
 pub mod ledger;
 pub mod machine;
+pub mod markdown;
 pub mod measure;
 pub mod memory;
 pub mod regress;

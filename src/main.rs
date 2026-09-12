@@ -254,6 +254,14 @@ struct Plan {
     /// anything at all, which a million rows answers in minutes. Nothing measured this way is
     /// comparable to anything and every table printed from it says so.
     rows: Option<Rows>,
+    /// Whether to write the run out as markdown as well as printing it.
+    ///
+    /// The terminal table is for the person watching the run and it drops most of what was
+    /// measured, because five engines and forty three queries do not fit in eighty columns any
+    /// other way. The file keeps everything, and it keeps it somewhere that can be committed and
+    /// read next week, which is the difference between a measurement and a number somebody
+    /// remembers.
+    report: bool,
 }
 
 /// Every engine this harness knows how to drive, in the order [`discover`] builds them.
@@ -275,6 +283,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     let mut store = None;
     let mut engines = None;
     let mut rows = None;
+    let mut report = false;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let wanted = match arg.as_str() {
@@ -309,6 +318,10 @@ fn plan(args: &[String]) -> Result<Plan, String> {
                 let given =
                     rest.next().ok_or("--rows wants a row count after it, such as `--rows 1m`")?;
                 rows = Some(Rows::parse(given)?);
+                continue;
+            }
+            "--report" => {
+                report = true;
                 continue;
             }
             "--engines" => {
@@ -372,6 +385,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
         store,
         engines,
         rows,
+        report,
     })
 }
 
@@ -422,6 +436,21 @@ fn run(plan: &Plan) -> ExitCode {
         println!();
     }
     print!("{}", comparison(&compared));
+
+    // Before the scratch directory goes, because the filesystem fact the machine record wants is
+    // the one under the data and not the one under the binary, and on most of the fleet those are
+    // different devices.
+    if plan.report {
+        let facts = machine::probe(&scratch);
+        let here = machine::name_here();
+        match rudb_bench::markdown::write(&compared, &facts, &here) {
+            Ok(at) => println!("\nwrote {}", at.display()),
+            // A report that could not be written is worth saying and is not worth failing a run
+            // over. The numbers are already on the terminal and the alternative is an hour of
+            // ClickBench thrown away because a directory was read only.
+            Err(e) => eprintln!("\nrudb-bench: could not write the report: {e}"),
+        }
+    }
 
     let _ = std::fs::remove_dir_all(&scratch);
     if compared.results.is_empty() {
@@ -669,7 +698,12 @@ fn discover(
 
 /// An engine that is not on this machine, as a line of the report.
 fn gap(what: &str, why: &BenchError) -> Abstention {
-    Abstention { engine: what.to_owned(), version: "not found".to_owned(), why: why.to_string() }
+    Abstention {
+        engine: what.to_owned(),
+        version: "not found".to_owned(),
+        why: why.to_string(),
+        unasked: false,
+    }
 }
 
 /// An engine that is on this machine and was left out of this run on purpose.
@@ -678,6 +712,7 @@ fn unasked(what: &str) -> Abstention {
         engine: what.to_owned(),
         version: "not asked for".to_owned(),
         why: "left out of this run by --engines".to_owned(),
+        unasked: true,
     }
 }
 
@@ -736,6 +771,8 @@ fn help() {
     println!("    --rows n        run over this many rows instead of the whole table, as 1m or");
     println!("                    200k, for the development loop. Not comparable to anything,");
     println!("                    and not allowed with the flags that write a record");
+    println!("    --report        also write the whole run to reports/run-<suite>-<machine>.md,");
+    println!("                    which keeps every metric the terminal table has to drop");
     println!("  ledger        print what each layer bought, from the committed runs");
     println!("  kernels       measure rudb's own loops in rudb's process, per row");
     println!("    --repo <path>   the rudb checkout, default ../rudb");
@@ -895,6 +932,18 @@ mod tests {
             assert!(e.contains("development loop"), "{line}: {e}");
         }
         assert!(plan(&args("clickbench --rows 1m")).is_ok());
+    }
+
+    /// The markdown file is asked for and never written by default, because a run that dirtied the
+    /// checkout every time it was invoked is a run people stop invoking from the checkout.
+    #[test]
+    fn the_markdown_report_is_off_until_it_is_asked_for() {
+        assert!(!plan(&args("clickbench")).unwrap().report);
+        assert!(plan(&args("clickbench --report")).unwrap().report);
+        // It says nothing about the numbers, so it goes with anything, including a smaller run and
+        // the gate flags that a smaller run is refused with.
+        assert!(plan(&args("clickbench --rows 1m --report")).unwrap().report);
+        assert!(plan(&args("smoke --record --report")).unwrap().report);
     }
 
     #[test]

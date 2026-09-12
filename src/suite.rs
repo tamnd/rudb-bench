@@ -28,6 +28,16 @@ pub struct Suite {
     pub tables: &'static [&'static str],
     /// Where under the data root those files live, relative, and empty for the root itself.
     pub directory: &'static str,
+    /// How many rows the suite's data holds in total, where that is fixed.
+    ///
+    /// The throughput numbers in a report are rows a second, and rows a second needs a row count.
+    /// It is declared here rather than counted at run time for the same reason the missing query
+    /// list is: a number that comes out of the data is a number that changes when somebody points
+    /// the harness at a different file and nobody notices, and a number in this table is one
+    /// somebody reviewed. `None` for the suites whose size is a scale factor the command line has
+    /// not learned to take yet, and a report over one of those prints no rows a second rather than
+    /// a rate over a row count it guessed.
+    pub rows: Option<u64>,
     /// What has to be true before it runs.
     pub needs: &'static str,
     /// Whether a number out of it is comparable to a public board.
@@ -44,6 +54,7 @@ pub const SUITES: &[Suite] = &[
         queries: SMOKE.len(),
         tables: &["smoke"],
         directory: "",
+        rows: Some(10_000_000),
         needs: "nothing, it generates its own data",
         comparable: false,
         note: "Not a benchmark. Ten million rows of generated integers and strings, and six \
@@ -57,6 +68,7 @@ pub const SUITES: &[Suite] = &[
         queries: 43,
         tables: &["hits"],
         directory: "",
+        rows: Some(99_997_497),
         needs: "hits at 99,997,497 rows, about 70 GB as TSV",
         comparable: true,
         note: "The board this project's headline claim is stated against. Run to the official \
@@ -72,6 +84,7 @@ pub const SUITES: &[Suite] = &[
             "lineitem", "orders", "customer", "part", "partsupp", "supplier", "nation", "region",
         ],
         directory: "tpch100",
+        rows: None,
         needs: "dbgen at SF10, SF100 and SF1000",
         comparable: true,
         note: "The three scales are three different measurements. SF10 fits in cache on a large \
@@ -85,6 +98,7 @@ pub const SUITES: &[Suite] = &[
         queries: 99,
         tables: &[],
         directory: "tpcds100",
+        rows: None,
         needs: "dsdgen at SF100",
         comparable: true,
         note: "All 99, including the ones that are unpleasant. The suite that punishes a narrow \
@@ -96,6 +110,7 @@ pub const SUITES: &[Suite] = &[
         queries: 113,
         tables: &[],
         directory: "job",
+        rows: None,
         needs: "the IMDb dataset",
         comparable: true,
         note: "Where Robust Predicate Transfer either works or does not. Reported with the \
@@ -108,6 +123,7 @@ pub const SUITES: &[Suite] = &[
         queries: 15,
         tables: &[],
         directory: "h2o",
+        rows: None,
         needs: "the h2o.ai generator",
         comparable: true,
         note: "Group by and join, fast to run and widely quoted, which makes it the best \
@@ -119,6 +135,7 @@ pub const SUITES: &[Suite] = &[
         queries: 0,
         tables: &[],
         directory: "",
+        rows: None,
         needs: "an engine to look inside",
         comparable: false,
         note: "Per encoding decode throughput, per kernel throughput, hash table insert and probe \

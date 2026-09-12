@@ -50,7 +50,11 @@ fn small(duckdb: &Duckdb, at: &std::path::Path) -> Dataset {
         )])
         .expect("writing a parquet should work");
     let bytes = std::fs::metadata(&path).unwrap().len();
-    Dataset { tables: vec![Table { name: "t".to_owned(), path, bytes }], sample: None }
+    Dataset {
+        tables: vec![Table { name: "t".to_owned(), path, bytes }],
+        sample: None,
+        rows: Some(100_000),
+    }
 }
 
 #[test]
