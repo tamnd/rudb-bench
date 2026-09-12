@@ -1616,7 +1616,7 @@ pub fn loading(suite: &str, engine: &str, table: &str) -> Option<Loading> {
 /// catch rudb returning ten wrong rows, because the whole point is that ten different rows are
 /// allowed. What it can still catch is a column that came back empty, a filter that dropped
 /// everything, or a count that is off by an order of magnitude, since the numbers still have to be
-/// there and the shape of the answer is still compared everywhere else in the suite. Twenty six of
+/// there and the shape of the answer is still compared everywhere else in the suite. Twenty four of
 /// the forty three queries are still checked to the last bit of a double.
 ///
 /// Looked at again for milestone E0e, tamnd/rudb#112, now that tamnd/rudb-compat can put rudb and
@@ -1628,6 +1628,13 @@ pub fn loading(suite: &str, engine: &str, table: &str) -> Option<Loading> {
 /// answer compared byte for byte, and they stay unsettled here where the official text runs.
 ///
 /// What that arbitration did change is q4, which turned out not to be a rounding difference.
+///
+/// Two more joined the list later, q37 and q38, and they were always the same hazard. The checker
+/// used to read an answer by scanning the whole text for runs of digits, so for a query that groups
+/// by a page title and orders by the count, all it ever compared was the ten counts. Two engines
+/// that cut a tie differently still produced the same ten counts, so the disagreement was invisible.
+/// Reading the fields instead of the text made it visible, which is the checker working rather than
+/// the engines getting worse.
 pub const CLICKBENCH_UNSETTLED: &[(&str, &str)] = &[
     (
         "q4",
@@ -1669,6 +1676,18 @@ pub const CLICKBENCH_UNSETTLED: &[(&str, &str)] = &[
     ),
     ("q35", "ORDER BY COUNT(*) DESC LIMIT 10 with ties at the cut, as q16"),
     ("q36", "ORDER BY COUNT(*) DESC LIMIT 10 with ties at the cut, as q16"),
+    (
+        "q37",
+        "ORDER BY PageViews DESC LIMIT 10 over URLs, where the tail of the ten is a tie and the \
+         engine picks which URL fills it",
+    ),
+    (
+        "q38",
+        "ORDER BY PageViews DESC LIMIT 10 over page titles, a tie at the cut as q37. Seen on a \
+         hundred thousand row sample, where the tenth and eleventh titles both had thirteen views \
+         and the two engines kept a different one. Sampling makes this more likely than the full \
+         file does, because the counts are smaller and so more of them collide",
+    ),
     (
         "q39",
         "ORDER BY PageViews DESC LIMIT 10 OFFSET 1000, which is a tie at the cut a thousand rows \
