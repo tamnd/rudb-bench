@@ -1,0 +1,55 @@
+#!/bin/sh
+# The half of the gate that runs on the box, once `scripts/gate` has put the tree there.
+#
+# It is a separate file rather than a string inside an ssh command because it is five commands that
+# have to run at once and collect their exit codes, and that is unreadable once it has been quoted
+# twice. It travels with the tree, so it is always the version of the gate that matches the code.
+#
+#   sh scripts/gate-remote              everything
+#   sh scripts/gate-remote answer::     everything, with the argument passed to `cargo test`
+#
+# The five checks do not depend on each other, so they run together. The catch is that cargo takes
+# a lock on the target directory, so two cargo processes sharing one would run one after the other
+# anyway, and worse, clippy and the 1.85.0 check and `cargo doc` each want different artifacts in
+# the same place. So each gets its own directory under `target`. That costs disk, which the box has,
+# and it means each check is incremental against its own last run rather than against whatever ran
+# in between.
+#
+# Every check's output is kept and printed only when it fails, because five interleaved cargo logs
+# are not readable, and the thing a person wants on a green run is one line.
+set -e
+export PATH="$HOME/.cargo/bin:$PATH"
+
+logs=$(mktemp -d)
+trap 'rm -rf "$logs"' EXIT
+
+# Run one check, quietly, and leave a file behind with its name in it when it fails.
+check() {
+  name=$1
+  shift
+  if "$@" >"$logs/$name.log" 2>&1; then
+    echo "  $name ok"
+  else
+    echo "  $name FAILED"
+    echo "$name" >>"$logs/failed"
+  fi
+}
+
+check fmt cargo fmt --all --check &
+check clippy env CARGO_TARGET_DIR=target/gate-clippy \
+  cargo clippy --all-targets --all-features -- -D warnings &
+check doc env CARGO_TARGET_DIR=target/gate-doc cargo doc --all-features --no-deps &
+check msrv env CARGO_TARGET_DIR=target/gate-msrv rustup run 1.85.0 cargo check --all-targets &
+check test cargo test --all-features -- "$@" &
+wait
+
+if [ -f "$logs/failed" ]; then
+  for name in $(cat "$logs/failed"); do
+    echo
+    echo "=== $name ==="
+    cat "$logs/$name.log"
+  done
+  exit 1
+fi
+
+echo "everything the gate runs is green"

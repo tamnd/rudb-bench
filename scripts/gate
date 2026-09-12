@@ -14,6 +14,10 @@
 # not need a compiler, and the prose test is a plain `cargo test --test style` away. A skipped
 # check announces itself, every time, because a gate that silently narrows is a gate nobody can
 # trust the green from.
+#
+# What is left after that narrowing is five checks that do not depend on each other, and they run
+# at once on the box rather than in a line. See `scripts/gate-remote`, which is the half that runs
+# there.
 set -e
 
 host=server3
@@ -60,15 +64,12 @@ rsync -a --delete \
 if [ "$code" = no ]; then
   echo "only markdown changed, running the prose test and skipping the compiler"
   # shellcheck disable=SC2029
-  ssh "$host" "export PATH=\$HOME/.cargo/bin:\$PATH; cd ~/$remote && cargo test --test style $*"
+  ssh "$host" "export PATH=\$HOME/.cargo/bin:\$PATH; cd ~/$remote && cargo test --test style -- $*"
   exit 0
 fi
 
+# The rest of it is five checks that do not depend on each other, so they run at once rather than in
+# a line, which is `scripts/gate-remote` because that does not read as a shell command inside a
+# string inside an ssh. Anything typed after the host goes to `cargo test` as a filter.
 # shellcheck disable=SC2029
-ssh "$host" "export PATH=\$HOME/.cargo/bin:\$PATH; cd ~/$remote && \
-  cargo fmt --all --check && \
-  cargo clippy --all-targets --all-features -- -D warnings && \
-  cargo test --all-features && \
-  cargo doc --all-features --no-deps && \
-  rustup run 1.85.0 cargo check --all-targets $*"
-echo "everything the gate runs is green"
+ssh "$host" "cd ~/$remote && sh scripts/gate-remote $*"
