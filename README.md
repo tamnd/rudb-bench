@@ -8,6 +8,8 @@ It is a separate repository so that a result can be reproduced by someone who do
 
 The design is [`spec/15-rudb-bench.md`](https://github.com/tamnd/rudb/blob/main/spec/15-rudb-bench.md) in the rudb repository.
 
+The [13 September measurement audit](reports/clickbench-audit-20260913/README.md) runs DuckDB 1.5.5 and rudb 0.2.37 through all 43 ClickBench queries at 1k, 10k, 100k and 1m rows, with five hot repetitions, per-child CPU and RSS checks, and retained raw results. It includes q19 and q33 on the samples. The earlier measurements below retain their original versions and methodology.
+
 ## Where rudb is, today
 
 rudb runs ClickBench now. Not all of it: 41 of the 43 queries, missing q19 and q33 because its hash aggregate does not spill and those two group by a key that is close to unique ([tamnd/rudb#220](https://github.com/tamnd/rudb/issues/220), milestone E5). Here is the whole table, seven engines, on `gamingpc-wsl`, which is 32 hardware threads, over four sizes of sample. Query time is what each engine says the queries cost it, which is the number the public board publishes.

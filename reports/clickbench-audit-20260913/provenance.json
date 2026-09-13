@@ -1,0 +1,10 @@
+{
+  "rudb": {
+    "commit": "697bb7c127f04aa8ce9344ca3fe233fe00df72da",
+    "status": " M crates/rudb-cli/src/shell.rs\n M crates/rudb-cli/tests/shell.rs\n M crates/rudb-functions/src/signature.rs\n M crates/rudb-kernels/src/datetime.rs\n M crates/rudb-kernels/src/scalar.rs\n M crates/rudb/src/tests.rs\n"
+  },
+  "rudb-bench": {
+    "commit": "f7b8d10c352b133323a16f247f85b3054144d175",
+    "status": " M .gitignore\n M src/engine.rs\n M src/memory.rs\n?? examples/\n?? reports/clickbench-audit-20260913/\n?? scripts/clickbench-audit.py\n?? scripts/measure-child.c\n?? scripts/test_clickbench_audit.py\n?? scripts/verify-clickbench-audit.py\n"
+  }
+}
