@@ -1,0 +1,32 @@
+{
+  "command": [
+    "/usr/bin/time",
+    "-v",
+    "-o",
+    "reports/audit-20260913-validated/crosscheck-gnu-time.txt",
+    "/usr/bin/python3",
+    "-c",
+    "x=bytearray(64*1024*1024); sum(i*i for i in range(2000000))"
+  ],
+  "status": "ok",
+  "exit_code": 0,
+  "query_s": null,
+  "stdout": "crosscheck.stdout",
+  "stderr": "crosscheck.stderr",
+  "wall_s": 0.068853622,
+  "user_s": 0.052728,
+  "system_s": 0.016105,
+  "peak_rss_bytes": 76959744,
+  "read_bytes": 0,
+  "write_bytes": 4096,
+  "major_faults": 0,
+  "minor_faults": 17384,
+  "voluntary_switches": 3,
+  "involuntary_switches": 0,
+  "orchestrator_wall_s": 0.069251139,
+  "cpu_s": 0.068833,
+  "gnu_rss_bytes": 76959744,
+  "gnu_cpu_s": 0.060000000000000005,
+  "rss_match": true,
+  "cpu_within_rounding": true
+}
