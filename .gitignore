@@ -20,3 +20,7 @@ flamegraph.svg
 .idea/
 .vscode/
 *.swp
+
+# Locally compiled audit helper and Python bytecode.
+/scripts/measure-child
+__pycache__/

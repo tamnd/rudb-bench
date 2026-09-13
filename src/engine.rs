@@ -239,7 +239,10 @@ fn run_time(line: &str) -> Option<Duration> {
     // returning the user time on a build that reorders them.
     while let Some(word) = words.next() {
         if word == "real" {
-            return words.next().and_then(|n| n.parse().ok()).map(Duration::from_secs_f64);
+            return words
+                .next()
+                .and_then(|n| n.parse().ok())
+                .and_then(|n| Duration::try_from_secs_f64(n).ok());
         }
     }
     None
@@ -253,20 +256,20 @@ fn seconds(line: &str) -> Option<Duration> {
     if trimmed.is_empty() || !trimmed.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
         return None;
     }
-    trimmed.parse().ok().map(Duration::from_secs_f64)
+    trimmed.parse().ok().and_then(|n| Duration::try_from_secs_f64(n).ok())
 }
 
 /// `Elapsed 0.022 seconds.`
 fn elapsed(line: &str) -> Option<Duration> {
     let rest = line.trim().strip_prefix("Elapsed ")?;
     let number = rest.split_whitespace().next()?;
-    number.parse().ok().map(Duration::from_secs_f64)
+    number.parse().ok().and_then(|n| Duration::try_from_secs_f64(n).ok())
 }
 
 /// `took 0.0219`, from the Polars script.
 fn took(line: &str) -> Option<Duration> {
     let rest = line.trim().strip_prefix("took ")?;
-    rest.trim().parse().ok().map(Duration::from_secs_f64)
+    rest.trim().parse().ok().and_then(|n| Duration::try_from_secs_f64(n).ok())
 }
 
 /// Lines a shell prints around an answer that are not the answer.
@@ -407,6 +410,7 @@ impl Runner {
         if let Some(path) = self.metrics_path() {
             let _ = std::fs::remove_file(path);
         }
+        let _ = std::fs::remove_file(&self.report);
         let (stdout, stderr) = both(&mut command, what)?;
         let cost = match &self.timer {
             Ok(_) => Timer::read(&self.report),
@@ -1759,6 +1763,15 @@ mod tests {
             runner: Runner::new(&scratch("rudb"), "rudb", Reported::RunTime),
             suite: suite.name,
             pins: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn malformed_reported_times_do_not_panic() {
+        for value in ["NaN", "inf", "-1", "1e999"] {
+            assert_eq!(run_time(&format!("Run Time (s): real {value}")), None);
+            assert_eq!(elapsed(&format!("Elapsed {value} seconds.")), None);
+            assert_eq!(took(&format!("took {value}")), None);
         }
     }
 
