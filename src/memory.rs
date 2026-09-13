@@ -166,7 +166,7 @@ impl Timer {
     #[must_use]
     pub fn wrap(&self, program: &Path, report: &Path) -> Command {
         let mut command = Command::new(&self.binary);
-        command.arg(self.flag).arg("-o").arg(report).arg(program);
+        command.env("LC_ALL", "C").arg(self.flag).arg("-o").arg(report).arg(program);
         command
     }
 
@@ -182,9 +182,9 @@ impl Timer {
 
 /// Whether `/usr/bin/time` accepts a flag, decided by running it on something that always works.
 fn probe(binary: &Path, flag: &str) -> bool {
-    Command::new(binary).arg(flag).arg("/usr/bin/true").output().is_ok_and(|out| {
-        out.status.success() && parse(&String::from_utf8_lossy(&out.stderr)).peak.measured()
-    })
+    Command::new(binary).env("LC_ALL", "C").arg(flag).arg("/usr/bin/true").output().is_ok_and(
+        |out| out.status.success() && parse(&String::from_utf8_lossy(&out.stderr)).peak.measured(),
+    )
 }
 
 /// Pull the peak, the CPU seconds and the blocks read out of a `time` report, whichever flavour
@@ -196,8 +196,8 @@ fn probe(binary: &Path, flag: &str) -> bool {
 /// `time` installed on a Mac is a thing that happens.
 ///
 /// The units differ the same way. GNU's peak is kibibytes and BSD's is bytes, and reading one as
-/// the other is out by a factor of 1024. Both count reads in 512 byte blocks, which is the kernel's
-/// unit for `ru_inblock` and not a choice either of them made.
+/// the other is out by a factor of 1024. Linux accounts reads in 512-byte units. BSD reports
+/// input operations, which cannot be converted to bytes, so its read bytes are unavailable.
 fn parse(text: &str) -> Cost {
     const BLOCK: u64 = 512;
     let mut peak = None;
@@ -208,7 +208,7 @@ fn parse(text: &str) -> Cost {
     for line in text.lines() {
         let line = line.trim();
         if let Some(rest) = line.strip_prefix("Maximum resident set size (kbytes):") {
-            peak = rest.trim().parse::<u64>().ok().map(|kib| kib * 1024);
+            peak = rest.trim().parse::<u64>().ok().and_then(|kib| kib.checked_mul(1024));
         } else if let Some(rest) = line.strip_prefix("User time (seconds):") {
             user = seconds(rest);
         } else if let Some(rest) = line.strip_prefix("System time (seconds):") {
@@ -218,7 +218,9 @@ fn parse(text: &str) -> Cost {
         } else if line.ends_with("maximum resident set size") {
             peak = leading(line);
         } else if line.ends_with("block input operations") {
-            blocks = leading(line);
+            // BSD reports operations, not Linux 512-byte accounting units.
+            // There is no portable conversion from an operation count to bytes.
+            blocks = None;
         } else if line.contains(" real ") && line.contains(" user ") {
             // BSD puts all three on one line as `0.01 real 0.00 user 0.00 sys`, so the number in
             // front of each name is the one that belongs to it.
@@ -245,7 +247,7 @@ fn parse(text: &str) -> Cost {
             Peak::Bytes,
         ),
         cpu,
-        read: blocks.map(|n| n * BLOCK),
+        read: blocks.and_then(|n| n.checked_mul(BLOCK)),
     }
 }
 
@@ -332,7 +334,7 @@ mod tests {
         let cost = parse(BSD);
         assert_eq!(cost.peak, Peak::Bytes(1_245_184));
         assert_eq!(cost.cpu, Some(Duration::from_millis(1000)));
-        assert_eq!(cost.read, Some(128 * 512));
+        assert_eq!(cost.read, None);
     }
 
     #[test]
@@ -353,8 +355,8 @@ mod tests {
 
     #[test]
     fn a_hot_run_that_read_from_the_disk_is_visible_as_a_number_that_is_not_zero() {
-        assert_eq!(parse(BSD).read, Some(65536));
-        assert_eq!(parse("             0  block input operations\n").read, Some(0));
+        assert_eq!(parse(GNU).read, Some(4096 * 512));
+        assert_eq!(parse("             0  block input operations\n").read, None);
     }
 
     #[test]
