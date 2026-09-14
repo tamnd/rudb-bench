@@ -28,3 +28,21 @@ The speedup and memory increase have the same cause. Every worker opens an indep
 The next architectural step is radix partitioning. Rows should be assigned by the high bits of the group hash before accumulation, with each partition owned by one aggregate task. A group will then exist in one table, local tables will not duplicate keys, and there will be no serial duplicate-group merge. The same ownership rule restores the invariant required for parallel aggregate spilling.
 
 All 172 size and query pairs completed. The verifier compared output with DuckDB and reran ambiguous ties with deterministic ordering. Every deterministic retest matched. Differences left in the report are row-order differences in queries whose result order is not fully specified.
+
+## Parallel aggregate merge follow-up
+
+A second 1 million row run measures parallel `COUNT(DISTINCT)` and the tree-shaped aggregate merge. DuckDB was rerun in the same session because machine conditions changed enough that reusing its earlier number would give a misleading ratio.
+
+| Engine | Queries | Query median sum | Process wall sum | CPU sum | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| DuckDB native | 43/43 | 0.627 s | 1.657 s | 4.402 s | 313.71 MiB |
+| DuckDB Parquet | 43/43 | 0.915 s | 2.038 s | 5.936 s | 646.52 MiB |
+| rudb | 43/43 | 2.782 s | 2.837 s | 8.200 s | 287.68 MiB |
+
+The total improves by 7.2 percent from the preceding rudb run. q23 improves from 0.407 seconds to 0.084 seconds because its distinct sets now merge across workers. Its peak RSS rises from 62.8 MiB to 287.7 MiB. The suite peak follows q23 and rises by 15.8 percent.
+
+The tree merge does not improve the high-cardinality plain groupings at this size. q34 changes from 0.193 seconds to 0.226 seconds, while q35 changes from 0.197 seconds to 0.204 seconds. These queries have nine Parquet row groups and therefore at most nine aggregate instances in this dataset. Their result confirms that rearranging the merge does not remove its work or the duplicate tables.
+
+The next change must partition before accumulation. A worker should hash each group key once, send the row to a partition selected from the high hash bits, and let one task own that partition through aggregation and spilling. Parallel merge remains useful for plans that cannot use the exchange, but it is not the final high-cardinality architecture.
+
+Every deterministic answer retest matched DuckDB.
