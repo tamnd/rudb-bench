@@ -1233,6 +1233,19 @@ pub fn comparison(compared: &Comparison) -> String {
         line(&mut out, "");
     }
 
+    // Which of the two clocks in the table the ratio is on, said here rather than left to be worked
+    // out. It is on the query time row, which is what the public board publishes and what the file
+    // written by this run compares on. Taking it on the wall clock instead would credit rudb for
+    // DuckDB starting a process once per query, and on a sample that is most of DuckDB's wall
+    // clock: at a million rows the engines are 11x apart on their own clocks and 4x apart on ours.
+    if compared.results.iter().any(|r| r.total_is_reported()) {
+        line(&mut out, "The ratio is on the query time row, which is what each engine says the");
+        line(&mut out, "queries cost it and what the public board publishes. The wall clock row");
+        line(&mut out, "above it also holds a process start per query, which is this harness and");
+        line(&mut out, "not the engine, and on a small sample it is most of what separates them.");
+        line(&mut out, "");
+    }
+
     // The work list, for the one engine that hands over a breakdown. Five kinds rather than all of
     // them, because this is the block somebody reads while the next run starts and the tail of the
     // list is a row that cost two microseconds. The report file has every kind.
@@ -1433,7 +1446,7 @@ pub fn comparison(compared: &Comparison) -> String {
 /// A constant because the blank line that separates the two halves of the table is placed by
 /// counting back from the end, and a table where somebody added a row and the blank line landed in
 /// the middle of the totals is a table nobody trusts.
-const SUMMARY_ROWS: usize = 10;
+const SUMMARY_ROWS: usize = 11;
 
 fn grid(compared: &Comparison) -> String {
     let reference = &compared.results[0];
@@ -1471,6 +1484,14 @@ fn grid(compared: &Comparison) -> String {
         r.shape_spread().map_or_else(|| "n/a".to_owned(), |s| format!("{s:.2}x"))
     }));
     rows.push(summary("total cold", compared, |r| show(r.cold_total())));
+    // The engine's own clock next to this harness's, because the ratio at the bottom is taken on
+    // the engine's own and a reader should not have to open the file to find out that the two
+    // differ. On a sample small enough to iterate on they differ by more than the engines do:
+    // DuckDB starts a process 43 times and rudb starts one 41 times, and at a million rows that
+    // startup is most of DuckDB's wall clock.
+    rows.push(summary("query time", compared, |r| {
+        r.reported_total().map_or_else(|| "not read".to_owned(), show)
+    }));
     rows.push(summary("hot cpu", compared, |r| {
         r.hot_cpu().map_or_else(|| "not read".to_owned(), show)
     }));
@@ -1492,14 +1513,14 @@ fn grid(compared: &Comparison) -> String {
         .map(|q| q.name.clone())
         .filter(|name| compared.results.iter().all(|r| r.find(name).is_some()))
         .collect();
-    let base = reference.hot_total_over(&common).unwrap_or(Duration::ZERO).as_secs_f64();
+    let base = reference.best_total_over(&common).unwrap_or(Duration::ZERO).as_secs_f64();
     let label = if common.len() == reference.queries.len() {
         format!("vs {}", reference.engine)
     } else {
         format!("vs {} on {} shared", reference.engine, common.len())
     };
     rows.push(summary(&label, compared, move |r| {
-        let Some(hot) = r.hot_total_over(&common) else {
+        let Some(hot) = r.best_total_over(&common) else {
             return "n/a".to_owned();
         };
         if base <= 0.0 {
@@ -2062,6 +2083,28 @@ mod tests {
     fn a_steady_query_is_not_a_reason_not_to_publish() {
         let reasons = publishable(&result(Peak::Bytes(1024), 5));
         assert!(!reasons.iter().any(|r| r.contains("swung by")), "{reasons:?}");
+    }
+
+    /// The ratio is on the engine's own clock, which is the one the file and the board are on.
+    #[test]
+    fn the_ratio_is_on_the_query_time_and_not_on_the_process_lifetime() {
+        // Two engines whose queries cost the same and whose processes do not. On the wall clock
+        // they are 1.00x apart. On their own clocks the second is twice the first, and it is the
+        // second number that says anything about the engines.
+        let mut fast = result(Peak::Bytes(1024), 5);
+        fast.queries[0].reported = Some(Runs {
+            cold: Duration::from_millis(5),
+            hot: Distribution::median(vec![Duration::from_millis(2); 5]),
+        });
+        let mut slow = rival("rudb", 10, "10000000");
+        slow.queries[0].reported = Some(Runs {
+            cold: Duration::from_millis(9),
+            hot: Distribution::median(vec![Duration::from_millis(4); 5]),
+        });
+        let text = comparison(&compared(vec![fast, slow], vec![]));
+        assert!(text.contains("query time"), "{text}");
+        assert!(text.contains("2.00x"), "{text}");
+        assert!(text.contains("what the public board publishes"), "{text}");
     }
 
     #[test]
