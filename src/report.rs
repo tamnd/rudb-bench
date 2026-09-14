@@ -262,6 +262,14 @@ impl SuiteResult {
         self.reported_total().unwrap_or_else(|| self.hot_total())
     }
 
+    /// The same over only the queries named here, for a ratio between two ragged columns.
+    ///
+    /// `None` when this column is short one of them, for the reason [`Self::hot_total_over`] gives.
+    #[must_use]
+    pub fn best_total_over(&self, names: &[String]) -> Option<Duration> {
+        self.reported_total_over(names).or_else(|| self.hot_total_over(names))
+    }
+
     /// Whether [`Self::best_total`] is the engine's own number or this harness's.
     #[must_use]
     pub fn total_is_reported(&self) -> bool {
