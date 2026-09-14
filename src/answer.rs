@@ -311,20 +311,44 @@ pub fn scan(text: &str) -> Vec<(f64, Option<u32>)> {
 /// The first is the reference rather than a vote, because a majority of three engines agreeing is
 /// not evidence when the fourth is the one being developed. DuckDB goes first, and the sentence
 /// this produces names it, so a reader knows which side of a disagreement is the claim.
+///
+/// The sentence says which half disagreed. It used to print the two number counts whatever the
+/// disagreement was, and for a group by that ties at its `LIMIT` the counts are equal and the text
+/// is not, so the sentence read "20 numbers against 20" and left a reader to work out that the
+/// numbers were never the problem. Two engines that computed the same counts and kept different
+/// tied rows is a different thing from two engines that computed different counts, and the first
+/// is usually the query rather than the engine.
 #[must_use]
 pub fn disagreements(answers: &[(String, String)]) -> Vec<String> {
     let Some((reference, expected)) = answers.first() else { return Vec::new() };
     let mut out = Vec::new();
     for (engine, got) in answers.iter().skip(1) {
         if !same(expected, got) {
-            out.push(format!(
-                "{engine} does not agree with {reference}: {} numbers against {}",
-                numbers(got).len(),
-                numbers(expected).len()
-            ));
+            out.push(format!("{engine} does not agree with {reference}: {}", how(expected, got)));
         }
     }
     out
+}
+
+/// Which half of an answer the disagreement is in, for the sentence above.
+fn how(expected: &str, got: &str) -> String {
+    let (mut mine, mut theirs) = (printed(got), printed(expected));
+    mine.sort_by(|x, y| f64::total_cmp(&x.0, &y.0));
+    theirs.sort_by(|x, y| f64::total_cmp(&x.0, &y.0));
+    let same_numbers =
+        mine.len() == theirs.len() && mine.iter().zip(&theirs).all(|(x, y)| close(*x, *y));
+    if !same_numbers {
+        return format!("{} numbers against {}", mine.len(), theirs.len());
+    }
+    let counted = theirs.len();
+    let (mine, theirs) = (words(got), words(expected));
+    let common = mine.iter().filter(|word| theirs.contains(word)).count();
+    format!(
+        "the same {counted} numbers and {} of {} text fields different, so the disagreement is \
+         which rows came back rather than what they hold",
+        theirs.len().saturating_sub(common),
+        theirs.len()
+    )
 }
 
 #[cfg(test)]
@@ -499,6 +523,31 @@ mod tests {
     fn a_count_that_is_off_by_one_is_still_a_wrong_answer_however_large_the_count() {
         assert!(!same("148047881", "148047882"));
         assert!(!same("1,148047881", "1,148047882"));
+    }
+
+    /// q22 and q23 on ClickBench, in miniature. The counts matched and the tied rows did not, and
+    /// the sentence used to say "numbers against" a number equal to itself.
+    #[test]
+    fn a_tie_kept_differently_is_reported_as_text_rather_than_as_numbers() {
+        let answers = vec![
+            ("duckdb".to_owned(), "a,2\nb,1\nc,1".to_owned()),
+            ("rudb".to_owned(), "a,2\nb,1\nd,1".to_owned()),
+        ];
+        let found = disagreements(&answers);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].contains("the same 3 numbers"), "{}", found[0]);
+        assert!(found[0].contains("1 of 3 text fields"), "{}", found[0]);
+        assert!(found[0].contains("which rows came back"), "{}", found[0]);
+    }
+
+    #[test]
+    fn a_count_that_is_different_is_still_reported_as_numbers() {
+        let answers = vec![
+            ("duckdb".to_owned(), "a,2\nb,1".to_owned()),
+            ("rudb".to_owned(), "a,2\nb,1\nc,1".to_owned()),
+        ];
+        let found = disagreements(&answers);
+        assert!(found[0].contains("3 numbers against 2"), "{}", found[0]);
     }
 
     #[test]
