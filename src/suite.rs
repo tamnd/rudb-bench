@@ -1616,8 +1616,8 @@ pub fn loading(suite: &str, engine: &str, table: &str) -> Option<Loading> {
 /// catch rudb returning ten wrong rows, because the whole point is that ten different rows are
 /// allowed. What it can still catch is a column that came back empty, a filter that dropped
 /// everything, or a count that is off by an order of magnitude, since the numbers still have to be
-/// there and the shape of the answer is still compared everywhere else in the suite. Twenty four of
-/// the forty three queries are still checked to the last bit of a double.
+/// there and the shape of the answer is still compared everywhere else in the suite. Twenty three
+/// of the forty three queries are still checked to the last bit of a double.
 ///
 /// Looked at again for milestone E0e, tamnd/rudb#112, now that tamnd/rudb-compat can put rudb and
 /// a real DuckDB to the same file and arbitrate. Not one of the seventeen becomes a checked query,
@@ -1637,6 +1637,13 @@ pub fn loading(suite: &str, engine: &str, table: &str) -> Option<Loading> {
 /// that cut a tie differently still produced the same ten counts, so the disagreement was invisible.
 /// Reading the fields instead of the text made it visible, which is the checker working rather than
 /// the engines getting worse.
+///
+/// q22 and q23 joined for the same reason and were checked by hand first, on the samples where they
+/// were reported. Both engines returned the same counts in the same order and kept different search
+/// phrases for the places where the count was one, which is a tie the query did not break. The
+/// sentence the checker printed said "20 numbers against 20", which is true and reads like a wrong
+/// answer, and `answer.rs` now says which half of the answer differed so the next one of these
+/// takes minutes rather than an afternoon.
 pub const CLICKBENCH_UNSETTLED: &[(&str, &str)] = &[
     (
         "q16",
@@ -1650,6 +1657,18 @@ pub const CLICKBENCH_UNSETTLED: &[(&str, &str)] = &[
          back first and the query did not ask for any particular ten",
     ),
     ("q19", "ORDER BY COUNT(*) DESC LIMIT 10 with ties at the cut, as q16"),
+    (
+        "q22",
+        "ORDER BY COUNT(*) DESC LIMIT 10 over search phrases whose URL matches, where the counts \
+         at the cut are twos and ones, so which phrases fill the ten is the engine's choice. Both \
+         engines returned 4, 3, 2, 2, 2, 2, 2, 2, 1, 1 on a ten million row sample and kept \
+         different phrases for the tied places",
+    ),
+    (
+        "q23",
+        "ORDER BY COUNT(*) DESC LIMIT 10 with ties at the cut, as q22, and the same on a one \
+         million row sample where seven of the ten places have a count of one",
+    ),
     (
         "q24",
         "ORDER BY EventTime LIMIT 10, and EventTime has one second resolution over a corpus with \
