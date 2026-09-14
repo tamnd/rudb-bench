@@ -19,7 +19,7 @@ use crate::data::{Dataset, Sample};
 use crate::engine::{BenchError, Engine, Loaded};
 use crate::measure::{Distribution, Runs, show};
 use crate::memory::{Cost, Peak};
-use crate::metrics::Internal;
+use crate::metrics::{Internal, Spend};
 use crate::suite::{Query, Suite};
 
 /// How wide a spread has to be before a run is called disturbed rather than measured.
@@ -90,6 +90,13 @@ pub struct QueryResult {
     /// From the cold run, for the same reason the answer is. [`publishable`] refuses a result
     /// whose breakdown does not add up to the run it came from.
     pub internal: Option<Internal>,
+    /// The same cold run's operators, folded by kind, most expensive first.
+    ///
+    /// Empty for an engine with no breakdown to read, and empty for a statement that ran as no
+    /// operator at all. It is beside `internal` rather than inside it because [`Internal`] is a
+    /// fixed handful of numbers a saved record writes on one line, and this is a list whose length
+    /// is however many kinds of operator the plan happened to use.
+    pub spend: Vec<Spend>,
 }
 
 impl QueryResult {
@@ -436,6 +443,45 @@ impl SuiteResult {
         }
         Some(total)
     }
+
+    /// Every query's operators folded by kind, over the whole suite, most expensive first.
+    ///
+    /// This is the work list. A suite is forty three queries and a query is half a dozen operators,
+    /// and reading two hundred and fifty rows to find out that the scan is most of the time is not
+    /// something anybody does twice. Folded, it is one short table whose first row is what to work
+    /// on, and that is the whole reason the harness asks the engine for a breakdown at all.
+    ///
+    /// Empty for an engine that has no breakdown to give, which is every engine but ours.
+    #[must_use]
+    pub fn spend(&self) -> Vec<Spend> {
+        crate::metrics::folded(self.queries.iter().map(|q| q.spend.as_slice()))
+    }
+
+    /// What every operator charged, added up, which is the denominator of a share.
+    #[must_use]
+    pub fn spent(&self) -> Duration {
+        self.queries.iter().flat_map(|q| q.spend.iter()).map(|s| s.cpu).sum()
+    }
+
+    /// The queries where one kind of operator cost the most, worst first.
+    ///
+    /// The fold says which kind to work on and this says which query to open first, which is not
+    /// always the slowest query in the suite. A kind can be most of the time in the suite and a
+    /// third of the time in the query that happens to be slowest.
+    #[must_use]
+    pub fn worst_for(&self, kind: &str, how_many: usize) -> Vec<(String, Duration)> {
+        let mut out: Vec<(String, Duration)> = self
+            .queries
+            .iter()
+            .filter_map(|q| {
+                let spend = q.spend.iter().find(|s| s.kind == kind)?;
+                Some((q.name.clone(), spend.cpu))
+            })
+            .collect();
+        out.sort_by_key(|one| std::cmp::Reverse(one.1));
+        out.truncate(how_many);
+        out
+    }
 }
 
 /// Every reason this result may not be published, which is empty only when there are none.
@@ -670,6 +716,7 @@ pub fn run(
             cold: cold.clone(),
             hot: together(rest),
             answer,
+            spend: breakdown.as_ref().map(|(document, _)| document.by_kind()).unwrap_or_default(),
             internal: breakdown.map(|(document, cpu)| document.internal(cpu)),
         });
     }
@@ -1178,6 +1225,37 @@ pub fn comparison(compared: &Comparison) -> String {
         line(&mut out, "");
     }
 
+    // The work list, for the one engine that hands over a breakdown. Five kinds rather than all of
+    // them, because this is the block somebody reads while the next run starts and the tail of the
+    // list is a row that cost two microseconds. The report file has every kind.
+    for result in &compared.results {
+        let folded = result.spend();
+        if folded.is_empty() {
+            continue;
+        }
+        let total = result.spent().as_secs_f64();
+        line(&mut out, &format!("where {} spent it, by kind of operator", result.engine));
+        for spend in folded.iter().take(5) {
+            let share = if total > 0.0 { spend.cpu.as_secs_f64() / total * 100.0 } else { 0.0 };
+            let rate = spend
+                .per_row_in()
+                .or_else(|| spend.per_row_out())
+                .map_or_else(|| "no rows".to_owned(), |ns| format!("{ns:.1}ns a row"));
+            line(
+                &mut out,
+                &format!("  {:<12} {:>10} {:>6.1}%  {rate}", spend.kind, show(spend.cpu), share),
+            );
+        }
+        if let Some(worst) = folded.first() {
+            let where_ = result.worst_for(&worst.kind, 3);
+            let named: Vec<String> = where_.iter().map(|(name, _)| name.clone()).collect();
+            if !named.is_empty() {
+                line(&mut out, &format!("  worst for {} in {}", worst.kind, named.join(", ")));
+            }
+        }
+        line(&mut out, "");
+    }
+
     let reading: Vec<&str> = compared
         .results
         .iter()
@@ -1516,6 +1594,7 @@ mod tests {
                 hot: cost(peak, Some(0)),
                 answer: "10000000".to_owned(),
                 internal: None,
+                spend: Vec::new(),
             }],
             sample: None,
             rows: None,

@@ -725,6 +725,7 @@ mod tests {
                 hot: cost(),
                 answer: "10000000".to_owned(),
                 internal: None,
+                spend: Vec::new(),
             }],
             sample: None,
             rows: None,
