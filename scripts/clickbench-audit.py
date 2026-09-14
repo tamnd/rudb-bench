@@ -115,8 +115,8 @@ def digest(path):
 
 def render(root, records, sizes, hot):
     lines = ['# ClickBench measurement audit', '',
-             'All 43 DuckDB SQL queries are attempted on both engines. Five hot repetitions are required for a complete row. A failed repetition invalidates that query; successful fragments are never averaged into a result.', '',
-             'First execution is not disk-cold: the page cache is not flushed. Each repetition uses a fresh process. Query seconds are the CLI timer, including result rendering; wall and CPU seconds and peak RSS cover the whole child process. CPU and RSS come from Linux wait4 for that child. RSS is the maximum resident set, not allocated bytes or an incremental memory delta. DuckDB uses a loaded native table; rudb reads and decodes Parquet on every query. These are sample results, not official ClickBench scores.', '',
+             'All 43 DuckDB SQL queries are attempted on DuckDB native storage, DuckDB reading Parquet and rudb reading the same Parquet file. Five hot repetitions are required for a complete row. A failed repetition invalidates that query; successful fragments are never averaged into a result.', '',
+             'First execution is not disk-cold: the page cache is not flushed. Each repetition uses a fresh process. Query seconds are the CLI timer, including result rendering; wall and CPU seconds and peak RSS cover the whole child process. CPU and RSS come from Linux wait4 for that child. RSS is the maximum resident set, not allocated bytes or an incremental memory delta. The duckdb row uses a loaded native table. The duckdb-parquet and rudb rows read and decode the same Parquet file on every query. These are sample results, not official ClickBench scores.', '',
              '| Size | Engine | Complete / 43 | Query median sum (s) | Process wall median sum (s) | CPU median sum (s) | Peak RSS (MiB) |',
              '| --- | --- | ---: | ---: | ---: | ---: | ---: |']
     checks_path = root / 'correctness.json'
@@ -125,7 +125,7 @@ def render(root, records, sizes, hot):
     for size in sizes:
         if not any(r.get('size') == size and r.get('phase') == 'query' for r in records):
             continue
-        for engine in ['duckdb', 'rudb']:
+        for engine in ['duckdb', 'duckdb-parquet', 'rudb']:
             groups = []
             for q in range(1, 44):
                 rows = [r for r in records if r.get('size') == size and r.get('engine') == engine and r.get('query') == q]
@@ -221,13 +221,17 @@ def main():
         meta['datasets'][size]['duckdb_settings'] = settings
         for q in range(1, 44):
             sql = (root / 'sql' / f'q{q}.sql').read_text()
-            for engine in (['duckdb', 'rudb'] if q % 2 else ['rudb', 'duckdb']):
+            engines = ['duckdb', 'duckdb-parquet', 'rudb']
+            if q % 2 == 0:
+                engines.reverse()
+            for engine in engines:
                 for run in range(a.hot + 1):
-                    command = [binaries[engine], '-batch', '-csv', '-noheader']
+                    binary = binaries['rudb'] if engine == 'rudb' else binaries['duckdb']
+                    command = [binary, '-batch', '-csv', '-noheader']
                     if engine == 'duckdb':
                         command += [str(database)]
                     command += ['-c', '.timer on']
-                    if engine == 'rudb':
+                    if engine != 'duckdb':
                         command += ['-c', f'CREATE VIEW hits AS {scan}']
                     command += ['-c', sql]
                     r = measure(command, root / f'{size}-{engine}-q{q}-r{run}', a.timeout)
