@@ -343,7 +343,26 @@ fn engines(compared: &Comparison) -> String {
 
 /// The summary row per engine, which is the table most readers stop at.
 fn totals(compared: &Comparison) -> String {
-    let base = compared.results.first().map(|r| r.best_total().as_secs_f64()).filter(|s| *s > 0.0);
+    // Over the queries every column in the table has, the way the terminal does it. A column short
+    // two queries has a smaller total for that reason alone, and dividing it by a full one hands
+    // the engine that ran the least the best number on the page. This used to divide each engine's
+    // own total by the reference's own total, so at ten million rows the file said 17.26x where the
+    // terminal said 13.78x for the same run, and neither the file nor the reader could tell why.
+    let shared: Vec<String> = compared.results.first().map_or_else(Vec::new, |first| {
+        first
+            .queries
+            .iter()
+            .map(|q| q.name.clone())
+            .filter(|name| compared.results.iter().all(|r| r.find(name).is_some()))
+            .collect()
+    });
+    let ragged = compared.results.first().is_some_and(|first| shared.len() != first.queries.len());
+    let base = compared
+        .results
+        .first()
+        .and_then(|r| r.best_total_over(&shared))
+        .map(|total| total.as_secs_f64())
+        .filter(|s| *s > 0.0);
     let reference = compared.results.first().map_or("nothing", |r| r.engine.as_str());
     let rows: Vec<Vec<String>> = compared
         .results
@@ -362,10 +381,10 @@ fn totals(compared: &Comparison) -> String {
                 r.hot_read().map_or_else(|| "not read".to_owned(), read_cell),
                 rows_rate(r.rows_per_second()),
                 bytes_rate(r.bytes_per_second(compared.source_bytes)),
-                base.map_or_else(
-                    || "n/a".to_owned(),
-                    |b| format!("{:.2}x", r.best_total().as_secs_f64() / b),
-                ),
+                match (base, r.best_total_over(&shared)) {
+                    (Some(b), Some(mine)) => format!("{:.2}x", mine.as_secs_f64() / b),
+                    _ => "n/a".to_owned(),
+                },
             ]
         })
         .collect();
@@ -382,7 +401,11 @@ fn totals(compared: &Comparison) -> String {
             "hot read",
             "rows/s",
             "bytes/s",
-            &format!("vs {reference}"),
+            &if ragged {
+                format!("vs {reference} on {} shared", shared.len())
+            } else {
+                format!("vs {reference}")
+            },
         ],
         &rows,
     );
@@ -1045,6 +1068,22 @@ mod tests {
         // And the report says which of the two a reader is comparing on.
         assert!(text.contains("what the engine itself says"), "{text}");
         assert!(text.contains("taken against query time"), "{text}");
+    }
+
+    /// A column short a query is divided over the queries both columns have, as the terminal does.
+    #[test]
+    fn a_ragged_column_is_compared_over_the_queries_both_of_them_ran() {
+        let mut compared = compared();
+        // rudb ran q1 and not q2, and q1 is the one it is quick on. Over its own two queries it
+        // would be a tenth of duckdb, and over the query they share it is a fifth, which is the
+        // honest one because the other is a total over a different question.
+        compared.results[1].queries.truncate(1);
+        let text = render(&compared, &facts(), "testbox");
+        assert!(text.contains("vs duckdb on 1 shared"), "{text}");
+        let base = compared.results[0].best_total_over(&["q1".to_owned()]).expect("a reading");
+        let mine = compared.results[1].best_total_over(&["q1".to_owned()]).expect("a reading");
+        let wanted = format!("{:.2}x", mine.as_secs_f64() / base.as_secs_f64());
+        assert!(text.contains(&wanted), "{wanted} is not in {text}");
     }
 
     /// An engine that would not say what a query cost it leaves a gap rather than a zero.
