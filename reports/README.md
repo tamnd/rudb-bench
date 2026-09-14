@@ -1,24 +1,35 @@
-# reports
+# Reports
 
-Runs that were taken, kept as they came out. Every file here was written by `rudb-bench run --report` and nothing in any of them was typed by hand, which is the point: a report somebody edited is a report nobody can check.
+Reports are grouped by the UTC date when the measurement was taken or the analysis was committed.
+Generated runs and written investigations share the same date directory, while supporting JSON
+files live in a named subdirectory beside their Markdown report.
+
+| Date | Reports |
+| --- | --- |
+| 2026-09-14 | [root cause](2026-09-14/rudb-duckdb-root-cause-20260914.md), [parallel audit](2026-09-14/clickbench-parallel-audit-20260914.md), [radix and fetch follow-up](2026-09-14/clickbench-radix-and-fetch-20260914.md) |
+| 2026-09-13 | [measurement audit](2026-09-13/clickbench-audit.md), [per-query details](2026-09-13/clickbench-audit-details.md) |
+| 2026-09-12 | ClickBench and smoke harness runs |
+| 2026-09-11 | [storage format experiment](2026-09-11/m1-the-format-experiment.md) |
+
+Generated runs are kept as they came out. Every run file was written by `rudb-bench run --report` and nothing in it was typed by hand, which is the point: a report somebody edited is a report nobody can check.
 
 Runs are added and never replaced. A number that was true on the day it was measured stays in the directory even after a faster one exists, because a history that overwrites itself is a table rather than a history, and the interesting question is usually what changed between two of these rather than what the latest one says.
 
 | file | suite | machine | engines | size | taken |
 | --- | --- | --- | --- | --- | --- |
-| [run-clickbench-gamingpc-wsl-1m-quiet.md](run-clickbench-gamingpc-wsl-1m-quiet.md) | ClickBench | gamingpc-wsl | 7 | 999975 rows, one in every 100 | 12 September 2026 |
-| [run-clickbench-gamingpc-wsl-100k-quiet.md](run-clickbench-gamingpc-wsl-100k-quiet.md) | ClickBench | gamingpc-wsl | 7 | 99998 rows, one in every 1000 | 12 September 2026 |
-| [run-clickbench-gamingpc-wsl-10k-quiet.md](run-clickbench-gamingpc-wsl-10k-quiet.md) | ClickBench | gamingpc-wsl | 7 | 10000 rows, one in every 10000 | 12 September 2026 |
-| [run-clickbench-gamingpc-wsl-1k-quiet.md](run-clickbench-gamingpc-wsl-1k-quiet.md) | ClickBench | gamingpc-wsl | 7 | 1000 rows, one in every 99998 | 12 September 2026 |
-| [run-clickbench-gamingpc-wsl-1m.md](run-clickbench-gamingpc-wsl-1m.md) | ClickBench | gamingpc-wsl | 7 | 999975 rows, one in every 100 | 12 September 2026 |
-| [run-clickbench-gamingpc-wsl-100k.md](run-clickbench-gamingpc-wsl-100k.md) | ClickBench | gamingpc-wsl | 7 | 99998 rows, one in every 1000 | 12 September 2026 |
-| [run-clickbench-gamingpc-wsl-10k.md](run-clickbench-gamingpc-wsl-10k.md) | ClickBench | gamingpc-wsl | 7 | 10000 rows, one in every 10000 | 12 September 2026 |
-| [run-clickbench-gamingpc-wsl-1k.md](run-clickbench-gamingpc-wsl-1k.md) | ClickBench | gamingpc-wsl | 7 | 1000 rows, one in every 99998 | 12 September 2026 |
-| [run-clickbench-vmi3391933-100k.md](run-clickbench-vmi3391933-100k.md) | ClickBench | vmi3391933 | 7 | 99998 rows, one in every 1000 | 12 September 2026 |
-| [run-clickbench-vmi3391933-10k.md](run-clickbench-vmi3391933-10k.md) | ClickBench | vmi3391933 | 7 | 10000 rows, one in every 10000 | 12 September 2026 |
-| [run-clickbench-vmi3391933-1k.md](run-clickbench-vmi3391933-1k.md) | ClickBench | vmi3391933 | 7 | 1000 rows, one in every 99998 | 12 September 2026 |
-| [run-clickbench-server3.md](run-clickbench-server3.md) | ClickBench | vmi3391933 | 2 | 999975 rows, one in every 100 | 11 September 2026 |
-| [m1-the-format-experiment.md](m1-the-format-experiment.md) | storage formats | several | n/a | n/a | September 2026 |
+| [run-clickbench-gamingpc-wsl-1m-quiet.md](2026-09-12/run-clickbench-gamingpc-wsl-1m-quiet.md) | ClickBench | gamingpc-wsl | 7 | 999975 rows, one in every 100 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-100k-quiet.md](2026-09-12/run-clickbench-gamingpc-wsl-100k-quiet.md) | ClickBench | gamingpc-wsl | 7 | 99998 rows, one in every 1000 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-10k-quiet.md](2026-09-12/run-clickbench-gamingpc-wsl-10k-quiet.md) | ClickBench | gamingpc-wsl | 7 | 10000 rows, one in every 10000 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-1k-quiet.md](2026-09-12/run-clickbench-gamingpc-wsl-1k-quiet.md) | ClickBench | gamingpc-wsl | 7 | 1000 rows, one in every 99998 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-1m.md](2026-09-12/run-clickbench-gamingpc-wsl-1m.md) | ClickBench | gamingpc-wsl | 7 | 999975 rows, one in every 100 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-100k.md](2026-09-12/run-clickbench-gamingpc-wsl-100k.md) | ClickBench | gamingpc-wsl | 7 | 99998 rows, one in every 1000 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-10k.md](2026-09-12/run-clickbench-gamingpc-wsl-10k.md) | ClickBench | gamingpc-wsl | 7 | 10000 rows, one in every 10000 | 12 September 2026 |
+| [run-clickbench-gamingpc-wsl-1k.md](2026-09-12/run-clickbench-gamingpc-wsl-1k.md) | ClickBench | gamingpc-wsl | 7 | 1000 rows, one in every 99998 | 12 September 2026 |
+| [run-clickbench-vmi3391933-100k.md](2026-09-12/run-clickbench-vmi3391933-100k.md) | ClickBench | vmi3391933 | 7 | 99998 rows, one in every 1000 | 12 September 2026 |
+| [run-clickbench-vmi3391933-10k.md](2026-09-12/run-clickbench-vmi3391933-10k.md) | ClickBench | vmi3391933 | 7 | 10000 rows, one in every 10000 | 12 September 2026 |
+| [run-clickbench-vmi3391933-1k.md](2026-09-12/run-clickbench-vmi3391933-1k.md) | ClickBench | vmi3391933 | 7 | 1000 rows, one in every 99998 | 12 September 2026 |
+| [run-clickbench-server3.md](2026-09-12/run-clickbench-server3.md) | ClickBench | vmi3391933 | 2 | 999975 rows, one in every 100 | 11 September 2026 |
+| [m1-the-format-experiment.md](2026-09-11/m1-the-format-experiment.md) | storage formats | several | n/a | n/a | September 2026 |
 
 A ladder is one measurement rather than three or four, and the sizes are meant to be read together. A single size cannot tell a fixed cost apart from a per row cost, and which of the two an engine is paying is usually the only thing worth knowing about it. See the top of the [README](../README.md) for what these ladders say.
 

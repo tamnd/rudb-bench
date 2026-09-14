@@ -13,11 +13,12 @@
 //! not also computed for the terminal, because a report with a number the terminal cannot show is a
 //! report whose number nobody ever checked.
 //!
-//! Markdown, and specifically markdown that passes `tests/style.rs`. Reports live in `reports/` and
-//! get committed, that test walks every markdown file in the repository, and a generator that
+//! Markdown, and specifically markdown that passes `tests/style.rs`. Reports live in dated
+//! directories under `reports/` and get committed, that test walks every markdown file in the
+//! repository, and a generator that
 //! emitted an em dash would produce a file that fails the build of the run after it.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::machine::Fact;
 use crate::measure::{Convention, Distribution, show};
@@ -30,15 +31,16 @@ use crate::report::{Comparison, SuiteResult, publishable};
 /// machines and two files that differ only in which box they were taken on would be compared by
 /// the first person who opened them side by side. The `run-` prefix keeps the generated reports
 /// apart from the written ones, which live in the same directory and are a different kind of
-/// document.
+/// document. The UTC date keeps each run with the other reports produced that day.
 ///
 /// `RUDB_BENCH_REPORTS` moves the directory, the way `RUDB_BENCH_BASELINE` moves the records, for
 /// a run somewhere other than a checkout.
 #[must_use]
 pub fn path(suite: &str, machine: &str) -> PathBuf {
     let name = format!("run-{suite}-{machine}.md");
-    std::env::var_os("RUDB_BENCH_REPORTS")
-        .map_or_else(|| Path::new("reports").join(&name), |at| PathBuf::from(at).join(&name))
+    let root = std::env::var_os("RUDB_BENCH_REPORTS")
+        .map_or_else(|| PathBuf::from("reports"), PathBuf::from);
+    root.join(crate::regress::today()).join(name)
 }
 
 /// Write the report and return where it went.
@@ -1144,7 +1146,13 @@ mod tests {
         // Rule seven is never compare across machines, and two files that differ only in which box
         // they came from are two files somebody puts side by side.
         let at = path("clickbench", "server3");
-        assert!(at.ends_with("run-clickbench-server3.md"), "{}", at.display());
+        assert!(
+            at.ends_with(
+                std::path::PathBuf::from(crate::regress::today()).join("run-clickbench-server3.md")
+            ),
+            "{}",
+            at.display()
+        );
     }
 
     #[test]
