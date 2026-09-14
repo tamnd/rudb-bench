@@ -1030,7 +1030,9 @@ fn help() {
     println!("    --save          add what each engine measured to reports/saved-<suite>-");
     println!("                    <machine>.txt, so that engines run on separate days end up");
     println!("                    in one table. Re-running an engine replaces its block");
-    println!("    --report        also write the whole run to reports/run-<suite>-<machine>.md,");
+    println!(
+        "    --report        also write the whole run to reports/<date>/run-<suite>-<machine>.md,"
+    );
     println!("                    which keeps every metric the terminal table has to drop");
     println!("  ledger        print what each layer bought, from the committed runs");
     println!("  seams         print rudb's seams and what is registered at each of them");

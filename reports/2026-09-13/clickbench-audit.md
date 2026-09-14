@@ -9,7 +9,7 @@ DuckDB v1.5.5 (`d8cdaa33fd`) and rudb 0.2.37 ran all 43 queries at each of four 
 | 100k | 99,998 | 0.303000 | 1.128922 | 65.21 | 159.15 |
 | 1m | 999,975 | 0.540000 | 10.144629 | 303.50 | 505.56 |
 
-Query seconds are the sum of the five-run median for each of the same 43 queries. RSS is the maximum across first and hot executions of all queries. At 1m, rudb takes 18.79 times DuckDB's query time and 1.67 times its peak RSS. The samples are strided extracts of the existing ClickBench file, identified by SHA-256 and actual row count in [metadata.json](metadata.json). They are not official ClickBench scores. The full dataset has not been run in this review, following the request to start with smaller sizes.
+Query seconds are the sum of the five-run median for each of the same 43 queries. RSS is the maximum across first and hot executions of all queries. At 1m, rudb takes 18.79 times DuckDB's query time and 1.67 times its peak RSS. The samples are strided extracts of the existing ClickBench file, identified by SHA-256 and actual row count in [metadata.json](clickbench-audit/metadata.json). They are not official ClickBench scores. The full dataset has not been run in this review, following the request to start with smaller sizes.
 
 ## Measurement boundaries
 
@@ -17,7 +17,7 @@ The CLI query timers measure statement execution and result rendering. The nativ
 
 First execution is explicitly unflushed, not disk-cold. Later repetitions have a warm OS page cache and a new engine process; they do not reuse a database buffer pool. Engine order alternates by query. DuckDB loads its declared native table once per size, whereas rudb uses a view over Parquet and pays decoding costs in each query. This storage-format difference is part of the measured comparison. The audit does not claim equal storage formats or equal CPU utilization. DuckDB's settings are recorded in the metadata; both engines use their default execution settings.
 
-DuckDB's CLI timer has millisecond resolution in this release. It rounded 65 individual query executions to zero across this sweep. The small-sample query totals therefore carry quantization error; a zero is not instantaneous execution. Read the higher-resolution process wall and CPU columns beside them. Five repetitions expose variation but do not guarantee a noise-free result. Per-query median and nearest-rank IQR are in [report.md](report.md), and every sample is retained in the raw archive. These medians are not the official best-of-three convention.
+DuckDB's CLI timer has millisecond resolution in this release. It rounded 65 individual query executions to zero across this sweep. The small-sample query totals therefore carry quantization error; a zero is not instantaneous execution. Read the higher-resolution process wall and CPU columns beside them. Five repetitions expose variation but do not guarantee a noise-free result. Per-query median and nearest-rank IQR are in [clickbench-audit-details.md](clickbench-audit-details.md), and every sample is retained in the raw archive. These medians are not the official best-of-three convention.
 
 ## Findings and fixes
 
@@ -27,11 +27,11 @@ DuckDB's CLI timer has millisecond resolution in this release. It rounded 65 ind
 - GNU time prints CPU components to hundredths of a second, making tiny rudb queries appear to use no CPU. The audit uses microsecond CPU counters from wait4 instead. A native launcher prevents the Python parent's pre-exec resident memory from inflating small-engine peaks. A rejected preliminary run exposed that inflation; its numbers are not used here.
 - The legacy suite skips q19 and q33 on rudb because of full-dataset memory limits and aborts an engine's suite on its first failure. The audit attempts all 43 queries at every size, including those two, with explicit failure and timeout records. It requires all repetitions to succeed before aggregating a query.
 
-The [resource cross-check](crosscheck.json) measured the same workload through GNU time and the native reader: both reported 76,959,744 bytes of peak RSS. The precise CPU total was 0.068833 seconds; GNU time printed 0.06 seconds. The difference is within its component rounding plus wrapper overhead. The test suite also launches a small child after a 64 MiB child and checks that its peak does not inherit either that prior peak or Python's resident memory.
+The [resource cross-check](clickbench-audit/crosscheck.json) measured the same workload through GNU time and the native reader: both reported 76,959,744 bytes of peak RSS. The precise CPU total was 0.068833 seconds; GNU time printed 0.06 seconds. The difference is within its component rounding plus wrapper overhead. The test suite also launches a small child after a 64 MiB child and checks that its peak does not inherit either that prior peak or Python's resident memory.
 
 ## Answer checks
 
-Of 172 query-and-size pairs, 112 matched directly, 18 returned the same rows in a different order, and 42 matched after a separate deterministic retest added output columns as tie breakers. No difference remained unresolved. Original output and its classification remain available in [correctness.json](correctness.json). The deterministic SQL is an untimed diagnostic and never replaces the benchmark SQL. This is a check of these samples, not proof of correctness on the full dataset.
+Of 172 query-and-size pairs, 112 matched directly, 18 returned the same rows in a different order, and 42 matched after a separate deterministic retest added output columns as tie breakers. No difference remained unresolved. Original output and its classification remain available in [correctness.json](clickbench-audit/correctness.json). The deterministic SQL is an untimed diagnostic and never replaces the benchmark SQL. This is a check of these samples, not proof of correctness on the full dataset.
 
 ## Reproduction
 
@@ -52,6 +52,6 @@ The verification command writes correctness.json and updates the report with tho
 
 ## Artifacts and validation
 
-[report.md](report.md) contains all per-query time, IQR, CPU and RSS results. [summary.json](summary.json) provides those measurements in machine-readable form. [audit-20260913-raw.tar.gz](audit-20260913-raw.tar.gz) contains every stdout/stderr file, resource JSON, raw sample log, SQL, deterministic retest, cross-check, apparatus source, provenance and test logs. Load time, database size and all raw resource counters are retained in the archive.
+[clickbench-audit-details.md](clickbench-audit-details.md) contains all per-query time, IQR, CPU and RSS results. [summary.json](clickbench-audit/summary.json) provides those measurements in machine-readable form. `audit-20260913-raw.tar.gz` contains every stdout/stderr file, resource JSON, raw sample log, SQL, deterministic retest, cross-check, apparatus source, provenance and test logs. Load time, database size and all raw resource counters are retained in the archive.
 
 The rudb-bench gate passed formatting, clippy with warnings denied, documentation, Rust 1.85 compatibility, and 246 Rust tests. All 29 rudb CLI shell tests passed, including the timer regression. Four Python measurement tests passed, covering isolated peak RSS, failures and timeout cleanup, exact large-integer answer comparison, and the GNU time cross-check.
