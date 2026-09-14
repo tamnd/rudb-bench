@@ -534,6 +534,7 @@ fn detail(result: &SuiteResult, source_bytes: u64) -> String {
         ));
     }
     out.push_str(&inside(result));
+    out.push_str(&spend(result));
     out
 }
 
@@ -599,6 +600,81 @@ fn inside(result: &SuiteResult) -> String {
          operators ran the reference implementation of their seam, which is the slow path kept \
          for differential testing.\n\n",
     );
+    out
+}
+
+/// Where the engine's own time went, folded by kind of operator.
+///
+/// Empty for the engines driven as black boxes, the same as the table above it. The difference
+/// between the two is what they are for: that one is the cross check, which asks whether the
+/// breakdown adds up, and this one is the work list, which asks what to go and make faster. Both
+/// come out of one breakdown and neither is worth much without the other, because a fold by kind
+/// whose total does not match what the engine measured is a work list sorted by a wrong number.
+fn spend(result: &SuiteResult) -> String {
+    let folded = result.spend();
+    if folded.is_empty() {
+        return String::new();
+    }
+    let total = result.spent().as_secs_f64();
+    let rows: Vec<Vec<String>> = folded
+        .iter()
+        .map(|s| {
+            vec![
+                s.kind.clone(),
+                show(s.cpu),
+                if total > 0.0 {
+                    format!("{:.1}%", s.cpu.as_secs_f64() / total * 100.0)
+                } else {
+                    "nothing to share".to_owned()
+                },
+                s.operators.to_string(),
+                s.rows_in.to_string(),
+                s.rows_out.to_string(),
+                s.per_row_in().map_or_else(|| "handed none".to_owned(), |ns| format!("{ns:.1}ns")),
+                s.per_row_out()
+                    .map_or_else(|| "handed on none".to_owned(), |ns| format!("{ns:.1}ns")),
+                format!("{} of {}", s.reference_impls, s.operators),
+            ]
+        })
+        .collect();
+    let mut out = String::new();
+    heading(&mut out, 4, "Where the time went");
+    out.push_str(&table(
+        &[
+            "kind",
+            "cpu",
+            "share",
+            "operators",
+            "rows in",
+            "rows out",
+            "per row in",
+            "per row out",
+            "reference",
+        ],
+        &rows,
+    ));
+    out.push_str(
+        "Every operator the engine ran over the whole suite, added up by kind, off the cold run of \
+         each query. `share` is of what the operators charged rather than of the wall clock, so the \
+         driver and the process startup are not in the denominator and the column adds to a hundred \
+         percent. `per row in` is the number to compare across kinds, and it is missing for a scan \
+         because a scan is handed nothing, so read `per row out` for that one. `reference` is how \
+         many of them ran the reference implementation of their seam, which is the slow path kept \
+         for differential testing, and a kind that is all reference is a kind whose number is about \
+         the slow path rather than about the engine.\n\n",
+    );
+    if let Some(worst) = folded.first() {
+        let where_ = result.worst_for(&worst.kind, 3);
+        if !where_.is_empty() {
+            let named: Vec<String> =
+                where_.iter().map(|(name, cpu)| format!("{name} at {}", show(*cpu))).collect();
+            out.push_str(&format!(
+                "The most expensive kind is {}, and the queries where it cost the most are {}.\n\n",
+                worst.kind,
+                named.join(", ")
+            ));
+        }
+    }
     out
 }
 
@@ -855,6 +931,7 @@ mod tests {
             },
             answer: "42".to_owned(),
             internal: None,
+            spend: Vec::new(),
         }
     }
 

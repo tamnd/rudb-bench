@@ -110,6 +110,78 @@ pub struct Operator {
     pub reference_impl: bool,
 }
 
+/// What one kind of operator cost, with every operator of that kind added together.
+///
+/// The per query breakdown says a query took six hundred milliseconds and had six operators in it.
+/// It does not say that five hundred of those milliseconds were the scan, and that is the number
+/// that decides what to work on next. Folding by kind is what turns a run into a work list, because
+/// forty three queries times six operators is two hundred and fifty rows and nobody reads those,
+/// where the same run folded by kind is eight rows and the first one is the answer.
+///
+/// Folded per query first and then across the suite, and both foldings are the same function, so
+/// the suite total and the per query rows cannot disagree about what a kind cost.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spend {
+    /// `FileScan`, `Filter`, `Aggregate` and so on, as the engine names it.
+    pub kind: String,
+    /// CPU inside operators of this kind.
+    pub cpu: Duration,
+    /// Rows they were handed, added up.
+    ///
+    /// The denominator of the only rate that means anything here. Two kinds costing the same is not
+    /// the same finding when one of them saw a hundred million rows and the other saw ten.
+    pub rows_in: u64,
+    /// Rows they handed on.
+    pub rows_out: u64,
+    /// How many operators this is.
+    pub operators: usize,
+    /// How many of them ran a reference implementation.
+    pub reference_impls: usize,
+}
+
+impl Spend {
+    /// Nanoseconds of CPU per row handed in, and `None` for a kind that was handed none.
+    ///
+    /// A scan is handed nothing and produces everything, so this is `None` for it rather than
+    /// infinite, and its cost per row is the row count on the other side. The report prints both
+    /// columns for that reason.
+    #[must_use]
+    pub fn per_row_in(&self) -> Option<f64> {
+        (self.rows_in > 0).then(|| self.cpu.as_nanos() as f64 / self.rows_in as f64)
+    }
+
+    /// Nanoseconds of CPU per row handed on, and `None` for a kind that handed on none.
+    #[must_use]
+    pub fn per_row_out(&self) -> Option<f64> {
+        (self.rows_out > 0).then(|| self.cpu.as_nanos() as f64 / self.rows_out as f64)
+    }
+}
+
+/// Add up several foldings into one, most expensive kind first.
+///
+/// Written over an iterator of slices rather than over a slice of slices so that the suite total is
+/// this function over the queries and one query is this function over its operators. A second way
+/// to add these up would be a second place for the two totals to stop agreeing.
+pub fn folded<'a>(every: impl Iterator<Item = &'a [Spend]>) -> Vec<Spend> {
+    let mut out: Vec<Spend> = Vec::new();
+    for spends in every {
+        for spend in spends {
+            match out.iter_mut().find(|held| held.kind == spend.kind) {
+                Some(held) => {
+                    held.cpu += spend.cpu;
+                    held.rows_in += spend.rows_in;
+                    held.rows_out += spend.rows_out;
+                    held.operators += spend.operators;
+                    held.reference_impls += spend.reference_impls;
+                }
+                None => out.push(spend.clone()),
+            }
+        }
+    }
+    out.sort_by(|one, other| other.cpu.cmp(&one.cpu).then_with(|| one.kind.cmp(&other.kind)));
+    out
+}
+
 impl Document {
     /// Read one document out of one line of JSON.
     ///
@@ -223,6 +295,26 @@ impl Document {
     #[must_use]
     pub fn reference_impls(&self) -> usize {
         self.operators.iter().filter(|o| o.reference_impl).count()
+    }
+
+    /// This query's operators folded by kind, most expensive kind first.
+    #[must_use]
+    pub fn by_kind(&self) -> Vec<Spend> {
+        let one: Vec<Vec<Spend>> = self
+            .operators
+            .iter()
+            .map(|o| {
+                vec![Spend {
+                    kind: o.kind.clone(),
+                    cpu: o.cpu,
+                    rows_in: o.rows_in,
+                    rows_out: o.rows_out,
+                    operators: 1,
+                    reference_impls: usize::from(o.reference_impl),
+                }]
+            })
+            .collect();
+        folded(one.iter().map(Vec::as_slice))
     }
 
     /// The accounted CPU against the measured CPU, and against the process, where there is one.
@@ -681,7 +773,7 @@ impl Reader<'_> {
 mod tests {
     use std::time::Duration;
 
-    use super::{Accounting, Document, Json, TOLERANCE};
+    use super::{Accounting, Document, Json, Spend, TOLERANCE, folded};
 
     /// A document the shape rudb writes, small enough to read.
     fn one(cpu_ns: u64, operators: &str) -> String {
@@ -734,6 +826,71 @@ mod tests {
         // nanoseconds between the two is the loop that made the calls.
         assert_eq!(document.accounted_cpu(), Duration::from_nanos(1200));
         assert_eq!(document.internal(None).driver, Duration::from_nanos(200));
+    }
+
+    #[test]
+    fn two_operators_of_one_kind_are_one_row_and_the_dearest_kind_is_first() {
+        let text = one(
+            1000,
+            &format!(
+                "{},{},{}",
+                operator(0, "Filter", 400, false),
+                operator(1, "Get", 300, true),
+                operator(2, "Filter", 300, true)
+            ),
+        );
+        let document = Document::parse(&text).expect("this is the shape rudb writes");
+        let folded = document.by_kind();
+        assert_eq!(folded.len(), 2, "three operators, two kinds");
+        // Neither filter on its own is the dearest operator in the query. Together they are the
+        // dearest kind, which is the thing worth working on and the thing the fold is for.
+        assert_eq!(folded[0].kind, "Filter");
+        assert_eq!(folded[0].cpu, Duration::from_nanos(700));
+        assert_eq!(folded[0].operators, 2);
+        assert_eq!(folded[0].reference_impls, 1, "one of the two filters was the reference");
+        assert_eq!(folded[0].rows_in, 200, "both filters were handed a hundred");
+        assert_eq!(folded[1].kind, "Get");
+        // What the table divides by has to be what the operators charged, or the shares are of
+        // something that is not on the page.
+        let total: Duration = folded.iter().map(|s| s.cpu).sum();
+        assert_eq!(total, document.operator_cpu());
+    }
+
+    #[test]
+    fn a_kind_handed_no_rows_has_no_rate_rather_than_a_division_by_zero() {
+        let scan = Spend {
+            kind: "FileScan".to_owned(),
+            cpu: Duration::from_nanos(500),
+            rows_in: 0,
+            rows_out: 100,
+            operators: 1,
+            reference_impls: 1,
+        };
+        assert_eq!(scan.per_row_in(), None, "a scan is handed nothing and produces everything");
+        assert_eq!(scan.per_row_out(), Some(5.0));
+    }
+
+    #[test]
+    fn folding_the_foldings_gives_what_folding_the_operators_gives() {
+        // The suite total is this function over the queries and one query is this function over its
+        // operators, and the two agreeing is the only reason a share in the report means anything.
+        let one_query = |kind: &str, cpu: u64| Spend {
+            kind: kind.to_owned(),
+            cpu: Duration::from_nanos(cpu),
+            rows_in: 10,
+            rows_out: 5,
+            operators: 1,
+            reference_impls: 0,
+        };
+        let first = vec![one_query("Get", 100), one_query("Filter", 50)];
+        let second = vec![one_query("Filter", 70)];
+        let folded = folded([first.as_slice(), second.as_slice()].into_iter());
+        assert_eq!(folded.len(), 2);
+        assert_eq!(folded[0].kind, "Filter");
+        assert_eq!(folded[0].cpu, Duration::from_nanos(120));
+        assert_eq!(folded[0].operators, 2);
+        assert_eq!(folded[0].rows_in, 20);
+        assert_eq!(folded[1].kind, "Get");
     }
 
     #[test]

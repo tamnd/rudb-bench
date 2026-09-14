@@ -27,7 +27,7 @@ use crate::data::Sample;
 use crate::engine::Loaded;
 use crate::measure::{Convention, Distribution, Runs};
 use crate::memory::{Cost, Peak};
-use crate::metrics::{Accounting, Internal};
+use crate::metrics::{Accounting, Internal, Spend};
 use crate::report::{Abstention, Comparison, QueryResult, SuiteResult};
 use crate::suite::find;
 
@@ -76,6 +76,11 @@ const PREAMBLE: &str = "\
 # reference implementations, and the cpu that went on building the tree before any pipeline
 # existed. The first two are the cross check, and a query where they disagree is refused by
 # `publishable` rather than dropped from the file.
+#
+# `spend` is the same breakdown folded by kind of operator, one line per kind: the kind, the cpu,
+# the rows handed in, the rows handed on, how many operators that was, and how many of them were
+# reference implementations. `inside` asks whether the breakdown adds up and this asks what to go
+# and make faster, which is why both are here and neither replaces the other.
 ";
 
 /// Add this result to the file, replacing whatever that engine had there before.
@@ -204,6 +209,49 @@ fn split(text: &str) -> BTreeMap<String, String> {
 /// The value of the first line with this key, where the value is the rest of the line.
 fn value<'a>(block: &'a str, key: &str) -> Option<&'a str> {
     block.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix(' ').map(str::trim_start))
+}
+
+/// Every line with this key rather than the first, for the keys a query has several of.
+fn values<'a>(block: &'a str, key: &'a str) -> impl Iterator<Item = &'a str> {
+    block
+        .lines()
+        .filter_map(move |line| line.strip_prefix(key)?.strip_prefix(' ').map(str::trim_start))
+}
+
+/// One kind of operator and what it cost, as this file writes it.
+///
+/// The kind first and on its own, because it is the only field that is not a number and a kind with
+/// a space in it would make every field after it land one place to the left. The engine names its
+/// operators in one word today and this file does not depend on that staying true.
+fn spent(s: &Spend) -> String {
+    format!(
+        "{} {} {} {} {} {}",
+        s.kind.replace(' ', "-"),
+        micros(s.cpu),
+        s.rows_in,
+        s.rows_out,
+        s.operators,
+        s.reference_impls
+    )
+}
+
+/// Read that back.
+fn unspend(text: &str) -> Result<Spend, String> {
+    let parts: Vec<&str> = text.split_whitespace().collect();
+    let [kind, cpu, rows_in, rows_out, operators, references] = parts[..] else {
+        return Err(format!("a spend line needs six fields and this has `{text}`"));
+    };
+    let number = |field: &str, what: &str| {
+        field.parse::<u64>().map_err(|_| format!("{field} is not {what}"))
+    };
+    Ok(Spend {
+        kind: kind.to_owned(),
+        cpu: Duration::from_micros(number(cpu, "a duration")?),
+        rows_in: number(rows_in, "a row count")?,
+        rows_out: number(rows_out, "a row count")?,
+        operators: number(operators, "a count")? as usize,
+        reference_impls: number(references, "a count")? as usize,
+    })
 }
 
 /// The two load readings out of the line that holds them.
@@ -439,6 +487,9 @@ fn write_one(result: &SuiteResult, machine: &str, source_bytes: u64) -> String {
         if let Some(i) = &q.internal {
             let _ = writeln!(out, "  inside  {}", inside(i));
         }
+        for s in &q.spend {
+            let _ = writeln!(out, "  spend   {}", spent(s));
+        }
         let _ = writeln!(out, "  answer  {}", escape(&q.answer));
     }
     out
@@ -560,6 +611,7 @@ fn one_query(engine: &str, piece: &str) -> Result<QueryResult, String> {
             Some(text) => Some(uninside(text)?),
             None => None,
         },
+        spend: values(&body, "spend").map(unspend).collect::<Result<Vec<_>, _>>()?,
     })
 }
 
@@ -571,7 +623,7 @@ mod tests {
     use crate::engine::Loaded;
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
-    use crate::metrics::{Accounting, Internal};
+    use crate::metrics::{Accounting, Internal, Spend};
     use crate::report::{QueryResult, SuiteResult};
     use crate::suite::find;
 
@@ -616,6 +668,24 @@ mod tests {
                 operators: 4,
                 reference_impls: 4,
             }),
+            spend: vec![
+                Spend {
+                    kind: "FileScan".to_owned(),
+                    cpu: Duration::from_micros(30_000),
+                    rows_in: 0,
+                    rows_out: 1_000,
+                    operators: 1,
+                    reference_impls: 1,
+                },
+                Spend {
+                    kind: "Filter".to_owned(),
+                    cpu: Duration::from_micros(8_000),
+                    rows_in: 1_000,
+                    rows_out: 12,
+                    operators: 2,
+                    reference_impls: 2,
+                },
+            ],
         }
     }
 
