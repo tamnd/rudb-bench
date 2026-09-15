@@ -1,10 +1,10 @@
 # Reports
 
-Reports are grouped by the UTC date when the measurement was taken or the analysis was committed. Generated runs and written investigations share the same date directory, while supporting JSON files live in a named subdirectory beside their Markdown report.
+Reports are grouped by the UTC date when the measurement was taken or the analysis was committed. Generated runs and written investigations share the same date directory, Supporting JSON files live in a named subdirectory beside their Markdown report.
 
 | Date | Reports |
 | --- | --- |
-| 2026-09-15 | [zone maps and the view](2026-09-15/zone-maps-and-the-view.md), [q23 memory scaling](2026-09-15/q23-memory-scaling.md), [q23 staged scan](2026-09-15/q23-staged-scan-experiment.md), [radix table follow-up](2026-09-15/radix-table-follow-up.md) |
+| 2026-09-15 | [row-group layout](2026-09-15/clickbench-row-group-layout.md), [zone maps and the view](2026-09-15/zone-maps-and-the-view.md), [q23 memory scaling](2026-09-15/q23-memory-scaling.md), [q23 staged scan](2026-09-15/q23-staged-scan-experiment.md), [radix table follow-up](2026-09-15/radix-table-follow-up.md) |
 | 2026-09-14 | [root cause](2026-09-14/rudb-duckdb-root-cause-20260914.md), [parallel audit](2026-09-14/clickbench-parallel-audit-20260914.md), [radix and fetch follow-up](2026-09-14/clickbench-radix-and-fetch-20260914.md) |
 | 2026-09-13 | [measurement audit](2026-09-13/clickbench-audit.md), [per-query details](2026-09-13/clickbench-audit-details.md) |
 | 2026-09-12 | ClickBench and smoke harness runs |

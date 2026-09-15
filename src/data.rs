@@ -270,18 +270,21 @@ fn take(
     }
     let every = full.div_ceil(rows.wanted);
     let stem = source.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-    let at = source.with_file_name(format!("{stem}-{}-snappy.parquet", rows.label));
+    let at = source.with_file_name(format!("{stem}-{}-snappy-rg8k.parquet", rows.label));
 
     if !at.is_file() {
         // `file_row_number` is the row's position in the file, which is what makes this a stride
         // over the whole thing rather than a sample that has to hold anything in memory. The
         // ClickBench's source file is Snappy. Keep that codec in the development samples: rudb
         // reads Parquet during every query while DuckDB converts it once at load time, so changing
-        // the codec here changes only one side of the repeated query measurement.
+        // the codec here changes only one side of the repeated query measurement. Eight thousand
+        // rows also keeps a string page from becoming the memory of the eight readers that happen
+        // to hold one. It is part of the sample's name so an older wide-row-group sample is never
+        // silently reused.
         let sql = format!(
             "COPY (SELECT * EXCLUDE (file_row_number) FROM read_parquet('{}', \
              file_row_number = true) WHERE file_row_number % {every} = 0) TO '{}' \
-             (FORMAT parquet, COMPRESSION snappy)",
+             (FORMAT parquet, COMPRESSION snappy, ROW_GROUP_SIZE 8192)",
             source.display(),
             at.display()
         );
