@@ -60,3 +60,45 @@ rudb's memory is three times DuckDB's advantage today, not a disadvantage: 347 M
 Not a straight switch to CTAS. That would triple rudb's reported memory and would move a load into a query, which is the thing rule five exists to prevent. The honest fix is for rudb to have a storage format it can persist into and reopen, which is F2, and for this harness to then load it the way it loads DuckDB's.
 
 Until then the number in this file is the one to quote when somebody asks how much of the gap is the decode. On ClickBench at a million rows on one thread it is 1.57 seconds of the 3.16, which is half the query column, and it is the single largest item in the gap between rudb and DuckDB on this suite.
+
+## Correction and the thread ladder
+
+The DuckDB row in the table above says "its own database file" and I described it as running at its own default thread count. That is wrong. The script that produced it set `SET threads = 1` for both engines, so both numbers in that table are single threaded, and the 2.19 s is DuckDB on one thread rather than on thirty two. The numbers are right and the label was not. Re-measured the same day DuckDB on one thread is 2.24 s, which is the same number.
+
+What the mistake hid is the thing worth knowing. Both engines were run again over the same file and the same forty one queries at six thread counts, three runs each, medians below. Wall is the whole process: the CTAS and then the queries.
+
+| threads | rudb wall | rudb query total | rudb peak RSS | DuckDB wall | DuckDB peak RSS |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 2.67 s | 1593 ms | 1013 MB | 2.24 s | 1036 MB |
+| 2 | 1.73 s | 1079 ms | 1073 MB | 1.31 s | 1235 MB |
+| 4 | 1.12 s | 686 ms | 1255 MB | 0.77 s | 1398 MB |
+| 8 | 0.80 s | 488 ms | 1513 MB | 0.50 s | 1523 MB |
+| 16 | 0.84 s | 507 ms | 1578 MB | 0.51 s | 1563 MB |
+| 32 | 0.84 s | 504 ms | 1733 MB | 0.57 s | 1709 MB |
+
+Both engines stop gaining at eight threads and both lose a little past sixteen, on a machine with thirty two. rudb goes 3.3 times faster from one thread to eight and DuckDB goes 4.5 times, so rudb is 1.19 times behind on one thread and 1.60 times behind on eight. The gap is not the work, it is the scaling.
+
+## Where the eight thread gap actually is
+
+Per query, medians of three, eight threads, the same forty one queries. rudb's query total is 482.6 ms and DuckDB's is 267.0, which is 1.81 times. The fourteen queries below are the ones where rudb spends the most more.
+
+| rudb | DuckDB | times | query |
+| ---: | ---: | ---: | --- |
+| 58.4 ms | 13.0 ms | 4.49 | `GROUP BY WatchID, ClientIP ORDER BY c DESC LIMIT 10` |
+| 49.5 ms | 14.0 ms | 3.54 | `GROUP BY URL ORDER BY c DESC LIMIT 10` |
+| 40.4 ms | 16.0 ms | 2.53 | `GROUP BY 1, URL ORDER BY c DESC LIMIT 10` |
+| 25.9 ms | 13.0 ms | 1.99 | `GROUP BY UserID, SearchPhrase LIMIT 10` |
+| 23.8 ms | 9.0 ms | 2.64 | `GROUP BY RegionID` with five aggregates |
+| 22.1 ms | 6.0 ms | 3.68 | `COUNT(DISTINCT UserID)` grouped by RegionID |
+| 21.4 ms | 6.0 ms | 3.57 | `GROUP BY ClientIP` with the arithmetic keys |
+| 19.9 ms | 9.0 ms | 2.21 | `GROUP BY UserID, SearchPhrase ORDER BY EventTime` |
+| 18.3 ms | 12.0 ms | 1.53 | `WHERE URL LIKE '%google%' ORDER BY EventTime` |
+| 17.6 ms | 5.0 ms | 3.52 | `COUNT(DISTINCT UserID)` grouped by SearchPhrase |
+| 17.2 ms | 6.0 ms | 2.87 | `COUNT(DISTINCT UserID)` |
+| 14.9 ms | 6.0 ms | 2.48 | `GROUP BY UserID ORDER BY COUNT(*) DESC LIMIT 10` |
+| 12.5 ms | 4.0 ms | 3.12 | `COUNT(DISTINCT SearchPhrase)` |
+| 10.4 ms | 4.0 ms | 2.61 | `GROUP BY SearchEngineID, SearchPhrase` |
+
+Every one of them is a grouped aggregate and almost every one of them has a lot of groups. The three largest are 148.3 ms of rudb's 482.6, which is 31 percent of the query column, against 43 ms of DuckDB's 267. `WatchID` is nearly unique so that query builds roughly a million groups, and `URL` builds about 800,000.
+
+Nothing else on the list is close. The scan is not the problem at eight threads, the filter is not the problem, and the regular expression query that used to be the worst is now within a rounding error of DuckDB. The grouped aggregate over a high cardinality key is the whole of the remaining gap, and it is the F5 item: a two phase radix partitioned aggregate with a packed row layout, which is what the DuckDB aggregate hash table design does and what rudb does not do yet.
