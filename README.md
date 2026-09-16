@@ -10,9 +10,11 @@ The design is [`spec/15-rudb-bench.md`](https://github.com/tamnd/rudb/blob/main/
 
 The [13 September measurement audit](reports/2026-09-13/clickbench-audit.md) runs DuckDB 1.5.5 and rudb 0.2.37 through all 43 ClickBench queries at 1k, 10k, 100k and 1m rows, with five hot repetitions, per-child CPU and RSS checks, and retained raw results. It includes q19 and q33 on the samples. The earlier measurements below retain their original versions and methodology.
 
+rudb now exposes all 43 ClickBench queries through the regular harness. Q19 and Q33 were the last two exclusions. Both complete and match DuckDB at 1k, 10k, 100k, and 1m rows in the four way native and Parquet audit. ClickBench has 43 queries, so the complete result is 43 of 43.
+
 ## Where rudb is, today
 
-rudb runs ClickBench now. Not all of it: 41 of the 43 queries, missing q19 and q33 because its hash aggregate does not spill and those two group by a key that is close to unique ([tamnd/rudb#220](https://github.com/tamnd/rudb/issues/220), milestone E5). Here is rudb 0.3.5 against DuckDB on `gamingpc-wsl`, which is 32 hardware threads, at a million rows and at ten million, five hot runs of each query after a cold one. Query time is what each engine says the queries cost it, which is the number the public board publishes, and the ratio is over the 41 queries both of them ran.
+The table below records rudb 0.3.5, when rudb ran 41 of 43 queries and still excluded Q19 and Q33. It is retained because benchmark history should not be rewritten after the engine improves. These measurements compare DuckDB and rudb on `gamingpc-wsl`, which is 32 hardware threads, at one million and ten million rows, with five hot runs of each query after a cold one. Query time is what each engine reports. The ratio covers the 41 queries both engines ran at that revision.
 
 | | 1m rows | 10m rows |
 | --- | --- | --- |
