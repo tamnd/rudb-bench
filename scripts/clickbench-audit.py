@@ -3,7 +3,7 @@
 
 First means first execution in a fresh process, not a flushed OS page cache.
 Every hot repetition also starts a fresh process. Results are fully rendered.
-DuckDB loads its native table once; rudb decodes the source Parquet per query.
+DuckDB and rudb load native tables once; both also read the source Parquet per query.
 No engine-specific profiling is enabled inside the timed interval.
 """
 import argparse
@@ -115,8 +115,17 @@ def digest(path):
 
 def render(root, records, sizes, hot):
     lines = ['# ClickBench measurement audit', '',
-             'All 43 DuckDB SQL queries are attempted on DuckDB native storage, DuckDB reading Parquet and rudb reading the same Parquet file. Five hot repetitions are required for a complete row. A failed repetition invalidates that query; successful fragments are never averaged into a result.', '',
-             'First execution is not disk-cold: the page cache is not flushed. Each repetition uses a fresh process. Query seconds are the CLI timer, including result rendering; wall and CPU seconds and peak RSS cover the whole child process. CPU and RSS come from Linux wait4 for that child. RSS is the maximum resident set, not allocated bytes or an incremental memory delta. The duckdb row uses a loaded native table. The duckdb-parquet and rudb rows read and decode the same Parquet file on every query. These are sample results, not official ClickBench scores.', '',
+             'All 43 SQL queries are attempted on DuckDB native, rudb native, DuckDB Parquet, and rudb Parquet. Five hot repetitions are required for a complete row. A failed repetition invalidates that query; successful fragments are never averaged into a result.', '',
+             'First execution is not disk-cold: the page cache is not flushed. Each repetition uses a fresh process. Query seconds are the CLI timer, including result rendering; wall and CPU seconds and peak RSS cover the whole child process. CPU and RSS come from Linux wait4 for that child. RSS is the maximum resident set, not allocated bytes or an incremental memory delta. Both native rows open a loaded single-file database. Both Parquet rows read and decode the same source file on every query. These are sample results, not official ClickBench scores.', '',
+             '| Size | Engine | Load wall (s) | Load CPU (s) | Load peak RSS (MiB) | Native bytes |',
+             '| --- | --- | ---: | ---: | ---: | ---: |']
+    for size in sizes:
+        for engine in ['duckdb-native', 'rudb-native']:
+            load = next((r for r in records if r.get('size') == size and r.get('engine') == engine and r.get('phase') == 'load'), None)
+            if load:
+                rss = load['peak_rss_bytes'] / 2**20 if load['peak_rss_bytes'] is not None else float('nan')
+                lines.append(f"| {size} | {engine} | {load['wall_s']:.6f} | {load['cpu_s']:.6f} | {rss:.2f} | {load['database_bytes']} |")
+    lines += ['',
              '| Size | Engine | Complete / 43 | Query median sum (s) | Process wall median sum (s) | CPU median sum (s) | Peak RSS (MiB) |',
              '| --- | --- | ---: | ---: | ---: | ---: | ---: |']
     checks_path = root / 'correctness.json'
@@ -125,7 +134,7 @@ def render(root, records, sizes, hot):
     for size in sizes:
         if not any(r.get('size') == size and r.get('phase') == 'query' for r in records):
             continue
-        for engine in ['duckdb', 'duckdb-parquet', 'rudb']:
+        for engine in ['duckdb-native', 'rudb-native', 'duckdb-parquet', 'rudb-parquet']:
             groups = []
             for q in range(1, 44):
                 rows = [r for r in records if r.get('size') == size and r.get('engine') == engine and r.get('query') == q]
@@ -149,13 +158,13 @@ def render(root, records, sizes, hot):
               '| Size | Query | Answer check |', '| --- | --- | --- |']
     for size in sizes:
         for q in range(1, 44):
-            pair = [[r for r in records if r.get('size') == size and r.get('engine') == e and r.get('query') == q and r.get('run') == 0] for e in ['duckdb', 'rudb']]
-            if not all(pair):
+            group = [[r for r in records if r.get('size') == size and r.get('engine') == e and r.get('query') == q and r.get('run') == 0] for e in ['duckdb-native', 'rudb-native', 'duckdb-parquet', 'rudb-parquet']]
+            if not all(group):
                 continue
-            a, b = pair[0][0], pair[1][0]
-            if a['status'] != 'ok' or b['status'] != 'ok':
-                check = f"duckdb {a['status']}, rudb {b['status']}"
-            elif equal(answer(root / a['stdout']), answer(root / b['stdout'])):
+            rows = [part[0] for part in group]
+            if any(row['status'] != 'ok' for row in rows):
+                check = ', '.join(f"{row['engine']} {row['status']}" for row in rows)
+            elif all(equal(answer(root / rows[0]['stdout']), answer(root / row['stdout'])) for row in rows[1:]):
                 check = 'match'
             else:
                 caveat = root / 'sql' / f'q{q}.caveat'
@@ -211,27 +220,31 @@ def main():
         count = int(subprocess.check_output([binaries['duckdb'], '-csv', '-noheader', '-c', f"SELECT count(*) FROM read_parquet('{source_sql}')"], text=True))
         meta['datasets'][size] = dict(path=str(source), rows=count, bytes=source.stat().st_size, sha256=digest(source))
         (root / 'metadata.json').write_text(json.dumps(meta, indent=2) + '\n')
-        database = root / f'{size}.duckdb'
-        load = measure([binaries['duckdb'], '-batch', str(database), '-c', f'CREATE TABLE hits ({schema}); INSERT INTO hits {scan}; CHECKPOINT;'], root / f'{size}-load', a.timeout)
-        load.update(size=size, engine='duckdb', phase='load', database_bytes=database.stat().st_size if database.exists() else None)
-        save(load)
-        if load['status'] != 'ok':
-            raise RuntimeError(f'load failed: {load}')
-        settings = subprocess.check_output([binaries['duckdb'], str(database), '-csv', '-c', "SELECT name,value FROM duckdb_settings() WHERE name IN ('threads','memory_limit','temp_directory','preserve_insertion_order')"], text=True)
+        databases = {'duckdb-native': root / f'{size}.duckdb', 'rudb-native': root / f'{size}.rudb'}
+        load_sql = f'CREATE TABLE hits ({schema}); INSERT INTO hits {scan}; CHECKPOINT;'
+        for engine, database in databases.items():
+            binary = binaries['duckdb'] if engine == 'duckdb-native' else binaries['rudb']
+            load = measure([binary, '-batch', str(database), '-c', load_sql], root / f'{size}-{engine}-load', a.timeout)
+            load.update(size=size, engine=engine, phase='load', database_bytes=database.stat().st_size if database.exists() else None,
+                        load_sql=load_sql)
+            save(load)
+            if load['status'] != 'ok':
+                raise RuntimeError(f'{engine} load failed: {load}')
+        settings = subprocess.check_output([binaries['duckdb'], str(databases['duckdb-native']), '-csv', '-c', "SELECT name,value FROM duckdb_settings() WHERE name IN ('threads','memory_limit','temp_directory','preserve_insertion_order')"], text=True)
         meta['datasets'][size]['duckdb_settings'] = settings
         for q in range(1, 44):
             sql = (root / 'sql' / f'q{q}.sql').read_text()
-            engines = ['duckdb', 'duckdb-parquet', 'rudb']
+            engines = ['duckdb-native', 'rudb-native', 'duckdb-parquet', 'rudb-parquet']
             if q % 2 == 0:
                 engines.reverse()
             for engine in engines:
                 for run in range(a.hot + 1):
-                    binary = binaries['rudb'] if engine == 'rudb' else binaries['duckdb']
+                    binary = binaries['rudb'] if engine.startswith('rudb') else binaries['duckdb']
                     command = [binary, '-batch', '-csv', '-noheader']
-                    if engine == 'duckdb':
-                        command += [str(database)]
+                    if engine in databases:
+                        command += [str(databases[engine])]
                     command += ['-c', '.timer on']
-                    if engine != 'duckdb':
+                    if engine.endswith('parquet'):
                         command += ['-c', f'CREATE VIEW hits AS {scan}']
                     command += ['-c', sql]
                     r = measure(command, root / f'{size}-{engine}-q{q}-r{run}', a.timeout)
@@ -241,8 +254,7 @@ def main():
                         break
             print(f'{size} q{q}/43 done', flush=True)
         render(root, records, a.sizes, a.hot)
-        # The native database is scratch; its size and load metrics are retained.
-        database.unlink()
+        # Native files stay beside the audit so deterministic retests open the exact timed files.
     meta.update(end_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), load_end=os.getloadavg(), meminfo_end=Path('/proc/meminfo').read_text())
     (root / 'metadata.json').write_text(json.dumps(meta, indent=2) + '\n')
     log.close()
