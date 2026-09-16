@@ -23,15 +23,16 @@ for size, data in meta['datasets'].items():
     source = data['path'].replace("'", "''")
     view = f"CREATE VIEW hits AS SELECT {projection} FROM read_parquet('{source}', binary_as_string=True)"
     for q in range(1, 44):
-        pair = [next(r for r in raw if r.get('size') == size and r.get('query') == q and r.get('run') == 0 and r['engine'] == e) for e in ['duckdb', 'rudb']]
+        engines = ['duckdb-native', 'rudb-native', 'duckdb-parquet', 'rudb-parquet']
+        pair = [next(r for r in raw if r.get('size') == size and r.get('query') == q and r.get('run') == 0 and r['engine'] == e) for e in engines]
         if any(r['status'] != 'ok' for r in pair):
             checks.append(dict(size=size, query=q, result='execution failed'))
             continue
         answers = [audit.answer(root/r['stdout']) for r in pair]
-        if audit.equal(*answers):
+        if all(audit.equal(answers[0], answer) for answer in answers[1:]):
             checks.append(dict(size=size, query=q, result='original match'))
             continue
-        if audit.equal(*[sorted(rows) for rows in answers]):
+        if all(audit.equal(sorted(answers[0]), sorted(answer)) for answer in answers[1:]):
             checks.append(dict(size=size, query=q, result='same rows; different order'))
             continue
         sql = (root/'sql'/f'q{q}.sql').read_text().strip().rstrip(';')
@@ -47,12 +48,19 @@ for size, data in meta['datasets'].items():
         (root/f'{size}-q{q}-deterministic.sql').write_text(deterministic+';\n')
         outputs = []
         statuses = []
-        for e in ['duckdb', 'rudb']:
-            command = [meta['binaries'][e]['path'], '-batch', '-csv', '-noheader', '-c', view, '-c', deterministic]
+        for e in engines:
+            binary = 'rudb' if e.startswith('rudb') else 'duckdb'
+            command = [meta['binaries'][binary]['path'], '-batch', '-csv', '-noheader']
+            if e.endswith('native'):
+                suffix = 'rudb' if e.startswith('rudb') else 'duckdb'
+                command += [str(root/f'{size}.{suffix}')]
+            else:
+                command += ['-c', view]
+            command += ['-c', deterministic]
             r = audit.measure(command, root/f'{size}-{e}-q{q}-verify', 120)
             statuses.append(r['status'])
             outputs.append(audit.answer(root/r['stdout']))
-        result = 'deterministic retest match' if statuses == ['ok','ok'] and audit.equal(*outputs) else 'UNRESOLVED deterministic retest'
+        result = 'deterministic retest match' if all(status == 'ok' for status in statuses) and all(audit.equal(outputs[0], output) for output in outputs[1:]) else 'UNRESOLVED deterministic retest'
         checks.append(dict(size=size, query=q, result=result, statuses=statuses, sql=deterministic))
         print(size, q, result, flush=True)
 (root/'correctness.json').write_text(json.dumps(checks, indent=2)+'\n')
