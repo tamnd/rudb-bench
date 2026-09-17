@@ -1,16 +1,12 @@
 # Native page checksum throughput
 
-Native scans validated every requested page with a byte-at-a-time FNV checksum. Profiling Query 18
-showed that checksum work consumed a material part of a scan that otherwise needed little execution
-work. The checksum now processes four independent 64-bit lanes in each 32-byte iteration and uses a
+Native scans validated every requested page with a byte-at-a-time FNV checksum. Profiling Query 18 showed that checksum work consumed a material part of a scan that otherwise needed little execution work. The checksum now processes four independent 64-bit lanes in each 32-byte iteration and uses a
 64-bit avalanche before storing the result.
 
-The checksum field remains eight bytes and readers still validate the committed directory and every
-page they read. Because checksum values changed, the native format version advances from v4 to v5.
+The checksum field remains eight bytes and readers still validate the committed directory and every page they read. Because checksum values changed, the native format version advances from v4 to v5.
 Existing v4 files must be loaded again.
 
-The measurements below use the complete four-way 1 million row audit. Every query ran in a fresh
-process once for the first measurement and five times for the hot median.
+The measurements below use the complete four-way 1 million row audit. Every query ran in a fresh process once for the first measurement and five times for the hot median.
 
 | Engine | Query timer sum | Process wall sum | CPU sum | Peak RSS |
 | --- | ---: | ---: | ---: | ---: |
@@ -35,6 +31,4 @@ process once for the first measurement and five times for the hot median.
 | Query 34 | 26.0 ms | 62.4 ms | 60.5 ms | 2.9% faster |
 | Query 35 | 28.0 ms | 61.4 ms | 58.2 ms | 5.3% faster |
 
-All 43 queries completed. Query 29 matched in the full audit, and all deterministic rewritten checks
-passed. The native timer sum is now 1.13 times DuckDB. Queries 34 and 35 changed little because their
-cost is high-cardinality string aggregation rather than page validation. The 10x target remains open.
+All 43 queries completed. Query 29 matched in the full audit, and all deterministic rewritten checks passed. The native timer sum is now 1.13 times DuckDB. Queries 34 and 35 changed little because their cost is high-cardinality string aggregation rather than page validation. The 10x target remains open.

@@ -1,9 +1,7 @@
 # Global string codes and radix count
 
 The native format prototype assigns one stable `u32` code to each distinct string in a column.
-Stripe pages store those codes. The dictionary payload stays in the file and is read in 64 KiB
-blocks only when a query needs string bytes. Grouped `count(*)` over one varying stable string key
-uses the code directly, exchanges codes into four radix owners, and counts with ordinary integers.
+Stripe pages store those codes. The dictionary payload stays in the file and is read in 64 KiB blocks only when a query needs string bytes. Grouped `count(*)` over one varying stable string key uses the code directly, exchanges codes into four radix owners, and counts with ordinary integers.
 Constant grouping columns are reconstructed beside the varying key.
 
 The main costs were architectural:
@@ -15,15 +13,11 @@ The main costs were architectural:
 5. Small native scans and their downstream buffered pipelines launched more workers than the work
    could amortize.
 
-The current reader keeps the offset index resident, caches payload blocks, and lets byte oriented
-kernels read external values without constructing `Value` objects. The scheduler caps small native
-and buffered pipelines by their row count.
+The current reader keeps the offset index resident, caches payload blocks, and lets byte oriented kernels read external values without constructing `Value` objects. The scheduler caps small native and buffered pipelines by their row count.
 
 ## Complete 100k audit
 
-Every query ran in a fresh process. The first run was retained separately and five following runs
-formed each hot median. All 43 queries completed in all four modes. The deterministic verifier
-matched every query that needed a stable tie breaker.
+Every query ran in a fresh process. The first run was retained separately and five following runs formed each hot median. All 43 queries completed in all four modes. The deterministic verifier matched every query that needed a stable tie breaker.
 
 | Engine | Complete | Query median sum | Process wall sum | CPU sum | Peak RSS |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -55,18 +49,14 @@ Before block caching and the external byte kernel, rudb native took 31.88 ms, 35
 
 At one million rows Q34 is about 5 to 7 ms with four useful workers, compared with 26 ms for
 DuckDB. The file has roughly one 1,024 row stripe per input chunk, so the query still performs about
-981 small code page reads. Larger physical pages with vector sized logical chunks are the next
-storage change.
+981 small code page reads. Larger physical pages with vector sized logical chunks are the next storage change.
 
-The 100k native suite is 1.59x faster than DuckDB and uses 3.74x less peak query memory. Native load
-uses 6.78x less peak memory. The whole suite has not reached the 10x target.
+The 100k native suite is 1.59x faster than DuckDB and uses 3.74x less peak query memory. Native load uses 6.78x less peak memory. The whole suite has not reached the 10x target.
 
 The compact arena writer and streamed dictionary finalization reduce the later 1m load peak from
-431 MiB to 295 MiB. DuckDB uses 1,932.7 MiB for the same load, so the current ratio is 6.5x. The
-remaining dictionary membership indexes and payload arenas stay resident together until commit.
+431 MiB to 295 MiB. DuckDB uses 1,932.7 MiB for the same load, so the current ratio is 6.5x. The remaining dictionary membership indexes and payload arenas stay resident together until commit.
 
-After rebasing to main and limiting both scan and buffered stages to four workers at this scale, the
-version 7 1m measurements are:
+After rebasing to main and limiting both scan and buffered stages to four workers at this scale, the version 7 1m measurements are:
 
 | Query | DuckDB native | rudb native | Speedup |
 | --- | ---: | ---: | ---: |
@@ -74,14 +64,10 @@ version 7 1m measurements are:
 | Q34 | 26.0 ms | 5.41 ms | 4.81x |
 | Q35 | 26.0 ms | 5.41 ms | 4.81x |
 
-Q34 peak RSS is 39.7 MiB versus DuckDB's 301.0 MiB. The remaining query cost is the 1,024 row
-physical stripe layout. A 1m scan performs about 981 small code page reads before radix counting.
+Q34 peak RSS is 39.7 MiB versus DuckDB's 301.0 MiB. The remaining query cost is the 1,024 row physical stripe layout. A 1m scan performs about 981 small code page reads before radix counting.
 
 Massif on the compact writer showed that finalization duplicated the complete dictionary payload.
 Writing the authenticated index followed by the existing arena reduced 1m load peak RSS from
 339 MiB to 295 MiB. The result is 6.5x below DuckDB's 1,932.7 MiB load peak.
 
-The lazy dictionary format needs independently authenticated indexes and payload blocks. Version 7
-adds an index checksum and one checksum per 64 KiB payload block. Error propagation from a lazy
-block read through every vector consumer remains part of the storage contract and must be complete
-before this work is merged.
+The lazy dictionary format needs independently authenticated indexes and payload blocks. Version 7 adds an index checksum and one checksum per 64 KiB payload block. Error propagation from a lazy block read through every vector consumer remains part of the storage contract and must be complete before this work is merged.
