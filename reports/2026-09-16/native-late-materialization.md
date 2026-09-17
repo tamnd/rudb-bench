@@ -1,17 +1,10 @@
 # Native late materialization
 
-ClickBench Query 24 selects all 105 columns, filters on `URL`, orders by `EventTime`, and returns ten
-rows. The old native plan decoded every selected column for all one million input rows before TopN
-discarded nearly all of them. Its median engine time was 76.3 ms and its median CPU time was 1.03
-seconds.
+ClickBench Query 24 selects all 105 columns, filters on `URL`, orders by `EventTime`, and returns ten rows. The old native plan decoded every selected column for all one million input rows before TopN discarded nearly all of them. Its median engine time was 76.3 ms and its median CPU time was 1.03 seconds.
 
-Catalog scans can now append a table-wide row ordinal. The late materialization optimizer carries
-that ordinal through the filter and TopN, then `TableFetch` reads the complete winning rows from the
-native table. The table fetch preserves TopN order and works across memory chunks and native
-stripes.
+Catalog scans can now append a table-wide row ordinal. The late materialization optimizer carries that ordinal through the filter and TopN, then `TableFetch` reads the complete winning rows from the native table. The table fetch preserves TopN order and works across memory chunks and native stripes.
 
-The measurements below use the full four-way 1 million row audit with six fresh processes per
-query.
+The measurements below use the full four-way 1 million row audit with six fresh processes per query.
 
 | Query 24 engine | Query median | Process wall median | CPU median | Peak RSS |
 | --- | ---: | ---: | ---: | ---: |
@@ -31,6 +24,4 @@ DuckDB native by engine time.
 | DuckDB Parquet | 1.580 s | 3.208 s | 8.064 s | 355.6 MiB |
 | rudb Parquet | 0.926 s | 1.177 s | 5.081 s | 186.9 MiB |
 
-All 43 queries completed. Query 24 output matched the previous plan byte for byte. The deterministic
-correctness verifier passed its rewritten checks, including Query 40, and Query 29 matched in the
-full audit. Native suite time is still 1.25 times DuckDB, so the 10x target remains open.
+All 43 queries completed. Query 24 output matched the previous plan byte for byte. The deterministic correctness verifier passed its rewritten checks, including Query 40, and Query 29 matched in the full audit. Native suite time is still 1.25 times DuckDB, so the 10x target remains open.

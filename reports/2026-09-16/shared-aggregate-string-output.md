@@ -1,16 +1,11 @@
 # Shared aggregate string output
 
 Callgrind on ClickBench Query 34 attributed 20.0 percent of executed instructions to `memcpy` and
-9.15 percent to vector cloning. A grouped aggregate built flat string result chunks, and TopN cloned
-those chunks while retaining candidate rows. Cloning a flat string vector copied its complete arena,
-including strings TopN would later discard.
+9.15 percent to vector cloning. A grouped aggregate built flat string result chunks, and TopN cloned those chunks while retaining candidate rows. Cloning a flat string vector copied its complete arena, including strings TopN would later discard.
 
-String key columns now move into the existing shared string-view representation when the aggregate
-finishes a result chunk. Construction remains mutable and unchanged. Downstream operators clone a
-page handle and the views instead of copying the string payload.
+String key columns now move into the existing shared string-view representation when the aggregate finishes a result chunk. Construction remains mutable and unchanged. Downstream operators clone a page handle and the views instead of copying the string payload.
 
-The measurements below use the complete four-way 1 million row audit. Every query ran in a fresh
-process once for the first measurement and five times for the hot median.
+The measurements below use the complete four-way 1 million row audit. Every query ran in a fresh process once for the first measurement and five times for the hot median.
 
 | Engine | Query timer sum | Process wall sum | CPU sum | Peak RSS |
 | --- | ---: | ---: | ---: | ---: |
@@ -26,14 +21,11 @@ process once for the first measurement and five times for the hot median.
 | Query 34 | 26.0 ms | 60.5 ms | 47.8 ms | 51.0 ms | 47.6 ms |
 | Query 35 | 26.0 ms | 58.2 ms | 49.3 ms | 59.0 ms | 48.1 ms |
 
-Native Query 34 improved by 21.0 percent and Query 35 by 15.2 percent. The complete native timer sum
-improved by 4.1 percent. All 43 queries completed, Query 29 matched, and every deterministic rewritten
-check passed. Native remains 1.09 times DuckDB by query time, so the 10x target remains open.
+Native Query 34 improved by 21.0 percent and Query 35 by 15.2 percent. The complete native timer sum improved by 4.1 percent. All 43 queries completed, Query 29 matched, and every deterministic rewritten check passed. Native remains 1.09 times DuckDB by query time, so the 10x target remains open.
 
 | Native load | Wall time | CPU time | Peak RSS |
 | --- | ---: | ---: | ---: |
 | DuckDB | 3.505 s | 7.237 s | 1932.7 MiB |
 | rudb | 2.358 s | 2.276 s | 45.7 MiB |
 
-The next controlling cost in Queries 34 and 35 is building and merging the high-cardinality string
-hash tables. Reducing result copies does not remove that state.
+The next controlling cost in Queries 34 and 35 is building and merging the high-cardinality string hash tables. Reducing result copies does not remove that state.
