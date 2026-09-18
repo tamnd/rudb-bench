@@ -182,3 +182,64 @@ peak      8105984
 read      0
 load      0
 disk      10920898
+
+[run]
+suite     smoke
+machine   gamingpc-wsl
+layer     E0 runs end to end
+commit    ac95006
+recorded  2026-09-18
+[engine]
+name      duckdb
+version   v2.0.0-dev84237 (Development Version) cc7e7bac7f
+hot       211077
+cpu       420000
+peak      161525760
+read      0
+load      160263
+disk      96481280
+[engine]
+name      clickhouse-local
+version   26.9.1.1162
+hot       1000426
+cpu       1650000
+peak      455745536
+read      0
+load      298422
+disk      51917530
+[engine]
+name      datafusion
+version   datafusion-cli 55.1.0
+hot       197488
+cpu       1250000
+peak      451424256
+read      0
+load      0
+disk      10920898
+[engine]
+name      polars
+version   1.44.2 in sink mode
+hot       663346
+cpu       1310000
+peak      304766976
+read      0
+load      0
+disk      10920898
+[engine]
+name      clickhouse-server
+version   26.9.1.1162
+hot       293367
+cpu       -
+peak      -
+read      -
+load      1320417
+disk      53426889
+[engine]
+name      rudb
+version   rudb 0.3.35
+hot       90268
+cpu       1020000
+peak      32509952
+read      0
+load      0
+disk      10920898
