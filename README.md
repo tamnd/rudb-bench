@@ -14,6 +14,53 @@ rudb now exposes all 43 ClickBench queries through the regular harness. Q19 and 
 
 ## Where rudb is, today
 
+rudb 0.3.45, six engines, four sizes, on `gamingpc-wsl`, which is 32 hardware threads. Five hot runs of each query after a cold one, all 43 queries, one report per size. Query time is what each engine itself reports, which is the number the public ClickBench board publishes. The ratio is against DuckDB v1.5.5 over the 39 queries every engine in the run answered.
+
+| engine | 1k rows | 10k rows | 100k rows | 1m rows |
+| --- | --- | --- | --- | --- |
+| duckdb v1.5.5 d8cdaa33fd | 98ms | 120ms | 362ms | 577ms |
+| duckdb-pinned v2.0.0-dev84237 cc7e7bac7f | 130ms | 148ms | 345ms | 565ms |
+| clickhouse-local 26.9.1.1562 | 364ms | 398ms | 782ms | 3.005s |
+| datafusion 55.1.0 | 203ms | 300ms | 422ms | 1.199s |
+| polars 1.44.2 | 569.005ms | 585.086ms | 690.885ms | 1.222s |
+| rudb 0.3.45 | 33.153ms | 77.588ms | 233.610ms | 927.438ms |
+| rudb against duckdb | 0.34x | 0.66x | 0.78x | 1.78x |
+
+rudb is ahead of every engine in the table at a thousand, ten thousand and a hundred thousand rows, and 1.78x behind DuckDB at a million. The previous entry in this file, four sections down, had rudb 16.59x behind DuckDB at a million rows at 0.2.31 and 11.28x behind at 0.3.5. It is now 1.78x behind, on the same machine, at the same size, doing more work than it was then: 0.3.5 ran 41 of 43 queries and excluded Q19 and Q33, and 0.3.45 runs all 43.
+
+The direction is the opposite of the one the 0.3.5 entry was written to admit, but the shape of the remaining gap has not changed and it is the same shape. A thousand times the rows costs DuckDB 5.9 times the time and costs rudb 28 times, so the line still tilts the wrong way as the data grows. What was true at 0.3.5 is true here: this is a per-row cost rather than a startup cost, and the win at the small sizes is mostly rudb starting in almost no memory rather than rudb computing anything faster.
+
+The cores column is the one that changed most, and it changes what the remaining gap can be blamed on.
+
+| cores used, hot | 1k rows | 10k rows | 100k rows | 1m rows |
+| --- | --- | --- | --- | --- |
+| duckdb | 0.33 | 0.41 | 0.69 | 2.61 |
+| rudb | 0.00 | 0.00 | 0.64 | 2.65 |
+
+At 0.3.5 rudb never got above 1.00 core on a 32 thread box while DuckDB kept 2.25 busy at a million rows and 9.01 at ten million. At 0.3.45 rudb keeps 2.65 busy at a million, marginally more than DuckDB's 2.61, and is still 1.78x behind. So the 1m gap is no longer a thread count gap. It is per-core work, which is a harder thing to find and a slower thing to fix, and it is the whole of what is left at this size. The two zeros at 1k and 10k are not rudb using no CPU; they are the process finishing inside the 10ms granularity of the CPU accounting, so there is nothing to divide.
+
+Memory still goes rudb's way, which matters because a time bought with twice the memory is not the same result.
+
+| peak RSS | 1k rows | 10k rows | 100k rows | 1m rows |
+| --- | --- | --- | --- | --- |
+| duckdb | 38.00 MiB | 40.25 MiB | 65.32 MiB | 307.69 MiB |
+| datafusion | 156.72 MiB | 201.09 MiB | 401.69 MiB | 1.16 GiB |
+| rudb | 10.24 MiB | 13.24 MiB | 46.48 MiB | 162.24 MiB |
+
+rudb is the smallest engine in the run at every size, at a million rows it is a little over half of DuckDB and about an eighth of DataFusion, and it also has the lowest harness overhead of the six at that size, +75% against DuckDB's +138% and DataFusion's +107%.
+
+Five things travel with all of that or it is worth nothing.
+
+These are strided samples of the real `hits`, one row in every 99998, 10000, 1000 and 100, so nothing here is comparable to the public board or to anybody else's number. rudb, DataFusion and Polars read the source Parquet where it lies and pay to decode it inside every query, which is in the column being compared; DuckDB and ClickHouse paid once at load time and are being timed on a format of their own, and at a million rows that load was 3.738s for DuckDB and 801ms for `clickhouse-local` against rudb's nothing. Polars cannot run q28, q29, q36 or q43 in its SQLContext, so it is 39 of 43 and every ratio in the table is taken over the shared set. `clickhouse-server` is absent from all four runs: its loader fails with `NO_DATA_TO_INSERT` on this build and the run was taken without it rather than with a row nobody could trust. And the page cache was warm and not dropped, so the cold column is a first pass rather than a first pass off the device.
+
+One number in the reports wants reading carefully rather than at face value. rudb's worst interquartile range at a million rows is 99.2% of the median on q39, which rule two would normally treat as a measurement that did not settle. It did not fail to settle: q37 and q39 are bimodal between about 20.28ms and about 40.4ms, which is one tick and two ticks of a 20ms clock. That is timer granularity on a query too short to resolve, not variance in the engine, and the fix is a longer query rather than more runs.
+
+None of this is the goal. The goal is the full file on a c6a.4xlarge, where ten times DuckDB is 2.63s, and the most recent run of rudb against the real hundred million rows under the official driver is 27.07s hot against DuckDB's 14.03s, which is 1.93x behind with a cold pass 23.6x longer than the hot one. That run is in [the full file under the official driver](reports/2026-09-18/official-driver-full-file.md) and it, rather than this ladder, is what the target is measured against.
+
+The four runs in full, written by the harness with nothing typed into them by hand, are [1k](reports/2026-09-18/run-clickbench-gamingpc-wsl-1k.md), [10k](reports/2026-09-18/run-clickbench-gamingpc-wsl-10k.md), [100k](reports/2026-09-18/run-clickbench-gamingpc-wsl-100k.md) and [1m](reports/2026-09-18/run-clickbench-gamingpc-wsl-1m.md). All six engines agreed on every answer the data settles, which is 31 of 43 queries, to the last significant digit of a double.
+
+### What the earlier ladders said
+
 The table below records rudb 0.3.5, when rudb ran 41 of 43 queries and still excluded Q19 and Q33. It is retained because benchmark history should not be rewritten after the engine improves. These measurements compare DuckDB and rudb on `gamingpc-wsl`, which is 32 hardware threads, at one million and ten million rows, with five hot runs of each query after a cold one. Query time is what each engine reports. The ratio covers the 41 queries both engines ran at that revision.
 
 | | 1m rows | 10m rows |
