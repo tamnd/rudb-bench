@@ -27,7 +27,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::engine::BenchError;
-use crate::suite::Suite;
+use crate::suite::{Scale, Suite};
 
 /// One table of a suite, as a file on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +135,18 @@ pub struct Dataset {
     /// divided the suite's hundred million by the time a million row run took would be off by two
     /// orders of magnitude and would look entirely plausible.
     pub rows: Option<u64>,
+    /// Which scale factor these files are, for a suite whose size is a choice.
+    ///
+    /// `None` for a suite that has one corpus. It is carried here rather than looked up again
+    /// wherever it is printed, because the run that produced a table and the header that describes
+    /// it have to be the same run, and a second lookup is a second chance to describe the wrong one.
+    pub scale: Option<&'static Scale>,
+    /// Whether the declared row count at this scale is the exact one.
+    ///
+    /// False only for a generated suite at a factor other than one, where `lineitem` is near its
+    /// multiple rather than at it. A rate derived from an approximate count is still worth printing
+    /// and is not worth printing to seven digits.
+    pub rows_exact: bool,
 }
 
 impl Dataset {
@@ -155,6 +167,11 @@ impl Dataset {
 /// `rows` asks for a smaller version of the data, which is built once and reused. See `take` for
 /// what smaller means and why it is not the first `n` rows.
 ///
+/// `scale` names which corpus of a generated suite to use, and `None` takes the suite's default.
+/// It is a different question from `rows` and the two do not meet: a scale factor is a corpus the
+/// generator built to a specification, and a row count is a stride over a corpus that already
+/// exists.
+///
 /// # Errors
 ///
 /// When a file the suite needs is not there, when the smoke generator could not run, or when a
@@ -163,6 +180,7 @@ pub fn prepare(
     suite: &'static Suite,
     scratch: &Path,
     rows: Option<&Rows>,
+    scale: Option<&'static Scale>,
 ) -> Result<Dataset, BenchError> {
     if suite.name == "smoke" {
         if rows.is_some() {
@@ -188,22 +206,28 @@ pub fn prepare(
         return Err(BenchError::new(format!(
             "the {} suite has {} tables, and taking a fraction of the rows of each of them \
              independently keeps almost none of the rows that join, so every join query would \
-             answer nothing very quickly. Generate a smaller scale factor instead",
+             answer nothing very quickly. Run a smaller scale factor instead, which is --scale{}",
             suite.name,
-            suite.tables.len()
+            suite.tables.len(),
+            match suite.scales().is_empty() {
+                true => String::new(),
+                false => format!(" and this suite has {}", suite.scale_labels()),
+            }
         )));
     }
     let root = root();
+    let directory = suite.directory(scale);
     let mut tables = Vec::with_capacity(suite.tables.len());
     let mut sample = None;
     for name in suite.tables {
-        let path = root.join(suite.directory).join(format!("{name}.parquet"));
+        let path = root.join(&directory).join(format!("{name}.parquet"));
         let bytes = std::fs::metadata(&path)
             .map_err(|e| {
                 BenchError::new(format!(
-                    "the {} suite needs {}, which is not readable: {e}. It needs {}. Set \
+                    "the {} suite{} needs {}, which is not readable: {e}. It needs {}. Set \
                      RUDB_BENCH_DATA to where the corpora are",
                     suite.name,
+                    scale.map(|scale| format!(" at {}", scale.named())).unwrap_or_default(),
                     path.display(),
                     suite.needs
                 ))
@@ -225,9 +249,10 @@ pub fn prepare(
         tables.push(Table { name: (*name).to_owned(), path, bytes });
     }
     // The sample's count when there is one, because that is the file the engines were handed, and
-    // the suite's declared count otherwise.
-    let rows = sample.map_or(suite.rows, |s| Some(s.rows));
-    Ok(Dataset { tables, sample, rows })
+    // the suite's declared count at this scale otherwise.
+    let rows = sample.map_or_else(|| suite.rows(scale), |s| Some(s.rows));
+    let scale = scale.or_else(|| suite.default_scale());
+    Ok(Dataset { tables, sample, rows, scale, rows_exact: suite.rows_exact(scale) })
 }
 
 /// Make a smaller version of one Parquet file, or find the one that was made before.
@@ -349,7 +374,9 @@ fn smoke(scratch: &Path, suite: &Suite) -> Result<Dataset, BenchError> {
     Ok(Dataset {
         tables: vec![Table { name: "smoke".to_owned(), path, bytes }],
         sample: None,
-        rows: suite.rows,
+        rows: suite.rows(None),
+        scale: None,
+        rows_exact: true,
     })
 }
 
@@ -439,6 +466,8 @@ mod tests {
             ],
             sample: None,
             rows: None,
+            scale: None,
+            rows_exact: true,
         };
         assert_eq!(set.bytes(), 42);
     }
@@ -477,7 +506,7 @@ mod tests {
     fn a_suite_of_more_than_one_table_refuses_to_be_made_smaller() {
         let tpch = crate::suite::find("tpch").expect("tpch is a suite");
         let rows = Rows::parse("1m").unwrap();
-        let e = prepare(tpch, Path::new("/no/such/scratch"), Some(&rows))
+        let e = prepare(tpch, Path::new("/no/such/scratch"), Some(&rows), None)
             .expect_err("eight tables cannot be sampled one at a time");
         assert!(e.to_string().contains("join"), "{e}");
     }
@@ -486,7 +515,7 @@ mod tests {
     fn the_smoke_suite_refuses_too_because_it_generates_its_own_data() {
         let smoke = crate::suite::find("smoke").expect("smoke is a suite");
         let rows = Rows::parse("1m").unwrap();
-        let e = prepare(smoke, Path::new("/no/such/scratch"), Some(&rows))
+        let e = prepare(smoke, Path::new("/no/such/scratch"), Some(&rows), None)
             .expect_err("there is nothing to take a smaller version of");
         assert!(e.to_string().contains("generates its own data"), "{e}");
     }

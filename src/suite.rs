@@ -10,6 +10,70 @@
 //! hot runs, a distribution, a peak resident set and a per-query table. It measures nothing anybody
 //! should quote and it proves the harness works, which is what M0 asks of it.
 
+/// One scale factor of a generated suite.
+///
+/// A suite stays one entry and the scale is a choice a run makes, rather than one suite per scale.
+/// Three of the four things that change with the scale are the directory, the row counts and the
+/// timeout, and none of them is a different query set, so a suite per scale would be three copies of
+/// twenty two queries kept in step by hand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Scale {
+    /// What `--scale` takes, what the directory is named after and what a report prints.
+    pub label: &'static str,
+    /// The factor in hundredths.
+    ///
+    /// An integer rather than a fraction, because SF0.01 is a scale the correctness suite runs at
+    /// and a row count that came out of a float is a row count somebody has to round back.
+    pub hundredths: u64,
+}
+
+/// One table's row count at scale factor one, and how it moves with the factor.
+///
+/// Declared rather than counted, for the reason [`Suite::size`] gives, and the counts are the
+/// specification's table in `spec/bench/tpc-h/02-the-data.md` section 2.1 rather than a measurement
+/// of one corpus. A corpus whose real counts disagree with these is a corpus with a problem, and the
+/// manifest written at generation time is where that gets caught.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TableRows {
+    /// The table, as [`Suite::tables`] names it.
+    pub table: &'static str,
+    /// How many rows it holds at scale factor one.
+    pub at_one: u64,
+    /// Whether the generator multiplies that count by the factor.
+    ///
+    /// False for `nation` and `region`, which are twenty five rows and five rows at every scale.
+    /// That is why TPC-H's dimension filters are as selective as they are and it is worth
+    /// remembering when reading any result out of the suite.
+    pub scales: bool,
+    /// Whether the count at a factor other than one is the exact number or close to it.
+    ///
+    /// True for `lineitem`, which is one to seven line items per order, so its count is near the
+    /// multiple rather than the multiple. The exact number is whatever the generator wrote and the
+    /// corpus manifest is where it gets recorded.
+    pub approximate: bool,
+}
+
+/// How big a suite's data is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Size {
+    /// One corpus of one size, which is what a download is.
+    Fixed(u64),
+    /// A generator, the scales the specification names for it, and the row counts at factor one.
+    ///
+    /// `tables` is empty for a suite whose counts have not been written down yet, and a report over
+    /// one of those prints no rows a second rather than a rate over a number it guessed.
+    Generated {
+        /// The scales, in the order `rudb-bench suites` should list them.
+        scales: &'static [Scale],
+        /// The per table row counts at scale factor one.
+        tables: &'static [TableRows],
+        /// The [`Scale::label`] a run uses when it does not say.
+        default: &'static str,
+    },
+    /// A suite whose data layout has not been settled yet.
+    Unsettled,
+}
+
 /// A benchmark suite, and what it needs before it can run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Suite {
@@ -27,17 +91,20 @@ pub struct Suite {
     /// [`directory`]: Suite::directory
     pub tables: &'static [&'static str],
     /// Where under the data root those files live, relative, and empty for the root itself.
-    pub directory: &'static str,
-    /// How many rows the suite's data holds in total, where that is fixed.
+    ///
+    /// The root of the corpus rather than the whole path, because a generated suite has one of these
+    /// per scale factor and [`Suite::directory`] is what puts the two together.
+    pub corpus: &'static str,
+    /// How many rows the suite's data holds, and whether that is a choice.
     ///
     /// The throughput numbers in a report are rows a second, and rows a second needs a row count.
     /// It is declared here rather than counted at run time for the same reason the missing query
     /// list is: a number that comes out of the data is a number that changes when somebody points
     /// the harness at a different file and nobody notices, and a number in this table is one
-    /// somebody reviewed. `None` for the suites whose size is a scale factor the command line has
-    /// not learned to take yet, and a report over one of those prints no rows a second rather than
-    /// a rate over a row count it guessed.
-    pub rows: Option<u64>,
+    /// somebody reviewed. That argument gets stronger rather than weaker for a generated suite,
+    /// where the counts are fixed by a specification and a corpus that disagrees with them is a
+    /// corpus with a problem.
+    pub size: Size,
     /// What has to be true before it runs.
     pub needs: &'static str,
     /// Whether a number out of it is comparable to a public board.
@@ -46,6 +113,140 @@ pub struct Suite {
     pub note: &'static str,
 }
 
+impl Suite {
+    /// The scales this suite has, empty when its size is not a choice.
+    #[must_use]
+    pub fn scales(&self) -> &'static [Scale] {
+        match self.size {
+            Size::Generated { scales, .. } => scales,
+            Size::Fixed(_) | Size::Unsettled => &[],
+        }
+    }
+
+    /// The scale this suite runs at when a run does not say which.
+    #[must_use]
+    pub fn default_scale(&self) -> Option<&'static Scale> {
+        match self.size {
+            Size::Generated { default, .. } => self.scale(default),
+            Size::Fixed(_) | Size::Unsettled => None,
+        }
+    }
+
+    /// The scale this label names, or nothing when this suite has no such scale.
+    #[must_use]
+    pub fn scale(&self, label: &str) -> Option<&'static Scale> {
+        self.scales().iter().find(|scale| scale.label == label)
+    }
+
+    /// Every scale this suite has, as a list a refusal can print.
+    #[must_use]
+    pub fn scale_labels(&self) -> String {
+        self.scales().iter().map(|scale| scale.label).collect::<Vec<_>>().join(", ")
+    }
+
+    /// Where under the data root this suite's files live, at this scale.
+    ///
+    /// `tpch/sf100` rather than `tpch100`, so that the scales of one suite sit under one directory
+    /// and a corpus that is being regenerated is one subdirectory rather than one of eight names
+    /// that happen to share a prefix.
+    #[must_use]
+    pub fn directory(&self, scale: Option<&Scale>) -> String {
+        match scale.or_else(|| self.default_scale()) {
+            Some(scale) if !self.scales().is_empty() => {
+                format!("{}/sf{}", self.corpus, scale.label)
+            }
+            _ => self.corpus.to_owned(),
+        }
+    }
+
+    /// How many rows this suite's data holds at this scale, where that is written down.
+    #[must_use]
+    pub fn rows(&self, scale: Option<&Scale>) -> Option<u64> {
+        match self.size {
+            Size::Fixed(rows) => Some(rows),
+            Size::Unsettled => None,
+            Size::Generated { tables, .. } => {
+                let scale = scale.or_else(|| self.default_scale())?;
+                if tables.is_empty() {
+                    return None;
+                }
+                Some(tables.iter().map(|table| table.rows(scale)).sum())
+            }
+        }
+    }
+
+    /// How many rows one of this suite's tables holds at this scale.
+    #[must_use]
+    pub fn table_rows(&self, table: &str, scale: Option<&Scale>) -> Option<u64> {
+        let Size::Generated { tables, .. } = self.size else { return None };
+        let scale = scale.or_else(|| self.default_scale())?;
+        tables.iter().find(|row| row.table == table).map(|row| row.rows(scale))
+    }
+
+    /// Whether every row count this suite declares at this scale is exact.
+    ///
+    /// A report prints about rather than a bare number when it is not, because `lineitem` at a
+    /// factor other than one is near its multiple and not at it, and a rate that looks exact to
+    /// seven digits is a rate somebody will subtract from another one.
+    #[must_use]
+    pub fn rows_exact(&self, scale: Option<&Scale>) -> bool {
+        let Size::Generated { tables, .. } = self.size else { return true };
+        let Some(scale) = scale.or_else(|| self.default_scale()) else { return true };
+        tables.iter().all(|table| table.exact_at(scale))
+    }
+}
+
+impl Scale {
+    /// The factor as a report prints it, such as `SF100`.
+    #[must_use]
+    pub fn named(&self) -> String {
+        format!("SF{}", self.label)
+    }
+}
+
+impl TableRows {
+    /// How many rows this table holds at this scale.
+    #[must_use]
+    pub fn rows(&self, scale: &Scale) -> u64 {
+        if self.scales { self.at_one * scale.hundredths / 100 } else { self.at_one }
+    }
+
+    /// Whether that count is the exact one at this scale.
+    #[must_use]
+    pub fn exact_at(&self, scale: &Scale) -> bool {
+        !self.approximate || !self.scales || scale.hundredths == 100
+    }
+}
+
+/// The scales TPC-H is run at, smallest first.
+///
+/// Five rather than the three `SUITES` used to name. SF1 is the qualification scale, because the
+/// specification's validation output is defined there and it is the one correctness reference in
+/// this harness that does not come from DuckDB. SF0.01 is the one the correctness suite can run on
+/// every commit, and it is already what every engine was asked the query text against.
+const TPCH_SCALES: &[Scale] = &[
+    Scale { label: "0.01", hundredths: 1 },
+    Scale { label: "1", hundredths: 100 },
+    Scale { label: "10", hundredths: 1_000 },
+    Scale { label: "100", hundredths: 10_000 },
+    Scale { label: "1000", hundredths: 100_000 },
+];
+
+/// The TPC-H row counts at scale factor one, from the specification's table.
+const TPCH_ROWS: &[TableRows] = &[
+    TableRows { table: "lineitem", at_one: 6_001_215, scales: true, approximate: true },
+    TableRows { table: "orders", at_one: 1_500_000, scales: true, approximate: false },
+    TableRows { table: "customer", at_one: 150_000, scales: true, approximate: false },
+    TableRows { table: "part", at_one: 200_000, scales: true, approximate: false },
+    TableRows { table: "partsupp", at_one: 800_000, scales: true, approximate: false },
+    TableRows { table: "supplier", at_one: 10_000, scales: true, approximate: false },
+    TableRows { table: "nation", at_one: 25, scales: false, approximate: false },
+    TableRows { table: "region", at_one: 5, scales: false, approximate: false },
+];
+
+/// The scale TPC-DS is generated at, which is one until somebody writes its row counts down.
+const TPCDS_SCALES: &[Scale] = &[Scale { label: "100", hundredths: 10_000 }];
+
 /// Every suite this harness knows about, in the order section 15.2 lists them, with `smoke` first
 /// because it is the only one that runs today.
 pub const SUITES: &[Suite] = &[
@@ -53,8 +254,8 @@ pub const SUITES: &[Suite] = &[
         name: "smoke",
         queries: SMOKE.len(),
         tables: &["smoke"],
-        directory: "",
-        rows: Some(10_000_000),
+        corpus: "",
+        size: Size::Fixed(10_000_000),
         needs: "nothing, it generates its own data",
         comparable: false,
         note: "Not a benchmark. Ten million rows of generated integers and strings, and six \
@@ -67,8 +268,8 @@ pub const SUITES: &[Suite] = &[
         name: "clickbench",
         queries: 43,
         tables: &["hits"],
-        directory: "",
-        rows: Some(99_997_497),
+        corpus: "",
+        size: Size::Fixed(99_997_497),
         needs: "hits at 99,997,497 rows, about 70 GB as TSV",
         comparable: true,
         note: "The board this project's headline claim is stated against. Run to the official \
@@ -83,22 +284,24 @@ pub const SUITES: &[Suite] = &[
         tables: &[
             "lineitem", "orders", "customer", "part", "partsupp", "supplier", "nation", "region",
         ],
-        directory: "tpch100",
-        rows: None,
-        needs: "dbgen at SF10, SF100 and SF1000",
+        corpus: "tpch",
+        size: Size::Generated { scales: TPCH_SCALES, tables: TPCH_ROWS, default: "100" },
+        needs: "dbgen at the scale factor asked for, as Parquet under tpch/sf<scale>",
         comparable: true,
-        note: "The three scales are three different measurements. SF10 fits in cache on a large \
-               machine and measures the engine. SF100 is the standard comparison point. SF1000 \
-               exceeds memory on most machines and measures spilling, which is where a lot of \
-               engines quietly fall over and where a harness that only ran SF100 would have said \
-               everything was fine.",
+        note: "The scales are different measurements rather than the same one at different sizes. \
+               SF10 fits in cache on a large machine and measures the engine. SF100 is the standard \
+               comparison point. SF1000 exceeds memory on most machines and measures spilling, \
+               which is where a lot of engines quietly fall over and where a harness that only ran \
+               SF100 would have said everything was fine. SF1 is the qualification scale, because \
+               the specification's validation output is defined there. SF0.01 runs in seconds and \
+               is where the correctness comparison goes on every commit.",
     },
     Suite {
         name: "tpcds",
         queries: 99,
         tables: &[],
-        directory: "tpcds100",
-        rows: None,
+        corpus: "tpcds",
+        size: Size::Generated { scales: TPCDS_SCALES, tables: &[], default: "100" },
         needs: "dsdgen at SF100",
         comparable: true,
         note: "All 99, including the ones that are unpleasant. The suite that punishes a narrow \
@@ -109,8 +312,8 @@ pub const SUITES: &[Suite] = &[
         name: "job",
         queries: 113,
         tables: &[],
-        directory: "job",
-        rows: None,
+        corpus: "job",
+        size: Size::Unsettled,
         needs: "the IMDb dataset",
         comparable: true,
         note: "Where Robust Predicate Transfer either works or does not. Reported with the \
@@ -122,8 +325,8 @@ pub const SUITES: &[Suite] = &[
         name: "h2o",
         queries: 15,
         tables: &[],
-        directory: "h2o",
-        rows: None,
+        corpus: "h2o",
+        size: Size::Unsettled,
         needs: "the h2o.ai generator",
         comparable: true,
         note: "Group by and join, fast to run and widely quoted, which makes it the best \
@@ -134,8 +337,8 @@ pub const SUITES: &[Suite] = &[
         name: "micro",
         queries: 0,
         tables: &[],
-        directory: "",
-        rows: None,
+        corpus: "",
+        size: Size::Unsettled,
         needs: "an engine to look inside",
         comparable: false,
         note: "Per encoding decode throughput, per kernel throughput, hash table insert and probe \
@@ -1744,9 +1947,85 @@ pub fn queries(name: &str) -> Option<&'static [Query]> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CLICKBENCH, DUCKDB_HITS, Fixup, HITS, SMOKE, SUITES, TPCH, find, loading, queries,
+        CLICKBENCH, DUCKDB_HITS, Fixup, HITS, SMOKE, SUITES, Size, TPCH, find, loading, queries,
         sorting_key,
     };
+
+    #[test]
+    fn a_scale_factor_is_a_directory_under_the_suite_rather_than_a_suite_of_its_own() {
+        let tpch = find("tpch").expect("tpch is a suite");
+        assert_eq!(tpch.directory(tpch.scale("1")), "tpch/sf1");
+        assert_eq!(tpch.directory(tpch.scale("100")), "tpch/sf100");
+        assert_eq!(tpch.directory(tpch.scale("0.01")), "tpch/sf0.01");
+        // No scale is the suite's default rather than the root, because a run that forgot to say
+        // would otherwise read eight files that are not there and blame the corpus.
+        assert_eq!(tpch.directory(None), "tpch/sf100");
+        let smoke = find("smoke").expect("smoke is a suite");
+        assert_eq!(smoke.directory(None), "");
+        assert!(smoke.scales().is_empty());
+    }
+
+    #[test]
+    fn the_row_counts_are_the_specification_s_and_they_move_with_the_factor() {
+        let tpch = find("tpch").expect("tpch is a suite");
+        // Document 02 section 2.1, read straight off the table.
+        assert_eq!(tpch.table_rows("lineitem", tpch.scale("1")), Some(6_001_215));
+        assert_eq!(tpch.table_rows("orders", tpch.scale("100")), Some(150_000_000));
+        assert_eq!(tpch.table_rows("supplier", tpch.scale("0.01")), Some(100));
+        assert_eq!(tpch.table_rows("partsupp", tpch.scale("1000")), Some(800_000_000));
+        // The two that do not scale, which is why the dimension filters are as selective as they
+        // are at every scale.
+        assert_eq!(tpch.table_rows("nation", tpch.scale("1000")), Some(25));
+        assert_eq!(tpch.table_rows("region", tpch.scale("0.01")), Some(5));
+        assert_eq!(tpch.rows(tpch.scale("1")), Some(8_661_245));
+    }
+
+    #[test]
+    fn a_count_that_is_near_the_multiple_rather_than_at_it_says_so() {
+        let tpch = find("tpch").expect("tpch is a suite");
+        // SF1 is the specification's own table, so every count there is exact.
+        assert!(tpch.rows_exact(tpch.scale("1")));
+        // Everywhere else lineitem is one to seven line items per order and lands near the
+        // multiple. The exact number is whatever the generator wrote.
+        assert!(!tpch.rows_exact(tpch.scale("100")));
+        assert!(find("smoke").expect("smoke is a suite").rows_exact(None));
+    }
+
+    #[test]
+    fn a_suite_of_one_corpus_has_one_row_count_and_no_scales() {
+        let smoke = find("smoke").expect("smoke is a suite");
+        assert_eq!(smoke.rows(None), Some(10_000_000));
+        assert_eq!(smoke.default_scale(), None);
+        let job = find("job").expect("job is a suite");
+        assert_eq!(job.rows(None), None, "nobody has written its counts down yet");
+        assert_eq!(job.directory(None), "job");
+    }
+
+    #[test]
+    fn every_table_a_generated_suite_names_has_a_row_count() {
+        for suite in SUITES {
+            let Size::Generated { tables, .. } = suite.size else { continue };
+            if tables.is_empty() {
+                continue;
+            }
+            for table in suite.tables {
+                assert!(
+                    tables.iter().any(|row| row.table == *table),
+                    "{} declares {table} and says nothing about how many rows it has",
+                    suite.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_scale_a_suite_does_not_have_is_not_a_scale() {
+        let tpch = find("tpch").expect("tpch is a suite");
+        assert_eq!(tpch.scale("50"), None);
+        assert_eq!(tpch.scale("sf1"), None, "the sf goes on in the directory and not in the flag");
+        assert_eq!(tpch.scale_labels(), "0.01, 1, 10, 100, 1000");
+        assert_eq!(tpch.default_scale().map(|scale| scale.named()), Some("SF100".to_owned()));
+    }
 
     #[test]
     fn a_suite_this_harness_has_the_queries_of_says_how_many_it_has() {

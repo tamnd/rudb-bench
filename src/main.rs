@@ -33,7 +33,7 @@ use rudb_bench::machine;
 use rudb_bench::planning;
 use rudb_bench::regress::{self, FACTOR, Watch};
 use rudb_bench::report::{Abstention, comparison, table};
-use rudb_bench::suite::{SUITES, Suite, queries};
+use rudb_bench::suite::{SUITES, Scale, Suite, queries};
 use rudb_bench::{CLICKBENCH_C6A_4XLARGE, FLEET, REPORTING_MACHINE, Role, target_seconds};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -168,6 +168,18 @@ fn suites() {
     }
     println!();
     for suite in SUITES {
+        if !suite.scales().is_empty() {
+            let default = suite.default_scale().map_or("none", |scale| scale.label);
+            println!(
+                "{:<10}  scale factors {}, default {default}, under {}",
+                suite.name,
+                suite.scale_labels(),
+                suite.directory(None)
+            );
+        }
+    }
+    println!();
+    for suite in SUITES {
         println!("{}: {}", suite.name, suite.note);
         println!();
     }
@@ -262,6 +274,13 @@ struct Plan {
     /// anything at all, which a million rows answers in minutes. Nothing measured this way is
     /// comparable to anything and every table printed from it says so.
     rows: Option<Rows>,
+    /// Which scale factor of a generated suite to run, when the default is not the one wanted.
+    ///
+    /// A different question from [`Plan::rows`] and not a smaller version of it. A scale factor is a
+    /// corpus the generator built to a specification, with the joins between its tables intact, and
+    /// every number out of one is comparable to every other number at the same scale. `--rows` is a
+    /// stride over a corpus that already exists and is a development loop.
+    scale: Option<&'static Scale>,
     /// Whether to write the run out as markdown as well as printing it.
     ///
     /// The terminal table is for the person watching the run and it drops most of what was
@@ -306,6 +325,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     let mut store = None;
     let mut engines = None;
     let mut rows = None;
+    let mut scale = None;
     let mut report = false;
     let mut save = false;
     let mut rest = args.iter();
@@ -346,6 +366,13 @@ fn plan(args: &[String]) -> Result<Plan, String> {
                 let given =
                     rest.next().ok_or("--rows wants a row count after it, such as `--rows 1m`")?;
                 rows = Some(Rows::parse(given)?);
+                continue;
+            }
+            "--scale" => {
+                let given = rest
+                    .next()
+                    .ok_or("--scale wants a scale factor after it, such as `--scale 1`")?;
+                scale = Some(given.trim().trim_start_matches("sf").to_owned());
                 continue;
             }
             "--report" => {
@@ -410,15 +437,42 @@ fn plan(args: &[String]) -> Result<Plan, String> {
                     trying"
             .to_owned());
     }
+    let suite = suite.unwrap_or_else(|| "smoke".to_owned());
+    let scale = chosen_scale(&suite, scale.as_deref())?;
     Ok(Plan {
-        suite: suite.unwrap_or_else(|| "smoke".to_owned()),
+        suite,
         gate,
         runs: runs.unwrap_or_else(|| gate.runs()),
         store,
         engines,
         rows,
+        scale,
         report,
         save,
+    })
+}
+
+/// Turn what `--scale` was given into the scale the suite has by that name.
+///
+/// A suite this harness does not have is not an error here. `run` already says which suites there
+/// are and says it in one place, and a second sentence about an unknown suite written here is a
+/// second sentence to keep in step with the first.
+fn chosen_scale(suite: &str, asked: Option<&str>) -> Result<Option<&'static Scale>, String> {
+    let Some(asked) = asked else { return Ok(None) };
+    let Some(suite) = rudb_bench::suite::find(suite) else { return Ok(None) };
+    if suite.scales().is_empty() {
+        return Err(format!(
+            "the {} suite is one corpus of one size, so it takes no --scale. The suites that do \
+             are the generated ones, which `rudb-bench suites` lists",
+            suite.name
+        ));
+    }
+    suite.scale(asked).map(Some).ok_or_else(|| {
+        format!(
+            "the {} suite has no scale factor {asked}, the ones it has are {}",
+            suite.name,
+            suite.scale_labels()
+        )
     })
 }
 
@@ -478,7 +532,7 @@ fn run(plan: &Plan) -> ExitCode {
 
     // The data before the engines, because every engine gets the same files and the first thing a
     // reader of a result asks is which files those were.
-    let dataset = match rudb_bench::data::prepare(suite, &scratch, plan.rows.as_ref()) {
+    let dataset = match rudb_bench::data::prepare(suite, &scratch, plan.rows.as_ref(), plan.scale) {
         Ok(dataset) => dataset,
         Err(e) => {
             eprintln!("rudb-bench: {e}");
@@ -921,7 +975,7 @@ fn sweep(args: &[String]) -> ExitCode {
     // One dataset for every row, made once and handed to each of them. Making it per row would be
     // the same bytes in a different order on the device, which is exactly the kind of difference a
     // sweep is supposed to be free of.
-    let dataset = match rudb_bench::data::prepare(suite, &scratch, rows.as_ref()) {
+    let dataset = match rudb_bench::data::prepare(suite, &scratch, rows.as_ref(), None) {
         Ok(dataset) => dataset,
         Err(e) => {
             eprintln!("rudb-bench: {e}");
@@ -1034,7 +1088,7 @@ fn attribute(args: &[String]) -> ExitCode {
         let _ = std::fs::remove_dir_all(&scratch);
         return ExitCode::FAILURE;
     };
-    let dataset = match rudb_bench::data::prepare(suite, &scratch, rows.as_ref()) {
+    let dataset = match rudb_bench::data::prepare(suite, &scratch, rows.as_ref(), None) {
         Ok(dataset) => dataset,
         Err(e) => {
             eprintln!("rudb-bench: {e}");
@@ -1351,6 +1405,9 @@ fn help() {
     println!("    --rows n        run over this many rows instead of the whole table, as 1m or");
     println!("                    200k, for the development loop. Not comparable to anything,");
     println!("                    and not allowed with the flags that write a record");
+    println!("    --scale n       which scale factor of a generated suite to run, such as 1 or");
+    println!("                    100. A corpus the generator built, so a number out of one is");
+    println!("                    comparable to every other number at the same scale");
     println!("    --save          add what each engine measured to reports/saved-<suite>-");
     println!("                    <machine>.txt, so that engines run on separate days end up");
     println!("                    in one table. Re-running an engine replaces its block");
@@ -1538,6 +1595,27 @@ mod tests {
         assert_eq!(plan(&args("clickbench")).unwrap().rows, None);
         assert!(plan(&args("clickbench --rows")).is_err());
         assert!(plan(&args("clickbench --rows soon")).is_err());
+    }
+
+    #[test]
+    fn a_scale_factor_is_read_as_the_scale_the_suite_has() {
+        let got = plan(&args("tpch --scale 1")).expect("tpch has an SF1");
+        assert_eq!(got.scale.map(|scale| scale.label), Some("1"));
+        // Typing what the directory is called rather than what the flag takes is the obvious near
+        // miss, so it is taken rather than refused.
+        assert_eq!(plan(&args("tpch --scale sf10")).unwrap().scale.map(|s| s.label), Some("10"));
+        // Nothing said is the suite's own default, which is what the corpus on the fleet is.
+        assert_eq!(plan(&args("tpch")).unwrap().scale, None);
+        assert!(plan(&args("tpch --scale")).is_err());
+    }
+
+    #[test]
+    fn a_scale_nobody_generated_is_refused_with_the_ones_there_are() {
+        let e = plan(&args("tpch --scale 50")).unwrap_err();
+        assert!(e.contains("0.01, 1, 10, 100, 1000"), "{e}");
+        // ClickBench is one file of one size, so a scale factor is a question it does not answer.
+        let e = plan(&args("clickbench --scale 10")).unwrap_err();
+        assert!(e.contains("one corpus of one size"), "{e}");
     }
 
     /// The committed record and the ledger are a history, and a row of either taken over a million

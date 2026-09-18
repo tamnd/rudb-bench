@@ -54,6 +54,8 @@ fn small(duckdb: &Duckdb, at: &std::path::Path) -> Dataset {
         tables: vec![Table { name: "t".to_owned(), path, bytes }],
         sample: None,
         rows: Some(100_000),
+        scale: None,
+        rows_exact: true,
     }
 }
 
