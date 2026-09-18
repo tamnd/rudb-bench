@@ -473,7 +473,7 @@ planned   21 of 22
 refused   q11  Binder Error: column a column must appear in the GROUP BY clause or must be part of an aggregate function
 ```
 
-Twenty one of twenty two, for the price of eight empty Parquet files. A query that stops binding is a regression and a query that starts binding is progress, and both of them are a diff here. The doubled word in that error is rudb's, and it is a second thing this found: the message substitutes an empty column name into a sentence that already says "column".
+Twenty one of twenty two, for the price of eight empty Parquet files, and the doubled word in that error is rudb's: the message was substituting an empty column name into a sentence that already says "column". The cause was a `HAVING` subquery joined below the grouping instead of above it, tamnd/rudb#831 fixed it, and rudb v0.3.40 reads `planned 22 of 22` with nothing refused. Both directions are a diff here, which is the point. A query that stops binding is a regression and a query that starts binding is progress, and neither of them is something anybody has to remember to check.
 
 The gate fails on any change at all, including a change somebody meant. A plan that moved on purpose wants `rudb-bench plans --suite <name> --record` in the same pull request as the change that moved it, which is the whole point: the diff gets reviewed next to its cause. A category of plan change that only printed a warning would be the category people stop reading.
 

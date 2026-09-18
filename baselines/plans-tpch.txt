@@ -22,10 +22,9 @@
 [plans]
 suite     tpch
 engine    rudb
-version   rudb 0.3.39
+version   rudb 0.3.40
 recorded  2026-09-18
-planned   21 of 22
-refused   q11  Binder Error: column a column must appear in the GROUP BY clause or must be part of an aggregate function
+planned   22 of 22
 
 query     q01
   Sort [#3.0::VARCHAR ASC NULLS LAST, #3.1::VARCHAR ASC NULLS LAST]  [rows unknown] [pipeline 1] [reference]
@@ -349,6 +348,49 @@ query     q10
     pipeline 3 waits for nothing
     pipeline 4 waits for nothing
     pipeline 5 waits for nothing
+
+query     q11
+  Sort [#15.1::DECIMAL(34,2) DESC NULLS LAST]  [rows unknown] [pipeline 1] [reference]
+    Project #15 [#6.0::BIGINT AS ps_partkey, #6.1::DECIMAL(34,2) AS value]  [rows unknown] [pipeline 1] [reference]
+      Filter (CAST(#6.1::DECIMAL(34,2))::DECIMAL(38,12) > #14.0::DECIMAL(38,12))::BOOLEAN  [rows unknown] [pipeline 1] [reference]
+        Join SINGLE on=[]  [rows unknown] [pipeline 3] [reference]
+          Aggregate #6 groups=[#1.0::BIGINT] aggregates=[sum("*"(CAST(#1.3::DECIMAL(15,2))::DECIMAL(34,2), CAST(#1.2::BIGINT)::DECIMAL(34,0))::DECIMAL(34,2))::DECIMAL(34,2)]  [rows unknown] [pipeline 7] [reference]
+            Filter (#3.1::INTEGER = #5.0::INTEGER)::BOOLEAN  [rows unknown] [pipeline 7] [reference]
+              CrossProduct  [rows unknown] [pipeline 7] [reference]
+                Filter (#1.1::BIGINT = #3.0::BIGINT)::BOOLEAN  [rows unknown] [pipeline 7] [reference]
+                  CrossProduct  [rows unknown] [pipeline 7] [reference]
+                    Project #1 [#0.0::BIGINT AS ps_partkey, #0.1::BIGINT AS ps_suppkey, #0.2::BIGINT AS ps_availqty, #0.3::DECIMAL(15,2) AS ps_supplycost]  [rows unknown] [pipeline 7] [reference]
+                      TableFunction read_parquet args=['<fixture>/partsupp.parquet'::VARCHAR] #0 [ps_partkey::BIGINT, ps_suppkey::BIGINT, ps_availqty::BIGINT, ps_supplycost::DECIMAL(15,2)]  [rows unknown] [pipeline 7] [reference]
+                    Project #3 [#2.0::BIGINT AS s_suppkey, #2.1::INTEGER AS s_nationkey]  [rows unknown] [pipeline 9] [reference]
+                      TableFunction read_parquet args=['<fixture>/supplier.parquet'::VARCHAR] #2 [s_suppkey::BIGINT, s_nationkey::INTEGER]  [rows unknown] [pipeline 9] [reference]
+                Project #5 [#4.0::INTEGER AS n_nationkey]  [rows unknown] [pipeline 8] [reference]
+                  Filter (#4.1::VARCHAR = 'GERMANY'::VARCHAR)::BOOLEAN  [rows unknown] [pipeline 8] [reference]
+                    TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #4 [n_nationkey::INTEGER, n_name::VARCHAR]  [rows unknown] [pipeline 8] [reference]
+          Project #14 ["*"(CAST(#13.0::DECIMAL(34,2))::DECIMAL(38,2), 0.0001000000::DECIMAL(38,10))::DECIMAL(38,12) AS "(sum((ps_supplycost * ps_availqty)) * 0.0001000000)"]  [1 rows exact] [pipeline 2] [reference]
+            Aggregate #13 groups=[] aggregates=[sum("*"(CAST(#8.2::DECIMAL(15,2))::DECIMAL(34,2), CAST(#8.1::BIGINT)::DECIMAL(34,0))::DECIMAL(34,2))::DECIMAL(34,2)]  [1 rows exact] [pipeline 4] [reference]
+              Filter (#10.1::INTEGER = #12.0::INTEGER)::BOOLEAN  [rows unknown] [pipeline 4] [reference]
+                CrossProduct  [rows unknown] [pipeline 4] [reference]
+                  Filter (#8.0::BIGINT = #10.0::BIGINT)::BOOLEAN  [rows unknown] [pipeline 4] [reference]
+                    CrossProduct  [rows unknown] [pipeline 4] [reference]
+                      Project #8 [#7.0::BIGINT AS ps_suppkey, #7.1::BIGINT AS ps_availqty, #7.2::DECIMAL(15,2) AS ps_supplycost]  [rows unknown] [pipeline 4] [reference]
+                        TableFunction read_parquet args=['<fixture>/partsupp.parquet'::VARCHAR] #7 [ps_suppkey::BIGINT, ps_availqty::BIGINT, ps_supplycost::DECIMAL(15,2)]  [rows unknown] [pipeline 4] [reference]
+                      Project #10 [#9.0::BIGINT AS s_suppkey, #9.1::INTEGER AS s_nationkey]  [rows unknown] [pipeline 6] [reference]
+                        TableFunction read_parquet args=['<fixture>/supplier.parquet'::VARCHAR] #9 [s_suppkey::BIGINT, s_nationkey::INTEGER]  [rows unknown] [pipeline 6] [reference]
+                  Project #12 [#11.0::INTEGER AS n_nationkey]  [rows unknown] [pipeline 5] [reference]
+                    Filter (#11.1::VARCHAR = 'GERMANY'::VARCHAR)::BOOLEAN  [rows unknown] [pipeline 5] [reference]
+                      TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #11 [n_nationkey::INTEGER, n_name::VARCHAR]  [rows unknown] [pipeline 5] [reference]
+  .
+  Pipelines
+    pipeline 0 waits for 1, and the answer comes out of it
+    pipeline 1 waits for 3
+    pipeline 2 waits for 4
+    pipeline 3 waits for 2 and 7
+    pipeline 4 waits for 5 and 6
+    pipeline 5 waits for nothing
+    pipeline 6 waits for nothing
+    pipeline 7 waits for 8 and 9
+    pipeline 8 waits for nothing
+    pipeline 9 waits for nothing
 
 query     q12
   Sort [#5.0::VARCHAR ASC NULLS LAST]  [rows unknown] [pipeline 1] [reference]
