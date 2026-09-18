@@ -473,6 +473,47 @@ pub fn report(suite: &str, changes: &[Change]) -> String {
         return out;
     }
     let _ = writeln!(out, "{} plans in {suite} are not what was written down\n", changes.len());
+    out.push_str(&body(changes));
+    out.push_str(
+        "A plan that moved on purpose wants `rudb-bench plans --suite <name> --record` in the same\n\
+         pull request as the change that moved it, so the diff is reviewed next to its cause.\n",
+    );
+    out
+}
+
+/// What to print about one suite planned twice, once with a rule on and once with it off.
+///
+/// A different question from the one [`report`] asks and the same evidence, so the bodies are the
+/// same function and only the sentences around them differ. This one is not about a baseline and
+/// nothing about it wants recording: the answer it is looking for is that there is nothing to say,
+/// and anything else is a rule that changes a plan while claiming not to.
+#[must_use]
+pub fn ablation(suite: &str, name: &str, changes: &[Change]) -> String {
+    let mut out = String::new();
+    if changes.is_empty() {
+        let _ =
+            writeln!(out, "every plan in {suite} is the same plan with {name} on and with it off");
+        return out;
+    }
+    let _ = writeln!(out, "{} plans in {suite} depend on whether {name} is on", changes.len());
+    let _ = writeln!(
+        out,
+        "The first capture is with it on and the second is with it off, so below, `was` is on and \
+         `is` is off.\n"
+    );
+    out.push_str(&body(changes));
+    let _ = writeln!(
+        out,
+        "A rule that is supposed to be worth nothing yet cannot move a plan. Either the rule is\n\
+         doing something, in which case it is no longer the honest zero the milestone asked for,\n\
+         or the plan depends on something other than the rule, which is worse."
+    );
+    out
+}
+
+/// The evidence itself, one paragraph per change, shared by both reports.
+fn body(changes: &[Change]) -> String {
+    let mut out = String::new();
     for change in changes {
         match change {
             Change::Replanned { name, before, after } => {
@@ -506,10 +547,6 @@ pub fn report(suite: &str, changes: &[Change]) -> String {
             }
         }
     }
-    out.push_str(
-        "A plan that moved on purpose wants `rudb-bench plans --suite <name> --record` in the same\n\
-         pull request as the change that moved it, so the diff is reviewed next to its cause.\n",
-    );
     out
 }
 
@@ -542,7 +579,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{Change, Plan, Plans, Refusal, capture, compare, parse, render, settle};
+    use super::{Change, Plan, Plans, Refusal, ablation, capture, compare, parse, render, settle};
     use crate::data::Table;
     use crate::engine::{Ability, BenchError, Engine, Loaded, Ran};
     use crate::suite::{Suite, find};
@@ -688,6 +725,31 @@ mod tests {
     fn a_baseline_that_still_holds_has_nothing_to_say() {
         let one = plans(vec![plan("q1", "Get x")], vec![]);
         assert!(compare(&one, &one).is_empty());
+    }
+
+    /// G0 wants a layer that lands worth nothing, and this is the sentence that says it did.
+    #[test]
+    fn a_rule_that_changes_no_plan_says_so_in_one_line() {
+        let one = plans(vec![plan("q1", "Get x")], vec![]);
+        let text = ablation("smoke", "statistics", &compare(&one, &one));
+        assert_eq!(
+            text,
+            "every plan in smoke is the same plan with statistics on and with it off\n"
+        );
+    }
+
+    /// And the sentence that says it did not, which is the whole reason to run the check.
+    #[test]
+    fn a_rule_that_moves_a_plan_is_named_along_with_both_trees() {
+        let on = plans(vec![plan("q1", "Filter y\n  Get x")], vec![]);
+        let off = plans(vec![plan("q1", "Get x\n  Filter y")], vec![]);
+        let text = ablation("smoke", "statistics", &compare(&on, &off));
+        assert!(text.contains("1 plans in smoke depend on whether statistics is on"), "{text}");
+        assert!(text.contains("`was` is on and `is` is off"), "{text}");
+        assert!(text.contains("Filter y\n      Get x"), "{text}");
+        assert!(text.contains("no longer the honest zero"), "{text}");
+        // Nothing here is a baseline, so nothing here should suggest recording one.
+        assert!(!text.contains("--record"), "{text}");
     }
 
     /// The case the whole module is for: a pass stopped firing and nothing else says so.

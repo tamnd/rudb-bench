@@ -1298,9 +1298,15 @@ fn generate(args: &[String]) -> ExitCode {
 /// It exits non-zero on any change at all, including a query that started binding. The reasoning is
 /// in [`rudb_bench::plans::Change::fails`]: a category of plan change that only printed a warning
 /// would be the category people stop reading.
+///
+/// `--ablate <rule>` asks a different question with the same apparatus. It plans every query twice,
+/// once with that rule on and once with it off, and fails when any plan differs. That is the
+/// checkable form of a layer that is supposed to be worth nothing yet: two runs of a suite are
+/// never the same number, so a timing cannot say whether a rule did anything, and a plan can.
 fn plans(args: &[String]) -> ExitCode {
     let mut wanted: Option<String> = None;
     let mut record = false;
+    let mut ablate: Option<String> = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -1312,12 +1318,23 @@ fn plans(args: &[String]) -> ExitCode {
                     return ExitCode::FAILURE;
                 }
             },
+            "--ablate" => match rest.next() {
+                Some(name) => ablate = Some(name.clone()),
+                None => {
+                    eprintln!("rudb-bench: --ablate wants the name of a rule after it");
+                    return ExitCode::FAILURE;
+                }
+            },
             other => {
                 eprintln!("rudb-bench: unknown argument {other}");
-                eprintln!("rudb-bench: plans [--suite s] [--record]");
+                eprintln!("rudb-bench: plans [--suite s] [--record] [--ablate rule]");
                 return ExitCode::FAILURE;
             }
         }
+    }
+    if record && ablate.is_some() {
+        eprintln!("rudb-bench: --ablate compares two captures and there is nothing to record");
+        return ExitCode::FAILURE;
     }
     let root = rudb_bench::plans::root();
     let chosen: Vec<&'static Suite> = match wanted.as_deref() {
@@ -1371,7 +1388,7 @@ fn plans(args: &[String]) -> ExitCode {
             let _ = std::fs::remove_dir_all(&scratch);
             return ExitCode::FAILURE;
         }
-        match one_suite(&root, &mut engine, suite, record) {
+        match one_suite(&root, &mut engine, suite, record, ablate.as_deref()) {
             Ok(false) => worst = ExitCode::FAILURE,
             Ok(true) => {}
             Err(e) => {
@@ -1399,12 +1416,16 @@ fn one_suite(
     engine: &mut dyn Engine,
     suite: &'static Suite,
     record: bool,
+    ablate: Option<&str>,
 ) -> Result<bool, String> {
     let Some(queries) = queries(suite.name) else {
         return Err(format!("the {} suite needs {}", suite.name, suite.needs));
     };
     let tables = rudb_bench::plans::tables(root, suite)?;
     let today = regress::today();
+    if let Some(name) = ablate {
+        return both_ways(engine, suite, queries, &tables, &today, name);
+    }
     let captured = rudb_bench::plans::capture(engine, suite, queries, &tables, &today)?;
     let at = rudb_bench::plans::path(root, suite.name);
 
@@ -1437,6 +1458,35 @@ fn one_suite(
     let changes = rudb_bench::plans::compare(&committed, &captured);
     print!("{}", rudb_bench::plans::report(suite.name, &changes));
     Ok(changes.iter().all(|change| !change.fails()))
+}
+
+/// Plan one suite twice, once with a rule on and once with it off, and say what differed.
+///
+/// G0 asks for a layer that lands worth nothing: every consumer answers `Unknown`, every operator
+/// takes the path it takes today, and the class histogram reads unknown everywhere. The honest way
+/// to check that is not a timing. Two runs of a suite are never the same number and a pair that
+/// agrees to within ten percent is a statement about this laptop rather than about the rule. A plan
+/// is exact, so it is the plan that gets compared, and the answer being looked for is that both
+/// captures are byte identical.
+///
+/// Both sides are set explicitly rather than one being left as it comes, for the same reason
+/// [`rudb_bench::engine::Engine::set_rule`] gives: a default that moves turns an ablation into a
+/// comparison against whatever the build happened to think.
+fn both_ways(
+    engine: &mut dyn Engine,
+    suite: &'static Suite,
+    queries: &[rudb_bench::suite::Query],
+    tables: &[rudb_bench::data::Table],
+    today: &str,
+    name: &str,
+) -> Result<bool, String> {
+    engine.set_rule(name, true)?;
+    let on = rudb_bench::plans::capture(engine, suite, queries, tables, today)?;
+    engine.set_rule(name, false)?;
+    let off = rudb_bench::plans::capture(engine, suite, queries, tables, today)?;
+    let changes = rudb_bench::plans::compare(&on, &off);
+    print!("{}", rudb_bench::plans::ablation(suite.name, name, &changes));
+    Ok(changes.is_empty())
 }
 
 /// Every engine on this machine, and a sentence for every one that is not.
@@ -1614,6 +1664,9 @@ fn help() {
     println!("                nothing and needs no data");
     println!("    --suite <name>  one suite, default every suite that has fixtures committed");
     println!("    --record        write baselines/plans-<suite>.txt instead of checking it");
+    println!("    --ablate <rule> plan every query twice, once with that rule on and once with it");
+    println!("                    off, and fail when any plan differs. The check for a layer that");
+    println!("                    is supposed to be worth nothing yet, which a timing cannot make");
     println!("  kernels       measure rudb's own loops in rudb's process, per row");
     println!("    --repo <path>   the rudb checkout, default ../rudb");
     println!("    --record        replace this machine's block in baselines/kernels.txt");

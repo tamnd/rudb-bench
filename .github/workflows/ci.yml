@@ -128,7 +128,7 @@ jobs:
     needs: quick
     runs-on: ubuntu-24.04
     env:
-      RUDB_VERSION: v0.3.33
+      RUDB_VERSION: v0.3.39
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/checkout@v7.0.1
@@ -155,6 +155,18 @@ jobs:
         env:
           RUDB_BENCH_RUDB: ${{ github.workspace }}/rudb/target/debug/rudb
         run: cargo run -q -- plans
+      # Milestone G0 asks for a zero that costs nothing, which means the two rules it adds have to
+      # be switchable and have to leave every plan alone while they are off. The gate above says
+      # what the plans are and this one says the rules had nothing to do with them. It plans each
+      # suite twice, once with the rule on and once with it off, and it passes when the two are the
+      # same plan. A rule that moves a plan here is either doing work it claims not to do or the
+      # plan is reading something other than the rule, and both of those are the milestone failing.
+      - name: the G0 rules move no plan
+        env:
+          RUDB_BENCH_RUDB: ${{ github.workspace }}/rudb/target/debug/rudb
+        run: |
+          cargo run -q -- plans --ablate statistics
+          cargo run -q -- plans --ablate graph_sections
 
   docs:
     name: documentation
