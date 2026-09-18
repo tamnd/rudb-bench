@@ -160,6 +160,23 @@ impl Manifest {
         directory.join("manifest.txt")
     }
 
+    /// The one line a report header carries about where its data came from.
+    ///
+    /// Provenance first, because a number over `duckdb-tpch` and a number over `dbgen` are not
+    /// quite the same claim and that is the part somebody reading a table needs to see without
+    /// opening anything. The date is in it because a corpus regenerated between two engines' runs
+    /// is the failure this line exists to make visible.
+    #[must_use]
+    pub fn line(&self) -> String {
+        format!(
+            "{} SF{}, corpus {}, written {}",
+            self.provenance.label(),
+            self.scale,
+            self.digest(),
+            self.written
+        )
+    }
+
     /// The corpus as one short string a report header can carry.
     ///
     /// Sixteen hex digits folded out of the per table digests, in table order. The identity of a

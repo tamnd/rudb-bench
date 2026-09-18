@@ -758,6 +758,7 @@ mod tests {
             missing: Vec::new(),
             load: None,
             cold_forced: false,
+            corpus: None,
         }
     }
 

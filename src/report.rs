@@ -266,6 +266,15 @@ pub struct SuiteResult {
     /// the cold column is, and the report prints which of the two it was rather than leaving a
     /// reader to assume the stronger one.
     pub cold_forced: bool,
+
+    /// Which corpus this engine was measured over, when the files said.
+    ///
+    /// The line the manifest beside the data prints, or `None` for a suite that generates its own
+    /// data and for a corpus that predates manifests. It is on the result rather than only on the
+    /// comparison because engines are measured one at a time and saved, and the question a saved
+    /// file has to be able to answer is whether the block written on Tuesday and the block written
+    /// on Thursday ran over the same files.
+    pub corpus: Option<String>,
 }
 
 impl SuiteResult {
@@ -883,6 +892,7 @@ pub fn run(
         missing,
         load: before.zip(crate::machine::load_now()),
         cold_forced: forcing_cold,
+        corpus: dataset.manifest.as_ref().map(crate::corpus::Manifest::line),
     })
 }
 
@@ -967,6 +977,9 @@ pub fn table(result: &SuiteResult) -> String {
         ),
     );
     line(&mut out, &format!("on disk  is {}", result.loaded.on_disk_is));
+    if let Some(corpus) = &result.corpus {
+        line(&mut out, &format!("corpus   {corpus}"));
+    }
     if let Some(sample) = result.sample {
         line(&mut out, &format!("data     {}", sample.sentence()));
     }
@@ -1133,6 +1146,12 @@ pub struct Comparison {
     pub results: Vec<SuiteResult>,
     /// The engines that did not, and why.
     pub skipped: Vec<Abstention>,
+    /// Which corpus every engine here was measured over, when the files said.
+    ///
+    /// Taken from the results rather than from the dataset, because a restored comparison is built
+    /// out of blocks saved on different days and the question of whether they agree is the whole
+    /// reason this is carried. Two blocks that disagree do not get this far.
+    pub corpus: Option<String>,
     /// How long each query was given, and nothing when it was given as long as it took.
     ///
     /// Kept on the comparison so the report can say it whether or not it fired. A limit that only
@@ -1333,9 +1352,28 @@ pub fn compare(
         source_bytes: dataset.bytes(),
         sample: dataset.sample,
         rows: dataset.rows,
+        corpus: dataset.manifest.as_ref().map(crate::corpus::Manifest::line),
         results,
         skipped,
         timeout: limit,
+    }
+}
+
+/// The timeout each query was given, and how many of them reached it.
+fn limit(compared: &Comparison) -> String {
+    let Some(limit) = compared.timeout else {
+        return "none, every query was waited for".to_owned();
+    };
+    let hit = compared
+        .results
+        .iter()
+        .flat_map(|result| &result.queries)
+        .filter(|query| !query.outcome.measured())
+        .count();
+    match hit {
+        0 => format!("{}s per query, and no query reached it", limit.as_secs()),
+        1 => format!("{}s per query, which one query reached", limit.as_secs()),
+        n => format!("{}s per query, which {n} queries reached", limit.as_secs()),
     }
 }
 
@@ -1363,6 +1401,14 @@ pub fn comparison(compared: &Comparison) -> String {
             if compared.suite.tables.len() == 1 { "" } else { "s" }
         ),
     );
+    if let Some(corpus) = &compared.corpus {
+        line(&mut out, &format!("corpus   {corpus}"));
+    }
+    // Said whether or not it fired, the same way the written report says it. A table with no
+    // timeout row in it reads as a table where nothing was cut off, and the difference between four
+    // seconds under a sixty second limit and four seconds under a five second one is the whole
+    // question of how much room the slowest query had.
+    line(&mut out, &format!("timeout  {}", limit(compared)));
     if let Some(sample) = compared.sample {
         line(&mut out, &format!("sample   {}", sample.sentence()));
     }
@@ -1801,6 +1847,7 @@ mod tests {
             missing: Vec::new(),
             load: None,
             cold_forced: false,
+            corpus: None,
         }
     }
 
@@ -1915,7 +1962,48 @@ mod tests {
             results,
             skipped,
             timeout: None,
+            corpus: None,
         }
+    }
+
+    /// The limit is a fact about the table, not a footnote on whichever query happened to hit it.
+    #[test]
+    fn the_header_says_the_timeout_whether_or_not_any_query_reached_it() {
+        let mut clean = compared(vec![two("duckdb", 10), two("rudb", 20)], Vec::new());
+        assert!(
+            comparison(&clean).contains("timeout  none, every query was waited for"),
+            "{}",
+            comparison(&clean)
+        );
+
+        clean.timeout = Some(Duration::from_secs(30));
+        assert!(
+            comparison(&clean).contains("timeout  30s per query, and no query reached it"),
+            "{}",
+            comparison(&clean)
+        );
+
+        let hit = compared(
+            vec![two("duckdb", 10), timed_out("rudb", 10, Duration::from_secs(30))],
+            Vec::new(),
+        );
+        let mut hit = Comparison { timeout: Some(Duration::from_secs(30)), ..hit };
+        assert!(
+            comparison(&hit).contains("timeout  30s per query, which one query reached"),
+            "{}",
+            comparison(&hit)
+        );
+
+        // And which files the numbers are over, when the data said. A table that cannot say is a
+        // table with no corpus line rather than a table with a blank one.
+        assert!(!comparison(&hit).contains("corpus"), "{}", comparison(&hit));
+        hit.corpus =
+            Some("duckdb-tpch SF1, corpus e02fbb7bb0145593, written 2026-09-18".to_owned());
+        assert!(
+            comparison(&hit).contains("corpus   duckdb-tpch SF1, corpus e02fbb7bb0145593"),
+            "{}",
+            comparison(&hit)
+        );
     }
 
     #[test]
