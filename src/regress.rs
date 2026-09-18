@@ -16,9 +16,15 @@
 //! Two thresholds, because there are two jobs. On a GitHub runner the gate catches a factor: the
 //! hardware underneath varies between runs, so anything smaller than [`FACTOR`] is not evidence.
 //! On `server3`, on a schedule, the gate catches a percentage, because that machine is the same
-//! machine every week and [`DRIFT`] is a real signal there. Reporting rule seven applies to the
-//! second one and not to the first: a drift check against a record from another machine is refused,
-//! while a factor of two is a code change on any machine anybody could plausibly run this on.
+//! machine every week and [`DRIFT`] is a real signal there.
+//!
+//! Reporting rule seven says never compare across machines, and the per commit check used to carry
+//! an exception to it on the grounds that no machine in the fleet is twice as fast as another at
+//! running `smoke`. That sentence is still true and it never covered a hosted runner, which is not
+//! in the fleet. Applying it there compared a GitHub runner against a record from `gamingpc-wsl`
+//! and failed q6 at 3.24x, and main was red for twelve runs before anybody read the log. So the
+//! exception now holds where its reasoning does, which is between two machines in [`crate::fleet`],
+//! and a check against anything else is refused with the reason printed.
 //!
 //! The record is a text file, committed, one block per suite and machine and engine. It is written
 //! by `rudb-bench run <suite> --record` and read by `--check` and `--check-drift`, and the reason
@@ -46,6 +52,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::fleet;
 use crate::measure::{Distribution, show};
 use crate::report::{Comparison, NOISY, SuiteResult};
 
@@ -84,15 +91,35 @@ impl Watch {
         }
     }
 
-    /// Whether the record has to have come from this machine.
+    /// Why a record taken on `recorded_on` may not be checked against a run on `ran_on`, when it
+    /// may not be.
     ///
-    /// Rule seven says never compare across machines, and the CI check is the one exception the
-    /// rules can carry: it does not produce a number, it answers yes or no to whether something got
-    /// twice as slow, and no machine in this fleet is twice as fast as another at running `smoke`.
-    /// The scheduled check does produce a number and gets no exception.
+    /// The same machine is always allowed. After that the scheduled check gets no exception at all,
+    /// because it produces a number and rule seven says never compare across machines. The per
+    /// commit check gets one, because it produces no number and only answers whether something got
+    /// twice as slow, and no machine in the fleet is twice as fast as another at running `smoke`.
+    ///
+    /// That last clause is the whole of the exception and it is why the exception stops at the edge
+    /// of the fleet. A hosted runner is three times slower than the desktop at q6, so a record from
+    /// one against a run on the other fails a gate every time and says nothing about the change that
+    /// triggered it.
     #[must_use]
-    pub const fn same_machine(self) -> bool {
-        matches!(self, Self::Scheduled)
+    pub fn refuses(self, recorded_on: &str, ran_on: &str) -> Option<String> {
+        if recorded_on.eq_ignore_ascii_case(ran_on) {
+            return None;
+        }
+        match self {
+            Self::Scheduled => Some(format!(
+                "the record was taken on {recorded_on} and this ran on {ran_on}, and rule seven \
+                 says never compare across machines"
+            )),
+            Self::Ci if fleet::is_fleet(recorded_on) && fleet::is_fleet(ran_on) => None,
+            Self::Ci => Some(format!(
+                "the record was taken on {recorded_on} and this ran on {ran_on}, and at least one \
+                 of those is not a machine in the fleet, so how far apart they are on this suite is \
+                 not known and a factor between them is not evidence of anything"
+            )),
+        }
     }
 
     /// What to call it in a sentence.
@@ -277,12 +304,8 @@ pub fn check(record: &Record, result: &SuiteResult, ran_on: &str, watch: Watch) 
         changes: Vec::new(),
         refused: None,
     };
-    if watch.same_machine() && record.machine != ran_on {
-        verdict.refused = Some(format!(
-            "the record was taken on {} and this ran on {}, and rule seven says never compare \
-             across machines",
-            record.machine, ran_on
-        ));
+    if let Some(why) = watch.refuses(&record.machine, ran_on) {
+        verdict.refused = Some(why);
         return verdict;
     }
 
@@ -813,10 +836,56 @@ mod tests {
         assert!(verdict.refused.is_some(), "{verdict:?}");
         assert!(!verdict.failed(), "a refusal is not a failure");
         // The same run on the per commit check is answered, because a factor of nine is not a
-        // difference between two machines that both run this suite in under a second.
+        // difference between two machines that both run this suite in under a second. Both of these
+        // are in the fleet, which is the whole of what makes that sentence true.
         let verdict = check(&record, &result, "server1", Watch::Ci);
         assert!(verdict.refused.is_none());
         assert!(verdict.failed());
+    }
+
+    #[test]
+    fn a_per_commit_check_on_a_machine_nobody_measured_is_refused_too() {
+        // This is the one that had main red for twelve runs. The record is the desktop, the run is
+        // whichever GitHub runner was handed out that morning, and q6 came out at 3.24x because a
+        // hosted runner is three times slower at it and not because anything changed. The per
+        // commit exception says no fleet machine is twice as fast as another, and a runner is not
+        // in the fleet, so the exception has nothing to say about this pair.
+        let record = Record {
+            suite: "smoke".to_owned(),
+            machine: "gamingpc-wsl".to_owned(),
+            engine: "duckdb".to_owned(),
+            version: "v1.5.5".to_owned(),
+            recorded: "2026-09-11".to_owned(),
+            queries: vec![was("q6", 26119, 26516, 28384)],
+        };
+        let result = ran("duckdb", &[85_000, 85_000, 86_000, 86_000, 87_000]);
+        let verdict = check(&record, &result, "runnervmlun5p", Watch::Ci);
+        assert!(verdict.refused.is_some(), "{verdict:?}");
+        assert!(!verdict.failed(), "a refusal is not a failure");
+        assert!(
+            report(&[verdict], Watch::Ci, 1).contains("not a machine in the fleet"),
+            "the log has to say why it checked nothing"
+        );
+    }
+
+    #[test]
+    fn a_machine_checked_against_its_own_record_is_answered_whoever_it_is() {
+        // A laptop is allowed to run `--check` against a record it took itself. Rule seven is about
+        // two machines and there is only one here.
+        let record = Record {
+            suite: "smoke".to_owned(),
+            machine: "some-laptop".to_owned(),
+            engine: "duckdb".to_owned(),
+            version: "v1.5.5".to_owned(),
+            recorded: "2026-09-11".to_owned(),
+            queries: vec![was("q1", 99, 100, 101)],
+        };
+        let result = ran("duckdb", &[900, 900, 900, 900, 900]);
+        for watch in [Watch::Ci, Watch::Scheduled] {
+            let verdict = check(&record, &result, "some-laptop", watch);
+            assert!(verdict.refused.is_none(), "{verdict:?}");
+            assert!(verdict.failed(), "nine times slower is a regression on any hardware");
+        }
     }
 
     #[test]
