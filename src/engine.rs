@@ -342,6 +342,53 @@ pub trait Engine {
     /// look at an engine's data after a run, which is a debugging convenience rather than a
     /// measurement, and `RUDB_BENCH_KEEP` turns it off for the afternoon somebody needs that.
     fn unload(&mut self) {}
+
+    /// Turn every optimizer this engine has off for the rest of its life, and say which ones those
+    /// were.
+    ///
+    /// The list is asked of the engine and never written down here. `duckdb_optimizers()` is a
+    /// table function both DuckDB and rudb answer, and `SET disabled_optimizers` takes the names
+    /// back, so the whole optimizer can be turned off without this harness knowing what is in it.
+    /// A copy of the list kept here would go stale the day the engine gained a pass, and what that
+    /// produces is not an error anybody would see: it is an off column with one pass still on,
+    /// reported as the optimizer being worth slightly less than it is.
+    ///
+    /// The default is a refusal naming the engine. Four of the six here are somebody else's engine
+    /// driven as a black box, and an engine that quietly ignored this would give an attribution
+    /// whose two columns are the same run twice.
+    ///
+    /// # Errors
+    ///
+    /// When the engine has no such switch, when it will not say what its optimizers are, or when it
+    /// answers with an empty list, which is an engine that has an optimizer and will not name it.
+    fn no_optimizer(&mut self) -> Result<Vec<String>, String> {
+        Err(format!(
+            "{} is driven as a black box, with no switch this harness can reach",
+            self.name()
+        ))
+    }
+}
+
+/// Read what `duckdb_optimizers()` answered into the list `SET disabled_optimizers` takes.
+///
+/// One name per line, which is what `-csv -noheader` over a one column table prints. Empty is an
+/// error rather than an empty list, because an engine that has the table function and returns
+/// nothing from it would turn nothing off and be reported as an optimizer that is worth nothing.
+fn optimizer_names(text: &str) -> Result<Vec<String>, String> {
+    let names: Vec<String> = text
+        .lines()
+        .map(|line| line.trim().trim_matches('"').to_owned())
+        .filter(|line| !line.is_empty())
+        .collect();
+    if names.is_empty() {
+        return Err("duckdb_optimizers() is empty, so there is nothing to turn off".to_owned());
+    }
+    Ok(names)
+}
+
+/// The statement that turns all of them off, in the spelling both engines take.
+fn disable(names: &[String]) -> String {
+    format!("SET disabled_optimizers = '{}'", names.join(","))
 }
 
 /// Whether the run was asked to leave every engine's copy of the data behind.
@@ -443,6 +490,11 @@ pub struct Duckdb {
     runner: Runner,
     /// Which suite is running, so the table can be built the way this engine's own entry builds it.
     suite: &'static str,
+    /// Statements replayed in front of every query, and empty for every ordinary run.
+    ///
+    /// This harness starts a fresh process per run on purpose, so a session setting has to be
+    /// replayed or it is not set. Only [`Engine::no_optimizer`] puts anything here today.
+    prelude: Vec<String>,
 }
 
 /// The environment variable naming the DuckDB the grammar is vendored from.
@@ -527,6 +579,7 @@ impl Duckdb {
             database: scratch.join(format!("bench-{name}.duckdb")),
             runner: Runner::new(scratch, name, Reported::RunTime),
             suite: suite.name,
+            prelude: Vec::new(),
         })
     }
 
@@ -656,7 +709,24 @@ impl Engine for Duckdb {
     }
 
     fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
-        self.exec(&[sql])
+        if self.prelude.is_empty() {
+            return self.exec(&[sql]);
+        }
+        // In front of the query and not in front of the load, so that the two runs an attribution
+        // compares built the same database and differ only in how the query was planned. A load
+        // with the optimizer off would be a slower load reported as a cost of the optimizer.
+        let mut statements: Vec<&str> = self.prelude.iter().map(String::as_str).collect();
+        statements.push(sql);
+        self.exec(&statements)
+    }
+
+    fn no_optimizer(&mut self) -> Result<Vec<String>, String> {
+        let text = self
+            .ask("SELECT name FROM duckdb_optimizers() ORDER BY name")
+            .map_err(|e| format!("{} would not list its optimizers: {e}", self.name))?;
+        let names = optimizer_names(&text)?;
+        self.prelude.push(disable(&names));
+        Ok(names)
     }
 
     fn unload(&mut self) {
@@ -1565,6 +1635,11 @@ pub struct Rudb {
     /// engine somebody would actually install. A sweep sets one of these and nothing else, so that
     /// the difference between two of its rows is the seam and not the way the engine was started.
     pins: Vec<(String, String)>,
+    /// Statements replayed in front of every query, and empty for every ordinary run.
+    ///
+    /// A `SET` rather than a `--set`, because what goes here is SQL the engine has a setting for
+    /// and not a seam the process flag takes. Only [`Engine::no_optimizer`] puts anything here.
+    prelude: Vec<String>,
 }
 
 impl Rudb {
@@ -1586,6 +1661,7 @@ impl Rudb {
             runner: Runner::new(scratch, "rudb", Reported::RunTime).watching(scratch, "rudb"),
             suite: suite.name,
             pins: Vec::new(),
+            prelude: Vec::new(),
         }
     }
 
@@ -1597,6 +1673,21 @@ impl Rudb {
     /// more thing that could be replayed differently between two rows of a sweep.
     pub fn pin(&mut self, seam: &str, implementation: &str) {
         self.pins.push((seam.to_owned(), implementation.to_owned()));
+    }
+
+    /// Ask the engine one question with no data and no timer, and read what it printed.
+    ///
+    /// The counterpart of [`Duckdb::ask`], and here for the same reason: the apparatus has
+    /// questions with an answer rather than an effect, and none of them are timed. No views are
+    /// replayed, because nothing asked through here is about the data.
+    fn ask(&self, statement: &str) -> Result<String, BenchError> {
+        let Some(binary) = self.binary.as_ref() else {
+            return Err(BenchError::new("there is no rudb to ask"));
+        };
+        let mut command = Command::new(binary);
+        command.arg("-batch").arg("-csv").arg("-noheader").arg("-c").arg(statement);
+        let out = output(&mut command, "rudb")?;
+        Ok(String::from_utf8_lossy(&out).trim().to_owned())
     }
 }
 
@@ -1691,8 +1782,22 @@ impl Engine for Rudb {
         for statement in &self.ddl {
             command.arg("-c").arg(statement);
         }
+        // After the views and before the query, so that the two runs an attribution compares
+        // declared the same data and differ only in how the query was planned.
+        for statement in &self.prelude {
+            command.arg("-c").arg(statement);
+        }
         command.arg("-c").arg(sql);
         self.runner.go(command, "rudb")
+    }
+
+    fn no_optimizer(&mut self) -> Result<Vec<String>, String> {
+        let text = self
+            .ask("SELECT name FROM duckdb_optimizers() ORDER BY name")
+            .map_err(|e| format!("rudb would not list its optimizers: {e}"))?;
+        let names = optimizer_names(&text)?;
+        self.prelude.push(disable(&names));
+        Ok(names)
     }
 }
 
@@ -1763,6 +1868,7 @@ mod tests {
             runner: Runner::new(&scratch("rudb"), "rudb", Reported::RunTime),
             suite: suite.name,
             pins: Vec::new(),
+            prelude: Vec::new(),
         }
     }
 

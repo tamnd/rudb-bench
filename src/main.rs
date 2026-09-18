@@ -62,6 +62,7 @@ fn main() -> ExitCode {
         Some("ledger") => ledger(),
         Some("kernels") => kernels(&args[1..]),
         Some("sweep") => sweep(&args[1..]),
+        Some("attribute") => attribute(&args[1..]),
         Some("seams") => seams(),
         Some("run") => match plan(&args[1..]) {
             Ok(plan) => run(&plan),
@@ -894,6 +895,120 @@ fn sweep(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Run one suite twice on one engine, with its optimizer and without it, per query.
+///
+/// The sibling of `sweep` and the same idea one level up. `sweep` moves a single decision inside the
+/// engine and holds the rest fixed; this turns the whole rewrite pipeline off and holds the rest
+/// fixed. What it produces is an attribution and not a claim, for the reason
+/// [`rudb_bench::attribute`] gives at length: the per query column is what says where the optimizer
+/// is worth something and, more usefully, where it is not.
+///
+/// One engine rather than every engine, because the two runs have to be the same engine for the
+/// difference between them to mean anything, and a table with a column per engine would invite
+/// exactly the comparison this does not make. Which engine is a flag, so that DuckDB can be
+/// attributed the same way, which is the only way to find out whether a number this prints about
+/// rudb is a number about rudb or a number about the apparatus.
+///
+/// It exits non-zero when the two runs answered differently, which is the one result here that is
+/// a property of the engine rather than of the machine and the only one worth failing a job over.
+fn attribute(args: &[String]) -> ExitCode {
+    let mut engine_name = "rudb".to_owned();
+    let mut suite_name = "smoke".to_owned();
+    let mut hot = 5usize;
+    let mut rows = None;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--engine" => match rest.next() {
+                Some(name) => engine_name = name.clone(),
+                None => {
+                    eprintln!("rudb-bench: --engine wants an engine name after it");
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--suite" => match rest.next() {
+                Some(name) => suite_name = name.clone(),
+                None => {
+                    eprintln!("rudb-bench: --suite wants a suite name after it");
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--hot" => match rest.next().map(|n| n.parse::<usize>()) {
+                Some(Ok(n)) if n > 0 => hot = n,
+                _ => {
+                    eprintln!("rudb-bench: --hot wants a number above zero after it");
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--rows" => match rest.next().map(|given| Rows::parse(given)) {
+                Some(Ok(parsed)) => rows = Some(parsed),
+                Some(Err(e)) => {
+                    eprintln!("rudb-bench: {e}");
+                    return ExitCode::FAILURE;
+                }
+                None => {
+                    eprintln!("rudb-bench: --rows wants a row count after it, such as `--rows 1m`");
+                    return ExitCode::FAILURE;
+                }
+            },
+            other => {
+                eprintln!("rudb-bench: unknown argument {other}");
+                eprintln!("rudb-bench: attribute [--engine e] [--suite s] [--hot n] [--rows n]");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let Some(suite) = rudb_bench::suite::find(&suite_name) else {
+        eprintln!("rudb-bench: no suite called {suite_name}");
+        eprintln!("rudb-bench: try `rudb-bench suites`");
+        return ExitCode::FAILURE;
+    };
+    let Some(queries) = queries(&suite_name) else {
+        eprintln!("rudb-bench: the {suite_name} suite needs {}", suite.needs);
+        return ExitCode::FAILURE;
+    };
+    let scratch = match scratch() {
+        Ok(at) => at,
+        Err(e) => {
+            eprintln!("rudb-bench: cannot make the scratch directory: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let asked = [engine_name.clone()];
+    let (mut engines, missing) = discover(&scratch, suite, Some(&asked));
+    let Some(engine) = engines.pop() else {
+        // The abstention rather than a shorter sentence of this command's own, because the reason
+        // an engine is not here has already been worked out once and saying it differently in two
+        // places is how the two start disagreeing.
+        match missing.iter().find(|one| one.engine == engine_name && !one.unasked) {
+            Some(one) => eprintln!("rudb-bench: {engine_name} is not here: {}", one.why),
+            None => eprintln!("rudb-bench: no engine called {engine_name}"),
+        }
+        let _ = std::fs::remove_dir_all(&scratch);
+        return ExitCode::FAILURE;
+    };
+    let dataset = match rudb_bench::data::prepare(suite, &scratch, rows.as_ref()) {
+        Ok(dataset) => dataset,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            let _ = std::fs::remove_dir_all(&scratch);
+            return ExitCode::FAILURE;
+        }
+    };
+    let attributed = rudb_bench::attribute::attribute(engine, suite, queries, &dataset, hot);
+    let _ = std::fs::remove_dir_all(&scratch);
+    match attributed {
+        Ok(attributed) => {
+            print!("{}", rudb_bench::attribute::table(&attributed));
+            if attributed.agreed() { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+        }
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 /// Every engine on this machine, and a sentence for every one that is not.
 ///
 /// DuckDB first, because it is the reference column of the comparison and the ratio row is stated
@@ -1040,6 +1155,13 @@ fn help() {
     println!("    --seam <seam>   the seam to move, from `rudb-bench seams`");
     println!("    --suite <name>  the suite to hold fixed, default smoke");
     println!("    --runs n        hot runs per query, default five");
+    println!("    --rows n        run over this many rows instead of the whole table");
+    println!("  attribute     run a suite twice on one engine, with its optimizer and without,");
+    println!("                and print what the optimizer was worth per query. Exits non-zero");
+    println!("                when the two runs answered differently, which is an engine bug");
+    println!("    --engine <name> the engine to attribute, default rudb");
+    println!("    --suite <name>  the suite to run twice, default smoke");
+    println!("    --hot n         hot runs per query, default five");
     println!("    --rows n        run over this many rows instead of the whole table");
     println!("  kernels       measure rudb's own loops in rudb's process, per row");
     println!("    --repo <path>   the rudb checkout, default ../rudb");

@@ -1,0 +1,192 @@
+# rudb ClickBench time and memory audit
+
+Date: 2026-09-13. Host: `gamingpc` under WSL2, Linux 6.6.87.2, AMD Ryzen 9
+9950X3D. Engines: DuckDB 1.5.5 and rudb 0.2.37, release builds.
+
+## Decision
+
+rudb does not currently meet the requested goal of 10 times DuckDB's speed and one tenth of its
+memory. At one million sampled rows it is 15.3 times slower by summed query time and its worst
+query uses 1.36 times DuckDB's worst-query RSS. Claiming the target from the present results would
+be incorrect.
+
+The audit found and fixed a benchmark input error, a large aggregate-state waste, and three
+measurement defects. With those changes, rudb's one-million-row total falls from 10.145 to 8.266
+seconds (18.5 percent), and its peak RSS falls from 505.6 to 414.0 MiB (18.1 percent). The remaining
+gap comes from unfinished execution architecture already described in the rudb specifications:
+single-threaded reference operators, full materialization of high-cardinality groups before TopN,
+and whole-row-group Parquet decoding.
+
+## Method
+
+Every one of ClickBench's 43 SQL queries was run in a fresh process. Each result contains one first
+execution and five measured repetitions. The page cache was not flushed. Query time is the CLI
+timer and includes result rendering. Process wall time, user plus system CPU time, page faults,
+context switches, I/O counters, and peak RSS come from Linux `wait4` for the direct child. Peak RSS
+is a high-water mark for the process, not a subtraction from a baseline and not allocator bytes.
+
+DuckDB first loads each sample into a native table. rudb scans Parquet on every query because it has
+no comparable persistent native table path. This is a useful current-product comparison, but it
+also means query time combines scan/decode and execution for rudb. The report therefore preserves
+process, operator, and byte counters separately rather than presenting one number as an explanation
+of another.[1][2]
+
+The four exact samples contain 1,000, 10,000, 100,000, and 1,000,000 rows. Sample filenames now
+include the codec. The earlier generator wrote ZSTD even though the official local ClickBench file
+is Snappy. This silently charged ZSTD decompression to rudb on every query while DuckDB paid it only
+during table loading. The generator now writes Snappy and refuses to reuse the old filename.[3]
+
+Correctness was checked from the first output of each engine. Of 172 engine/query/size pairs, 112
+matched directly, 17 contained the same rows in a different order, and 43 matched after an untimed
+deterministic tie-break retest. No difference remains unresolved. Original benchmark SQL and original
+outputs remain in the artifact.[4]
+
+## Results
+
+| Rows | DuckDB query total | rudb query total | rudb / DuckDB | DuckDB peak RSS | rudb peak RSS |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 0.090 s | 0.024 s | 0.27x | 35.8 MiB | 6.3 MiB |
+| 10,000 | 0.118 s | 0.102 s | 0.87x | 38.3 MiB | 20.2 MiB |
+| 100,000 | 0.309 s | 0.914 s | 2.96x | 63.9 MiB | 159.3 MiB |
+| 1,000,000 | 0.539 s | 8.266 s | 15.34x | 303.6 MiB | 414.0 MiB |
+
+The totals are sums of per-query medians. The RSS columns are the largest peak among those queries,
+so they do not imply that the same query set both engines' maximum. Full per-query figures and raw
+observations are in `report.md`, `summary.json`, and `raw.jsonl` in this directory.[4]
+
+At one million rows, rudb's slowest query is Q24 at 1.189 seconds, 25.8 times DuckDB. Q23 takes
+0.586 seconds (27.9 times), Q35 0.423 seconds (13.2 times), Q19 0.371 seconds (17.7 times), and Q33
+0.346 seconds (19.2 times). Q38 has the largest ratio, 58.0 times, although its absolute rudb time
+is 0.232 seconds. The dominant memory cases are Q33 at 414.0 MiB, Q19 at 335.4 MiB, Q35 at 270.9
+MiB, Q36 at 254.9 MiB, Q17 at 244.5 MiB, and Q18 at 244.4 MiB.[4]
+
+## Root causes
+
+### The original samples measured the wrong compression path
+
+A Callgrind run of rudb Q24 over the old 100,000-row ZSTD sample retired 2.87 billion instructions.
+`rudb_compress::zstd::bits::Backward::peek` alone accounted for 996.7 million, or 34.75 percent;
+other ZSTD Huffman and FSE routines occupied more of the leading entries. This established that the
+old run was substantially a ZSTD decoder benchmark. Matching the official file's Snappy codec and
+shrinking aggregate state together reduced total runtime by 18 to 23 percent across the tested
+sizes above 1,000 rows. Codec correction is a benchmark fix, not evidence that the query executor
+became 10 times faster.
+
+### A full logical type was cloned into every aggregate state
+
+Before this change, every `Accumulator` owned a cloned `LogicalType`. Q33 creates nearly one million
+groups and three accumulator states per group; vector capacity grows beyond the live state count.
+This duplicated a recursively shaped type millions of times. The accumulator now stores a compact
+return-category enum and reconstructs a logical type only on the rare finish/error path. Its size is
+guarded at 80 bytes. On the same one-million-row Q33, observed RSS fell from 505.6 to 414.0 MiB and
+wall time from roughly 0.405 to 0.346 seconds.[5]
+
+This is still too large because the state enum itself is designed as a general scalar oracle.
+The design document calls out `Extreme(Option<Value>)`, the separate `Vec<Accumulator>`, and the
+extra indirection as blockers to an inline, type-specialized aggregate payload.[6]
+
+### High-cardinality aggregation materializes an answer that TopN discards
+
+Q33 groups near-unique keys, constructs almost one million group rows with several aggregates, and
+then sends the complete result to a separate TopN operator which keeps ten. Memory is therefore
+O(distinct groups), even though the requested output is constant size. The repository specification
+already proposes a bounded Space-Saving or Misra-Gries candidate pass, an exact verification pass,
+and fallback when the bound cannot prove correctness. That changes successful cases from
+O(distinct) to O(k) state and is the only documented route to the desired order-of-magnitude memory
+reduction on these queries.[7]
+
+The current fix makes each state smaller; it does not change that algorithm. Implementing the fused
+grouped TopN plan is required before a ten-times memory claim is credible. Queries whose working set
+is inherently proportional to input cannot promise one tenth of DuckDB's RSS; the project goal
+itself says parity is the honest target for those cases.[8]
+
+### Wide Parquet scans retain an entire decoded row group
+
+Q24 is `SELECT * ... ORDER BY EventTime LIMIT 10`, so projection pushdown cannot remove any of the
+105 columns. `Reader::read_group` walks all projected column chunks, fully decodes them into cursor
+vectors, retains them together, and only then slices the decoded columns into output chunks. This
+explains why Q24 at 100,000 rows reaches about 159 MiB although rudb's memory-budget high-water mark
+was tiny: these decoder allocations were outside the engine memory budget.[9]
+
+At one million rows Q24 reaches 217.7 MiB versus DuckDB's 212.8 MiB, so it is close to parity rather
+than the suite maximum. Reaching one tenth on this query requires page-streamed decoding or bounded
+row-group slices, plus budget accounting for compressed and decoded buffers. TopN alone cannot erase
+the scan's decoded working set.
+
+### Execution is deliberately single-threaded reference code
+
+The database records `threads = 1` unconditionally, and the builder marks every operator as a
+reference implementation. There is no active morsel scheduler or optimized execution tier in this
+code path.[10][11] DuckDB consumed up to several CPU-seconds inside much smaller wall times during
+the benchmark, confirming parallel work, while rudb CPU and wall totals are nearly identical.
+
+The rudb design calls for worker-owned morsels, work stealing, bounded backpressure, prepared fused
+expressions, specialized hash tables, and compiled tiers. Those are specifications rather than
+current code.[12] The remaining 15.3-times suite gap cannot be closed safely by timer changes or a
+few allocations; the hot operators need those implementations.
+
+## Measurement corrections
+
+The CLI timer previously printed milliseconds with three decimal places. Fast queries consequently
+quantized to zero and DuckDB's timer had finer apparent resolution. It now prints nine fractional
+digits and has a regression test.[13]
+
+The benchmark duration parser previously accepted non-finite or negative floating-point values and
+converted them directly. It now uses checked `Duration::try_from_secs_f64`, and removes a stale
+metrics report before each invocation. Linux child accounting uses `wait4`; locale is fixed to `C`;
+integer unit conversions are checked; BSD `ru_inblock`/`ru_oublock` values are no longer mislabeled
+as bytes.[2]
+
+rudb's query-level `resource.peak_bytes` was always zero. Query execution now resets the memory
+budget high-water mark at entry and records it after execution. This is engine-accounted memory,
+which complements rather than replaces process RSS. Concurrent statements share a database budget,
+so in that future mode it will be a database-level high-water mark.[14]
+
+Parquet's reader already tracked compressed column bytes, but `FileScan` did not send the delta to
+operator counters, and `Report::fill` did not roll operator byte counters into the resource total.
+Both paths are now connected and tested. CSV remains zero because its reader does not yet expose a
+byte counter. Decoder output bytes and file-scan memory are still not instrumented, and the zeroes
+for those fields must not be interpreted as zero allocation.[15]
+
+## Work required to reach the stated target
+
+The next performance milestone should implement type-specialized inline aggregate payloads and the
+exact heavy-hitter grouped-TopN path, then rerun Q15-Q19 and Q31-Q36. This directly attacks the six
+largest rudb RSS results and eliminates general `Value`/`Accumulator` payloads from hot hash slots.
+
+The scan milestone should decode projected Parquet pages into bounded vector-size chunks, charge
+both compressed and decoded buffers to the memory budget, and expose bytes decoded. Q24 and scan
+microbenchmarks should gate it. A native loaded-table benchmark should then be reported alongside
+the present Parquet-query benchmark so scan format and execution can be assessed separately.
+
+The CPU milestone should replace the reference hash/group path with the planned typed hash table,
+prepare and fuse expression kernels, then enable a real fixed-thread scheduler. Report wall and CPU
+time together at a fixed thread count. Only after those changes should the project test the global
+claim against all 43 queries at the official row count. The acceptance calculation must compare
+like-for-like per-query medians and process RSS, retain failures, and preserve answer verification.
+
+## Sources
+
+1. `scripts/measure-child.c`, local repository source, accessed 2026-09-13.
+2. `scripts/clickbench-audit.py`, `src/engine.rs`, and `src/memory.rs`, local repository sources,
+   accessed 2026-09-13.
+3. `src/data.rs`, local repository source, accessed 2026-09-13.
+4. `report.md`, `summary.json`, `raw.jsonl`, and `correctness.json` beside this report, generated
+   benchmark evidence, accessed 2026-09-13.
+5. `crates/rudb-kernels/src/aggregate.rs` and `crates/rudb-exec/src/group.rs`, local rudb sources,
+   accessed 2026-09-13.
+6. `rudb/spec/engine/07-aggregate.md`, local design source, accessed 2026-09-13.
+7. `rudb/spec/07-execution.md` sections “Top-k aggregation with a heavy-hitter pre-pass” and
+   “The properties that make this acceptable,” local design source, accessed 2026-09-13.
+8. `rudb/spec/02-the-goal.md`, “Peak resident set,” local design source, accessed 2026-09-13.
+9. `crates/rudb-parquet/src/reader.rs`, especially `read_group` and `queue`, local rudb source,
+   accessed 2026-09-13.
+10. `crates/rudb/src/database.rs`, `run`, local rudb source, accessed 2026-09-13.
+11. `crates/rudb-exec/src/build.rs`, `watch`, local rudb source, accessed 2026-09-13.
+12. `rudb/spec/07-execution.md`, local design source, accessed 2026-09-13.
+13. `crates/rudb-cli/src/shell.rs` and `crates/rudb-cli/tests/shell.rs`, local rudb sources,
+    accessed 2026-09-13.
+14. `crates/rudb/src/database.rs` and `crates/rudb/src/tests.rs`, local rudb sources, accessed
+    2026-09-13.
+15. `crates/rudb-exec/src/source.rs`, `crates/rudb-metrics/src/report.rs`, and
+    `crates/rudb/tests/parquet.rs`, local rudb sources, accessed 2026-09-13.

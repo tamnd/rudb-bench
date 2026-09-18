@@ -1,0 +1,162 @@
+diff --git a/.gitignore b/.gitignore
+index 5f6d006..e62df6f 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -20,3 +20,7 @@ flamegraph.svg
+ .idea/
+ .vscode/
+ *.swp
++
++# Locally compiled audit helper and Python bytecode.
++/scripts/measure-child
++__pycache__/
+diff --git a/src/engine.rs b/src/engine.rs
+index a0f614c..fc71852 100644
+--- a/src/engine.rs
++++ b/src/engine.rs
+@@ -239,7 +239,10 @@ fn run_time(line: &str) -> Option<Duration> {
+     // returning the user time on a build that reorders them.
+     while let Some(word) = words.next() {
+         if word == "real" {
+-            return words.next().and_then(|n| n.parse().ok()).map(Duration::from_secs_f64);
++            return words
++                .next()
++                .and_then(|n| n.parse().ok())
++                .and_then(|n| Duration::try_from_secs_f64(n).ok());
+         }
+     }
+     None
+@@ -253,20 +256,20 @@ fn seconds(line: &str) -> Option<Duration> {
+     if trimmed.is_empty() || !trimmed.bytes().all(|b| b.is_ascii_digit() || b == b'.') {
+         return None;
+     }
+-    trimmed.parse().ok().map(Duration::from_secs_f64)
++    trimmed.parse().ok().and_then(|n| Duration::try_from_secs_f64(n).ok())
+ }
+ 
+ /// `Elapsed 0.022 seconds.`
+ fn elapsed(line: &str) -> Option<Duration> {
+     let rest = line.trim().strip_prefix("Elapsed ")?;
+     let number = rest.split_whitespace().next()?;
+-    number.parse().ok().map(Duration::from_secs_f64)
++    number.parse().ok().and_then(|n| Duration::try_from_secs_f64(n).ok())
+ }
+ 
+ /// `took 0.0219`, from the Polars script.
+ fn took(line: &str) -> Option<Duration> {
+     let rest = line.trim().strip_prefix("took ")?;
+-    rest.trim().parse().ok().map(Duration::from_secs_f64)
++    rest.trim().parse().ok().and_then(|n| Duration::try_from_secs_f64(n).ok())
+ }
+ 
+ /// Lines a shell prints around an answer that are not the answer.
+@@ -407,6 +410,7 @@ impl Runner {
+         if let Some(path) = self.metrics_path() {
+             let _ = std::fs::remove_file(path);
+         }
++        let _ = std::fs::remove_file(&self.report);
+         let (stdout, stderr) = both(&mut command, what)?;
+         let cost = match &self.timer {
+             Ok(_) => Timer::read(&self.report),
+@@ -1762,6 +1766,15 @@ mod tests {
+         }
+     }
+ 
++    #[test]
++    fn malformed_reported_times_do_not_panic() {
++        for value in ["NaN", "inf", "-1", "1e999"] {
++            assert_eq!(run_time(&format!("Run Time (s): real {value}")), None);
++            assert_eq!(elapsed(&format!("Elapsed {value} seconds.")), None);
++            assert_eq!(took(&format!("took {value}")), None);
++        }
++    }
++
+     #[test]
+     fn rudb_reads_the_parquet_where_it_lies_and_the_load_column_stays_empty() {
+         let clickbench = find("clickbench").unwrap();
+diff --git a/src/memory.rs b/src/memory.rs
+index 4802509..c9884a9 100644
+--- a/src/memory.rs
++++ b/src/memory.rs
+@@ -166,7 +166,7 @@ impl Timer {
+     #[must_use]
+     pub fn wrap(&self, program: &Path, report: &Path) -> Command {
+         let mut command = Command::new(&self.binary);
+-        command.arg(self.flag).arg("-o").arg(report).arg(program);
++        command.env("LC_ALL", "C").arg(self.flag).arg("-o").arg(report).arg(program);
+         command
+     }
+ 
+@@ -182,9 +182,9 @@ impl Timer {
+ 
+ /// Whether `/usr/bin/time` accepts a flag, decided by running it on something that always works.
+ fn probe(binary: &Path, flag: &str) -> bool {
+-    Command::new(binary).arg(flag).arg("/usr/bin/true").output().is_ok_and(|out| {
+-        out.status.success() && parse(&String::from_utf8_lossy(&out.stderr)).peak.measured()
+-    })
++    Command::new(binary).env("LC_ALL", "C").arg(flag).arg("/usr/bin/true").output().is_ok_and(
++        |out| out.status.success() && parse(&String::from_utf8_lossy(&out.stderr)).peak.measured(),
++    )
+ }
+ 
+ /// Pull the peak, the CPU seconds and the blocks read out of a `time` report, whichever flavour
+@@ -196,8 +196,8 @@ fn probe(binary: &Path, flag: &str) -> bool {
+ /// `time` installed on a Mac is a thing that happens.
+ ///
+ /// The units differ the same way. GNU's peak is kibibytes and BSD's is bytes, and reading one as
+-/// the other is out by a factor of 1024. Both count reads in 512 byte blocks, which is the kernel's
+-/// unit for `ru_inblock` and not a choice either of them made.
++/// the other is out by a factor of 1024. Linux accounts reads in 512-byte units. BSD reports
++/// input operations, which cannot be converted to bytes, so its read bytes are unavailable.
+ fn parse(text: &str) -> Cost {
+     const BLOCK: u64 = 512;
+     let mut peak = None;
+@@ -208,7 +208,7 @@ fn parse(text: &str) -> Cost {
+     for line in text.lines() {
+         let line = line.trim();
+         if let Some(rest) = line.strip_prefix("Maximum resident set size (kbytes):") {
+-            peak = rest.trim().parse::<u64>().ok().map(|kib| kib * 1024);
++            peak = rest.trim().parse::<u64>().ok().and_then(|kib| kib.checked_mul(1024));
+         } else if let Some(rest) = line.strip_prefix("User time (seconds):") {
+             user = seconds(rest);
+         } else if let Some(rest) = line.strip_prefix("System time (seconds):") {
+@@ -218,7 +218,9 @@ fn parse(text: &str) -> Cost {
+         } else if line.ends_with("maximum resident set size") {
+             peak = leading(line);
+         } else if line.ends_with("block input operations") {
+-            blocks = leading(line);
++            // BSD reports operations, not Linux 512-byte accounting units.
++            // There is no portable conversion from an operation count to bytes.
++            blocks = None;
+         } else if line.contains(" real ") && line.contains(" user ") {
+             // BSD puts all three on one line as `0.01 real 0.00 user 0.00 sys`, so the number in
+             // front of each name is the one that belongs to it.
+@@ -245,7 +247,7 @@ fn parse(text: &str) -> Cost {
+             Peak::Bytes,
+         ),
+         cpu,
+-        read: blocks.map(|n| n * BLOCK),
++        read: blocks.and_then(|n| n.checked_mul(BLOCK)),
+     }
+ }
+ 
+@@ -332,7 +334,7 @@ mod tests {
+         let cost = parse(BSD);
+         assert_eq!(cost.peak, Peak::Bytes(1_245_184));
+         assert_eq!(cost.cpu, Some(Duration::from_millis(1000)));
+-        assert_eq!(cost.read, Some(128 * 512));
++        assert_eq!(cost.read, None);
+     }
+ 
+     #[test]
+@@ -353,8 +355,8 @@ mod tests {
+ 
+     #[test]
+     fn a_hot_run_that_read_from_the_disk_is_visible_as_a_number_that_is_not_zero() {
+-        assert_eq!(parse(BSD).read, Some(65536));
+-        assert_eq!(parse("             0  block input operations\n").read, Some(0));
++        assert_eq!(parse(GNU).read, Some(4096 * 512));
++        assert_eq!(parse("             0  block input operations\n").read, None);
+     }
+ 
+     #[test]
