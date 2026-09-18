@@ -576,6 +576,7 @@ fn inside(result: &SuiteResult) -> String {
             let i = q.internal.as_ref()?;
             Some(vec![
                 q.name.clone(),
+                show(i.planning),
                 show(i.execute),
                 show(i.accounting.accounted),
                 show(i.accounting.measured),
@@ -599,6 +600,7 @@ fn inside(result: &SuiteResult) -> String {
     out.push_str(&table(
         &[
             "query",
+            "planning",
             "execute",
             "accounted",
             "measured",
@@ -612,7 +614,15 @@ fn inside(result: &SuiteResult) -> String {
         &rows,
     ));
     out.push_str(
-        "Read from the breakdown the engine wrote for its cold run. `accounted` is what its \
+        "Read from the breakdown the engine wrote for its cold run. `planning` is everything before \
+         the first row moved, which is the parse, the bind, the optimizer passes and building the \
+         tree. It is a column rather than a footnote because it is the one cost of a query nobody \
+         profiles: an optimizer only ever has passes added to it, each paying for itself on the \
+         query it was written for, and a query that plans for four hundred milliseconds to save two \
+         hundred is a query the optimizer made slower. What is gated is planning as a share of the \
+         whole statement, and that share is not in this table, because it is taken over every run \
+         rather than off the cold one the rest of these columns come from. It lives in \
+         `baselines/planning-<suite>.txt`. `accounted` is what its \
          pipelines charged themselves and `measured` is what it measured around running them, so \
          `apart` is the cross check and anything over five percent is time the breakdown cannot \
          explain. `driver` is the part of `accounted` that was not inside an operator, which is \
@@ -956,6 +966,7 @@ mod tests {
             },
             answer: "42".to_owned(),
             internal: None,
+            planning: Vec::new(),
             spend: Vec::new(),
         }
     }

@@ -30,6 +30,7 @@ use rudb_bench::engine::{
 use rudb_bench::kernels;
 use rudb_bench::ledger;
 use rudb_bench::machine;
+use rudb_bench::planning;
 use rudb_bench::regress::{self, FACTOR, Watch};
 use rudb_bench::report::{Abstention, comparison, table};
 use rudb_bench::suite::{SUITES, Suite, queries};
@@ -563,11 +564,35 @@ fn check(compared: &rudb_bench::report::Comparison, watch: Watch) -> ExitCode {
     // A machine with no record passes. The alternative is a gate that cannot be introduced without
     // being introduced on every machine at once, and the sentence above says how to make it a gate
     // here, which is the part that stops it being a hole nobody notices.
-    if verdicts.iter().any(regress::Verdict::failed) {
-        ExitCode::FAILURE
-    } else {
-        ExitCode::SUCCESS
-    }
+    let slower = verdicts.iter().any(regress::Verdict::failed);
+    // Both gates run and both are reported even when the first one failed, because a run that is
+    // slower and planning for longer is one finding and the second half of it is the explanation.
+    // Stopping at the first failure would hide it behind the thing it caused.
+    let over = budgets(compared);
+    if slower || over { ExitCode::FAILURE } else { ExitCode::SUCCESS }
+}
+
+/// Compare what each query spent planning against the committed budget for it.
+///
+/// Its own gate rather than a column in the one above, because the two ask different questions and
+/// only one of them can be asked anywhere. The regression gate compares this machine's run against
+/// this machine's record, so it says nothing on a machine with no record. A planning budget is a
+/// share of a run against itself, so it means the same thing on every machine and can be checked on
+/// whatever ran.
+fn budgets(compared: &rudb_bench::report::Comparison) -> bool {
+    let at = planning::path(compared.suite.name);
+    let budgets = match planning::read(&at) {
+        Ok(budgets) => budgets,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return true;
+        }
+    };
+    let verdicts = planning::check_all(&budgets, compared);
+    println!();
+    println!("{}", at.display());
+    print!("{}", planning::report(&verdicts, budgets.len()));
+    verdicts.iter().any(planning::Verdict::failed)
 }
 
 /// Write what just ran into the committed records.
@@ -584,6 +609,26 @@ fn record(compared: &rudb_bench::report::Comparison) -> ExitCode {
     println!("{}", at.display());
     for record in &taken {
         println!("  {}", regress::describe_record(record));
+    }
+    // The planning budgets come off the same run, because the alternative is two commands somebody
+    // has to remember to run together and a budget file that is a month older than the records
+    // beside it.
+    let budgets: Vec<planning::Budget> = compared
+        .results
+        .iter()
+        .map(|r| planning::Budget::of(r, &here, &today))
+        .filter(|b| !b.queries.is_empty())
+        .collect();
+    if !budgets.is_empty() {
+        let at = planning::path(compared.suite.name);
+        if let Err(e) = planning::write(&at, &budgets) {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+        println!("{}", at.display());
+        for budget in &budgets {
+            println!("  {}", planning::describe(budget));
+        }
     }
     println!();
     println!("Read the diff before committing it. A record taken on a machine somebody else was");
@@ -1294,6 +1339,10 @@ fn help() {
         (regress::DRIFT - 1.0) * 100.0
     );
     println!("    --record        replace the committed records for the engines that ran here");
+    println!("                    and the planning budgets, for the engine that reports one");
+    println!("                    (--check also fails a query that spent a larger share of");
+    println!("                    itself planning than baselines/planning-<suite>.txt allows,");
+    println!("                    which is a share rather than a time and so travels)");
     println!("    --store <layer> add this run to the ledger as the row that closes a layer");
     println!("    --engines a,b   run only these, the rest abstain saying they were left out");
     println!("    --runs n        hot runs per query, default five and fifteen. Under five is a");

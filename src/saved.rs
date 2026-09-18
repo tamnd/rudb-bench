@@ -365,14 +365,15 @@ fn maybe(text: &str) -> Option<&str> {
 
 /// What the engine said about its own execution, on one line.
 ///
-/// Ten fixed fields, in the order they are read back. Only rudb writes one, so the line is absent
-/// for every other engine rather than being ten dashes.
+/// Eleven fixed fields, in the order they are read back. Only rudb writes one, so the line is absent
+/// for every other engine rather than being eleven dashes.
 ///
-/// The build is last rather than beside the two numbers it belongs with, because it was added
-/// after the line existed and a file written before it is a file somebody still wants to open.
+/// The build and the planning are last rather than beside the numbers they belong with, because
+/// each was added after the line existed and a file written before it is a file somebody still
+/// wants to open. Appending is what keeps that true, and it costs one arm in the reader.
 fn inside(i: &Internal) -> String {
     format!(
-        "{} {} {} {} {} {} {} {} {} {}",
+        "{} {} {} {} {} {} {} {} {} {} {}",
         micros(i.accounting.accounted),
         micros(i.accounting.measured),
         i.accounting.process.map_or_else(|| "-".to_owned(), |d| micros(d).to_string()),
@@ -382,7 +383,8 @@ fn inside(i: &Internal) -> String {
         i.pipelines,
         i.operators,
         i.reference_impls,
-        micros(i.accounting.build)
+        micros(i.accounting.build),
+        micros(i.planning)
     )
 }
 
@@ -390,15 +392,21 @@ fn inside(i: &Internal) -> String {
 fn uninside(text: &str) -> Result<Internal, String> {
     let parts: Vec<&str> = text.split_whitespace().collect();
     // Nine fields is a file written before the build was split out of the measured cpu, and zero is
-    // what it meant at the time: everything the engine measured was on the right of the check.
+    // what it meant at the time: everything the engine measured was on the right of the check. Ten
+    // is a file written before the engine put a clock on its planner, and zero is what it meant
+    // then too, because the three planning phases really did report nothing.
     let (
         [accounted, measured, process, execute, driver, peak, pipelines, operators, references],
         build,
+        planning,
     ) = match parts[..] {
-        [a, b, c, d, e, f, g, h, i] => ([a, b, c, d, e, f, g, h, i], "0"),
-        [a, b, c, d, e, f, g, h, i, j] => ([a, b, c, d, e, f, g, h, i], j),
+        [a, b, c, d, e, f, g, h, i] => ([a, b, c, d, e, f, g, h, i], "0", "0"),
+        [a, b, c, d, e, f, g, h, i, j] => ([a, b, c, d, e, f, g, h, i], j, "0"),
+        [a, b, c, d, e, f, g, h, i, j, k] => ([a, b, c, d, e, f, g, h, i], j, k),
         _ => {
-            return Err(format!("an inside line needs nine or ten fields and this has `{text}`"));
+            return Err(format!(
+                "an inside line needs nine, ten or eleven fields and this has `{text}`"
+            ));
         }
     };
     let time = |field: &str| -> Result<Duration, String> {
@@ -421,6 +429,7 @@ fn uninside(text: &str) -> Result<Internal, String> {
             },
         },
         execute: time(execute)?,
+        planning: time(planning)?,
         driver: time(driver)?,
         peak_bytes: number(peak)?,
         pipelines: number(pipelines)? as usize,
@@ -611,6 +620,12 @@ fn one_query(engine: &str, piece: &str) -> Result<QueryResult, String> {
             Some(text) => Some(uninside(text)?),
             None => None,
         },
+        // Not saved and so not read back. A record holds one run's breakdown, and a share taken
+        // over the runs cannot be rebuilt from it. Filling this with the one pair the record does
+        // hold would hand a caller a sample of one wearing a distribution's name, which is the
+        // thing this field was added to stop. What reads it is the budget, and the budget is
+        // recorded from a run rather than from a record.
+        planning: Vec::new(),
         spend: values(&body, "spend").map(unspend).collect::<Result<Vec<_>, _>>()?,
     })
 }
@@ -635,6 +650,10 @@ mod tests {
         QueryResult {
             name: name.to_owned(),
             shape: "group by, low card".to_owned(),
+            // A record does not carry these, so a round trip through one comes back empty and the
+            // fixture starts there. Putting a value here would make the round trip test assert that
+            // a field survives a format that has no room for it.
+            planning: Vec::new(),
             runs: Runs {
                 cold: Duration::from_millis(90),
                 hot: Distribution::median(ms(&[10, 20, 30])),
@@ -662,6 +681,7 @@ mod tests {
                     process: Some(Duration::from_micros(95_000)),
                 },
                 execute: Duration::from_micros(41_000),
+                planning: Duration::from_micros(2_600),
                 driver: Duration::from_micros(900),
                 peak_bytes: 8192,
                 pipelines: 2,
