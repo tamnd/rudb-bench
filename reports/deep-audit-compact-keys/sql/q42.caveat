@@ -1,0 +1,1 @@
+ORDER BY PageViews DESC LIMIT 10 OFFSET 10000 with ties at the cut, as q39
