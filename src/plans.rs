@@ -45,15 +45,15 @@
 //! # What a query that will not bind does
 //!
 //! It gets a `refused` line naming it and the error, and the baseline records that. This was not
-//! the point of the module and it is the first thing it found. rudb has never run TPC-H, because
-//! every join in it is a nested loop and [`crate::engine::Engine::can_run`] declines the suite, so
-//! nobody had found out which of the twenty two queries the binder even accepts. Planning needs no
-//! data and no join, so this answers it on every commit for the price of eight empty Parquet files:
-//! twenty one of the twenty two plan, and q11 does not.
+//! the point of the module and it is the first thing it found. Nobody had found out which of the
+//! twenty two TPC-H queries rudb's binder even accepts, because the suite was declined outright.
+//! Planning needs no data and no join, so this answers it on every commit for the price of eight
+//! empty Parquet files: twenty one of the twenty two planned, and q11 did not, because the HAVING
+//! there compares a group total against a total over the whole table.
 //!
 //! That makes a refusal a first class row rather than a skipped query. A query that stops binding
 //! is a regression and a query that starts binding is progress, and both of them are a diff in this
-//! file.
+//! file. q11 is the second kind, and the diff that made it one is in this repository's history.
 //!
 //! # The path problem
 //!

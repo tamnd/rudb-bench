@@ -13,17 +13,22 @@
 #
 # Nothing here is a measurement and no number in it is a time. A plan is a shape, and the only
 # question this file asks is whether it is still the same shape.
+#
+# Every line of a plan is indented two spaces and a blank line inside one is written as a lone dot,
+# so that the blank line between two queries is the only blank line in the file and a reader can
+# see where one plan ends. The dot rather than two spaces and nothing, because trailing whitespace
+# is the kind of thing an editor removes on save and a baseline should not depend on it surviving.
 
 [plans]
 suite     smoke
 engine    rudb
-version   rudb 0.3.33
+version   rudb 0.3.38
 recorded  2026-09-18
 planned   5 of 5
 
 query     q1
-  Project #3 [#2.0::BIGINT AS "count_star()"]  [~1 rows] [pipeline 0] [reference]
-    Aggregate #2 groups=[] aggregates=[count_star()::BIGINT]  [~1 rows] [pipeline 1] [reference]
+  Project #3 [#2.0::BIGINT AS "count_star()"]  [1 rows exact] [pipeline 0] [reference]
+    Aggregate #2 groups=[] aggregates=[count_star()::BIGINT]  [1 rows exact] [pipeline 1] [reference]
       Project #1 []  [rows unknown] [pipeline 1] [reference]
         TableFunction read_parquet args=['<fixture>/smoke.parquet'::VARCHAR] #0 []  [rows unknown] [pipeline 1] [reference]
   .
@@ -32,8 +37,8 @@ query     q1
     pipeline 1 waits for nothing
 
 query     q2
-  Project #3 [#2.0::DOUBLE AS "sum(v)"]  [~1 rows] [pipeline 0] [reference]
-    Aggregate #2 groups=[] aggregates=[sum(#1.0::DOUBLE)::DOUBLE]  [~1 rows] [pipeline 1] [reference]
+  Project #3 [#2.0::DOUBLE AS "sum(v)"]  [1 rows exact] [pipeline 0] [reference]
+    Aggregate #2 groups=[] aggregates=[sum(#1.0::DOUBLE)::DOUBLE]  [1 rows exact] [pipeline 1] [reference]
       Project #1 [#0.1::DOUBLE AS v]  [rows unknown] [pipeline 1] [reference]
         Filter (#0.0::BIGINT < 100::BIGINT)::BOOLEAN  [rows unknown] [pipeline 1] [reference]
           TableFunction read_parquet args=['<fixture>/smoke.parquet'::VARCHAR] #0 [k::BIGINT, v::DOUBLE]  [rows unknown] [pipeline 1] [reference]
@@ -53,7 +58,7 @@ query     q3
     pipeline 1 waits for nothing
 
 query     q4
-  TopN 10 offset 0 [#3.1::DOUBLE DESC NULLS LAST]  [~10 rows] [pipeline 1] [reference]
+  TopN 10 offset 0 [#3.1::DOUBLE DESC NULLS LAST]  [10 rows certified to 100.00%] [pipeline 1] [reference]
     Project #3 [#2.0::BIGINT AS k, #2.1::DOUBLE AS total]  [rows unknown] [pipeline 1] [reference]
       Aggregate #2 groups=[#1.0::BIGINT] aggregates=[sum(#1.1::DOUBLE)::DOUBLE]  [rows unknown] [pipeline 2] [reference]
         Project #1 [#0.0::BIGINT AS k, #0.1::DOUBLE AS v]  [rows unknown] [pipeline 2] [reference]
@@ -65,8 +70,8 @@ query     q4
     pipeline 2 waits for nothing
 
 query     q5
-  Project #3 [#2.0::BIGINT AS "count(DISTINCT tag)"]  [~1 rows] [pipeline 0] [reference]
-    Aggregate #2 groups=[] aggregates=[count(#4.0::VARCHAR)::BIGINT]  [~1 rows] [pipeline 1] [reference]
+  Project #3 [#2.0::BIGINT AS "count(DISTINCT tag)"]  [1 rows exact] [pipeline 0] [reference]
+    Aggregate #2 groups=[] aggregates=[count(#4.0::VARCHAR)::BIGINT]  [1 rows exact] [pipeline 1] [reference]
       Aggregate #4 groups=[#1.0::VARCHAR] aggregates=[]  [rows unknown] [pipeline 2] [reference]
         Project #1 [#0.1::VARCHAR AS tag]  [rows unknown] [pipeline 2] [reference]
           Filter (#0.0::DOUBLE > 5.0::DOUBLE)::BOOLEAN  [rows unknown] [pipeline 2] [reference]
