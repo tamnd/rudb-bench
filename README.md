@@ -297,9 +297,53 @@ Which passes were turned off is asked of the engine through `duckdb_optimizers()
 
 The command exits non-zero when a query answered differently with the passes off. That is the one result here that is a property of the engine rather than of the machine, and it is a bug rather than a timing, so the row says so instead of printing a ratio between two different answers. The gate that actually chases it down is the whole corpus run in `tamnd/rudb-compat`, and this only checks the handful of queries it happens to be timing, which is worth having anyway because a benchmark comparing a right answer against a wrong one is not slower or faster, it is meaningless.
 
-This is not a quick command and it is not wired into any gate. The unoptimized half runs the plan the binder emitted, which for a join is a cross product filtered afterwards, and nothing in this harness has a clock on it. On the smoke suite against DuckDB the five queries that are scans and aggregates are unaffected to within the noise, and q6, the join, is the entire result.
+This is not a quick command and it is not wired into any gate. The unoptimized half runs the plan the binder emitted, which for a join is a cross product filtered afterwards, and nothing in this harness has a clock on it. The first run of it, on `mba-m2`, took half an hour, and all but a minute of that was six runs of one query.
 
-REPLACEME
+```
+$ rudb-bench attribute --engine duckdb --suite smoke --hot 5
+
+suite       smoke, 6 queries
+engine      duckdb v1.5.5 (Variegata) d8cdaa33fd
+optimizers  33 turned off
+
+query       shape                     with     without  what it was worth
+q1          count                 19.448ms    19.476ms  1.00x faster
+q2          filter and sum        30.953ms    32.569ms  1.05x faster
+q3          group by, low card    24.495ms    25.486ms  1.04x faster
+q4          group by and top k    33.273ms    46.294ms  1.39x faster
+q5          count distinct        36.806ms    38.212ms  1.04x faster
+q6          join and group by     81.712ms    269.045s  3292.61x faster
+
+ 226.686ms with the optimizer, over 6 queries
+  269.207s without it
+this total is the sum of the rows and not a claim about the engine. The rows are the result
+```
+
+That is the argument for the per query column in one table. Five of the six rows are between 1.00 and 1.39, which is to say the optimizer is worth nothing measurable on a scan or an aggregate, and the sixth is 3292x. A total would have reported the optimizer as worth 1188x on the smoke suite, which is a number about q6 wearing a suite's name, and a suite with one more scan in it would have reported a different one for no reason that has anything to do with the optimizer. The rows do not have that problem: q6 is 3292x and the rest are noise, on this suite and on any other.
+
+The same command on rudb, which is the engine this is for, runs five queries rather than six because rudb declines the join on the smoke suite until it has something better than a nested loop. The five it does run agree both ways, which is the exit code, and the spread is 1.53x to 49.99x:
+
+```
+$ rudb-bench attribute --engine rudb --suite smoke --hot 3
+
+suite       smoke, 6 queries
+engine      rudb rudb 0.3.31
+optimizers  44 turned off
+
+query       shape                     with     without  what it was worth
+q1          count                 45.206ms      2.260s  49.99x faster
+q2          filter and sum       501.877ms      1.655s  3.30x faster
+q3          group by, low card      1.105s      2.466s  2.23x faster
+q4          group by and top k      1.107s      2.578s  2.33x faster
+q5          count distinct          1.650s      2.522s  1.53x faster
+
+    4.409s with the optimizer, over 5 queries
+   11.480s without it
+```
+
+Forty four names against DuckDB's thirty three, and rudb has nine passes. That is not a discrepancy, it is what the setting is: a corpus file that disables a pass rudb has not written yet has to be accepted rather than rejected, so `duckdb_optimizers()` answers with the whole DuckDB list. The printed line is therefore the truthful answer to what was turned off and is not a count of the optimizer's parts. Which of the nine did the work is a different question with its own command, `rudb-compat sweep` in `tamnd/rudb-compat`, which runs the corpus with pass k on and the rest off so that a difference localizes to one pass. This says what the pipeline was worth and that says which pass it was.
+
+The 49.99x on q1 is the interesting row and it is the one to be suspicious of, because `SELECT count(*)` should not need an optimizer. What it says is that without projection pushdown rudb reads every column of ten million rows to count them, which is the pass that landed first in E1 and is doing exactly what it was landed to do. It is also a measurement of how much rudb's scan layer costs when nothing prunes it, which is milestone E2, and reading it as a fact about the optimizer rather than about the scan would be the wrong lesson from a right number.
 
 ### The attribution ledger
 
