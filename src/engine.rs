@@ -646,9 +646,7 @@ impl Duckdb {
     ///
     /// When the binary is missing or does not answer `--version`.
     pub fn discover(scratch: &Path, suite: &'static Suite) -> Result<Self, BenchError> {
-        let binary =
-            std::env::var_os("RUDB_BENCH_DUCKDB").map_or_else(|| on_path("duckdb"), PathBuf::from);
-        Self::at("duckdb", binary, "RUDB_BENCH_DUCKDB", scratch, suite)
+        Self::at("duckdb", duckdb(), "RUDB_BENCH_DUCKDB", scratch, suite)
     }
 
     /// The same, for the DuckDB rudb's compatibility is actually measured against.
@@ -2064,6 +2062,19 @@ fn add(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
         (Some(a), Some(b)) => Some(a + b),
         _ => None,
     }
+}
+
+/// Which DuckDB this machine means.
+///
+/// `RUDB_BENCH_DUCKDB` when it is set, and otherwise `duckdb` looked up on `PATH` and resolved to a
+/// file, so a report names which of the three DuckDBs on a developer machine actually ran. Here
+/// rather than inside [`Duckdb::discover`] because DuckDB is not only an engine in this harness: it
+/// is also the generator and the converter for a corpus, per
+/// `spec/bench/tpc-h/02-the-data.md` section 2.2, and two places resolving it two ways is two
+/// binaries under one name in one report.
+#[must_use]
+pub fn duckdb() -> PathBuf {
+    std::env::var_os("RUDB_BENCH_DUCKDB").map_or_else(|| on_path("duckdb"), PathBuf::from)
 }
 
 /// Resolve a bare command name against `PATH`.

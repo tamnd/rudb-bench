@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use crate::corpus::Manifest;
 use crate::engine::BenchError;
 use crate::suite::{Scale, Suite};
 
@@ -149,6 +150,13 @@ pub struct Dataset {
     /// multiple rather than at it. A rate derived from an approximate count is still worth printing
     /// and is not worth printing to seven digits.
     pub rows_exact: bool,
+    /// What the manifest beside these files says about them, when there is one.
+    ///
+    /// `None` for the smoke suite, which makes its own data every run, and for a corpus that was
+    /// put in place by hand before this harness could write manifests. It is carried rather than
+    /// read again at print time so that the run and the header describing it are the same corpus,
+    /// which is the same reason [`Dataset::scale`] is carried.
+    pub manifest: Option<Manifest>,
 }
 
 impl Dataset {
@@ -227,11 +235,12 @@ pub fn prepare(
             .map_err(|e| {
                 BenchError::new(format!(
                     "the {} suite{} needs {}, which is not readable: {e}. It needs {}. Set \
-                     RUDB_BENCH_DATA to where the corpora are",
+                     RUDB_BENCH_DATA to where the corpora are{}",
                     suite.name,
                     scale.map(|scale| format!(" at {}", scale.named())).unwrap_or_default(),
                     path.display(),
-                    suite.needs
+                    suite.needs,
+                    makes(suite, scale)
                 ))
             })?
             .len();
@@ -253,8 +262,76 @@ pub fn prepare(
     // The sample's count when there is one, because that is the file the engines were handed, and
     // the suite's declared count at this scale otherwise.
     let rows = sample.map_or_else(|| suite.rows(scale), |s| Some(s.rows));
+    let manifest = manifest(suite, &root.join(&directory))?;
     let scale = scale.or_else(|| suite.default_scale());
-    Ok(Dataset { tables, sample, rows, scale, rows_exact: suite.rows_exact(scale) })
+    Ok(Dataset { tables, sample, rows, scale, rows_exact: suite.rows_exact(scale), manifest })
+}
+
+/// The command that writes the corpus a run just failed to find, when there is one.
+///
+/// Empty for a suite whose data is downloaded, because pointing somebody at a generator that cannot
+/// make their data wastes more of their time than saying nothing. A message that ends in the exact
+/// line to type is the difference between a missing corpus costing a minute and costing an hour of
+/// reading the readme, and the scale factor has to be in it: the common failure is a run at one
+/// scale over a machine that only has another.
+fn makes(suite: &'static Suite, scale: Option<&'static Scale>) -> String {
+    if !matches!(suite.size, crate::suite::Size::Generated { .. }) {
+        return String::new();
+    }
+    let scale = scale.or_else(|| suite.default_scale());
+    match scale {
+        Some(scale) => format!(
+            ". This corpus is generated, so the command that makes it is `rudb-bench generate {} \
+             --scale {}`",
+            suite.name, scale.label
+        ),
+        None => format!(
+            ". This corpus is generated, so the command that makes it is `rudb-bench generate {}`",
+            suite.name
+        ),
+    }
+}
+
+/// Read the manifest beside a corpus, and check it still describes the files that are there.
+///
+/// The check is per table file length against what was recorded at generation time, which is not a
+/// hash and is not meant to be one: rehashing eighty gigabytes before every run would cost more
+/// than the run. What it catches is the case that actually happens, which is a corpus half rewritten
+/// by a second generation or a file truncated by a disk that filled, and in both of those the length
+/// moves. Somebody who wants the real answer has the per table SHA-256s in the manifest and
+/// `shasum -a 256` on the files.
+///
+/// A corpus with no manifest is not an error. Manifests arrived after the first corpora did, and a
+/// run over files somebody put in place by hand is still a run, it just cannot say where they came
+/// from.
+fn manifest(suite: &'static Suite, directory: &Path) -> Result<Option<Manifest>, BenchError> {
+    let Some(manifest) = Manifest::beside(directory).map_err(BenchError::new)? else {
+        return Ok(None);
+    };
+    for name in suite.tables {
+        let Some(recorded) = manifest.tables.iter().find(|table| table.table == *name) else {
+            return Err(BenchError::new(format!(
+                "the manifest at {} does not record {name}, which the {} suite needs, so this \
+                 directory holds some other corpus. Generate this one again",
+                Manifest::path(directory).display(),
+                suite.name
+            )));
+        };
+        let path = directory.join(format!("{name}.parquet"));
+        let bytes = std::fs::metadata(&path)
+            .map_err(|e| BenchError::new(format!("cannot size {}: {e}", path.display())))?
+            .len();
+        if bytes != recorded.bytes {
+            return Err(BenchError::new(format!(
+                "{} is {bytes} bytes and the manifest beside it recorded {} when it was written, \
+                 so the corpus changed after it was described and nothing measured over it can be \
+                 compared to anything. Generate it again",
+                path.display(),
+                recorded.bytes
+            )));
+        }
+    }
+    Ok(Some(manifest))
 }
 
 /// Make a smaller version of one Parquet file, or find the one that was made before.
@@ -379,6 +456,9 @@ fn smoke(scratch: &Path, suite: &Suite) -> Result<Dataset, BenchError> {
         rows: suite.rows(None),
         scale: None,
         rows_exact: true,
+        // The smoke suite writes its one file here, every run, from the rows above it. There is
+        // nothing to describe that this function does not already know.
+        manifest: None,
     })
 }
 
@@ -552,7 +632,12 @@ const POLL: Duration = Duration::from_millis(20);
 
 #[cfg(test)]
 mod tests {
-    use super::{Dataset, Finished, Rows, Sample, Table, both_within, prepare, root, size_of_tree};
+    use super::{
+        Dataset, Finished, Rows, Sample, Table, both_within, makes, manifest, prepare, root,
+        size_of_tree,
+    };
+    use crate::corpus::{Manifest, Provenance, Recorded};
+    use crate::suite::SUITES;
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::time::{Duration, Instant};
@@ -605,6 +690,62 @@ mod tests {
     }
 
     #[test]
+    fn a_corpus_that_changed_after_it_was_described_is_refused() {
+        let suite = SUITES.iter().find(|suite| suite.name == "tpch").expect("tpch is a suite");
+        let dir =
+            std::env::temp_dir().join(format!("rudb-bench-moved-corpus-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let mut written = Manifest {
+            suite: "tpch".to_owned(),
+            scale: "0.01".to_owned(),
+            provenance: Provenance::DuckdbTpch,
+            generator: "duckdb tpch extension, CALL dbgen(sf = 0.01)".to_owned(),
+            converter: "duckdb v1.5.5".to_owned(),
+            hashed_by: "shasum -a 256".to_owned(),
+            written: "2026-09-18".to_owned(),
+            tables: Vec::new(),
+            properties: Vec::new(),
+        };
+        for name in suite.tables {
+            let path = dir.join(format!("{name}.parquet"));
+            std::fs::write(&path, b"four").expect("write table");
+            written.tables.push(Recorded {
+                table: (*name).to_owned(),
+                rows: 1,
+                bytes: 4,
+                sha256: "c".repeat(64),
+            });
+        }
+        std::fs::write(Manifest::path(&dir), written.write()).expect("write manifest");
+        assert!(manifest(suite, &dir).expect("a corpus that matches").is_some());
+
+        // One byte longer than it was described as, which is what half a rewritten corpus looks
+        // like from here.
+        std::fs::write(dir.join("nation.parquet"), b"fives").expect("rewrite one table");
+        let e = manifest(suite, &dir).expect_err("a corpus that moved");
+        let said = e.to_string();
+        assert!(said.contains("5 bytes"), "{said}");
+        assert!(said.contains("recorded 4"), "{said}");
+        assert!(said.contains("Generate it again"), "{said}");
+        std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    #[test]
+    fn a_missing_generated_corpus_says_what_makes_it() {
+        let suite = SUITES.iter().find(|suite| suite.name == "tpch").expect("tpch is a suite");
+        let scale = suite.scales().iter().find(|scale| scale.label == "1");
+        let said = makes(suite, scale);
+        assert!(said.contains("rudb-bench generate tpch --scale 1"), "{said}");
+
+        // ClickBench is downloaded, so there is no command to offer and offering one would be a
+        // lie that costs somebody a download.
+        let hits = SUITES.iter().find(|suite| suite.name == "clickbench");
+        if let Some(hits) = hits {
+            assert_eq!(makes(hits, None), "");
+        }
+    }
+
+    #[test]
     fn a_dataset_knows_what_its_files_take() {
         let set = Dataset {
             tables: vec![
@@ -615,6 +756,7 @@ mod tests {
             rows: None,
             scale: None,
             rows_exact: true,
+            manifest: None,
         };
         assert_eq!(set.bytes(), 42);
     }

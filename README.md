@@ -172,6 +172,63 @@ The difference between TPC-H and ClickBench is that TPC-H has a specification. T
 
 Whether every engine actually takes that text is a question with an answer, so it was asked before the table was written, against a real SF 0.01 corpus rather than against an empty schema. DuckDB, ClickHouse and DataFusion each answered all twenty two. Polars answers nineteen: its `SQLContext` does not resolve the correlated `p_partkey` in q02 or q17, and it rejects the `NOT LIKE` inside the q13 join constraint. Those three are declared absent in the table for the same reason the four ClickBench ones are.
 
+### Where a corpus comes from, written down
+
+A TPC-H number is a number over a particular pile of files, and until now the pile arrived by hand and nothing beside it said what it was. `rudb-bench generate tpch --scale 1` writes it and writes a `manifest.txt` next to it saying where it came from.
+
+```
+$ rudb-bench generate tpch --scale 1 --yes
+writing 8 tables to /Users/apple/rudb-data/tpch/sf1
+generator duckdb-tpch
+  lineitem    6001215 rows
+  orders      1500000 rows
+  ...
+about 330.40 MiB of Parquet, roughly
+generating tpch at SF1
+  lineitem    6001215 rows, 196.78 MiB
+  orders      1500000 rows, 53.50 MiB
+  ...
+checking the physical properties
+  lineitem-ordered        holds  0 rows out of order in l_orderkey
+  orderkey-sparse         holds  o_orderkey is 0.25 dense over its range
+  c_custkey-dense         holds  0 keys missing from the range of c_custkey
+  p_partkey-dense         holds  0 keys missing from the range of p_partkey
+  s_suppkey-dense         holds  0 keys missing from the range of s_suppkey
+  partsupp-ordered        holds  0 rows out of order, 4 to 4 suppliers per part
+wrote /Users/apple/rudb-data/tpch/sf1/manifest.txt
+
+8661245 rows over 8 tables
+corpus e02fbb7bb0145593
+```
+
+Without `--yes` it prints the first block and stops, which is there because the same command at SF100 is thirty two gigabytes and a harness that starts writing that because somebody typed a scale factor is a harness people run once.
+
+The manifest is plain text, and the part that matters is short.
+
+```
+[corpus]
+suite tpch
+scale 1
+provenance duckdb-tpch
+generator duckdb tpch extension, CALL dbgen(sf = 1)
+converter duckdb v1.5.5 (Variegata) d8cdaa33fd
+hashed-by shasum -a 256
+written 2026-09-18
+
+[table] lineitem
+rows 6001215
+bytes 206339551
+sha256 3bd435b18cc30916be44b644a51024af6213ed07543b0b6e8085c4d181ec178e
+```
+
+`provenance` is `duckdb-tpch` rather than `dbgen` because they are not the same thing and recording them as the same thing is how a corpus becomes very probably right. DuckDB's extension is permitted up to SF10 and the generator refuses above it, since past there the specification wants the official `dbgen` with `-C` and `-S` chunking and this harness does not drive that yet. `rows` is counted in the file that was written rather than taken from the specification's table, and at SF1 the two agree exactly. At SF0.01 they do not: `lineitem` comes out at 60175 against a declared 60012, which is the one to seven line items per order landing where it lands, and the manifest says what was counted.
+
+The digests are what `shasum -a 256` prints, so checking a manifest needs nothing from this repository. The `corpus e02fbb7bb0145593` line at the end is those eight digests folded to sixteen hex digits so a report header can carry one string instead of five hundred, and it is not a substitute for them.
+
+The property block is the part that exists for the graph work rather than for TPC-H. `spec/graph/` builds a 106 MB forward link out of `lineitem` being in `l_orderkey` order and chooses one key map over another out of `o_orderkey` being about a quarter dense, and both of those are facts about the files rather than about the specification. Measured here, they hold, and the density comes out at 0.25 on the nose. A corpus that lost one of them would not fail anything: it would quietly produce a link ten times the size and a number that reads like a regression in the engine, which is why it is measured once at generation time and written down. A property that does not hold is recorded as not holding rather than refusing the corpus, because it is still a usable TPC-H corpus and is only a problem for the layer that assumed otherwise.
+
+Every run now reads the manifest beside the files it is about to measure, and checks each file is still the length it was described as. That is not a hash and is not meant to be one, since rehashing thirty gigabytes before every run would cost more than the run. It catches the case that happens, which is a corpus half rewritten by a second generation. A corpus with no manifest is still run, it just cannot say where it came from, and a run that cannot find a corpus at all now ends with the command that makes it.
+
 ### The first full TPC-H at scale factor 100, and what it says
 
 TPC-H has now run end to end on `gamingpc-wsl` over the real 22.50 GiB corpus, all twenty two queries, five runs each, with DuckDB and `clickhouse local` each loading into a format of their own and DataFusion reading the Parquet where it lies. It is committed as the `2a` row of `runs/tpch.txt`.
