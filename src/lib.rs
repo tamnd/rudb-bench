@@ -36,6 +36,7 @@ pub mod markdown;
 pub mod measure;
 pub mod memory;
 pub mod metrics;
+pub mod plans;
 pub mod regress;
 pub mod report;
 pub mod saved;

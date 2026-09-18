@@ -345,6 +345,47 @@ Forty four names against DuckDB's thirty three, and rudb has nine passes. That i
 
 The 49.99x on q1 is the interesting row and it is the one to be suspicious of, because `SELECT count(*)` should not need an optimizer. What it says is that without projection pushdown rudb reads every column of ten million rows to count them, which is the pass that landed first in E1 and is doing exactly what it was landed to do. It is also a measurement of how much rudb's scan layer costs when nothing prunes it, which is milestone E2, and reading it as a fact about the optimizer rather than about the scan would be the wrong lesson from a right number.
 
+### The plan gate
+
+Everything above this line is a measurement, and the trouble with catching an optimizer regression by measurement is that a measurement is slow, noisy and run on the day somebody needs a number. A pass that quietly stops firing on one query shape does not crash. It shows up weeks later as a number that got worse, on a machine that is busy, in a run that touched forty commits.
+
+So the plan is written down. `rudb-bench plans` asks rudb to `EXPLAIN` every query in a suite and compares what comes back to `baselines/plans-<suite>.txt`, which is committed and reviewed as a diff. It measures nothing, it runs in under a second, and it runs on every commit.
+
+```
+$ rudb-bench plans
+every plan in smoke is the one that was written down
+every plan in tpch is the one that was written down
+```
+
+It needs no data. A plan needs a schema to bind against and a zero row Parquet file carries its whole schema in the footer, so the tables it plans against are the empty ones in `fixtures/`, which are 36 KB for the whole of TPC-H and the smoke suite together. That is the decision that lets this be a CI job rather than a thing that needs the fifteen gigabyte corpus and therefore never runs where it was supposed to. What it costs is stated in `fixtures/README.md` and in the header of every baseline file: a pass that decides something from a row count is not exercised here the way a real run exercises it. Today that costs less than it sounds like, because rudb prints `rows unknown` on almost every node of these plans rather than an estimate, and join order is not among the nine passes it runs yet.
+
+What is in the file is the shape, and the shape is where a pass shows up. This is q1 of the smoke suite, which is `SELECT count(*)`:
+
+```
+query     q1
+  Project #3 [#2.0::BIGINT AS "count_star()"]  [~1 rows] [pipeline 0] [reference]
+    Aggregate #2 groups=[] aggregates=[count_star()::BIGINT]  [~1 rows] [pipeline 1] [reference]
+      Project #1 []  [rows unknown] [pipeline 1] [reference]
+        TableFunction read_parquet args=['<fixture>/smoke.parquet'::VARCHAR] #0 []  [rows unknown] [pipeline 1] [reference]
+```
+
+The empty column list on the `TableFunction` is projection pushdown, and it is the same pass the attribution above measured as 49.99x on this query. The point of having both is that the attribution says what it is worth and needs ten million rows and a quiet machine to say it, and this says whether it is still happening and needs neither.
+
+The absolute path of the checkout is settled out before anything is written down, because rudb inlines a view and a baseline holding one machine's path is a baseline that fails for everybody else. The trailing seam block is dropped too: it is byte identical in every query, so keeping it would put twenty one copies of one fact about the build in a file and make registering a seam look like every query in the suite replanning.
+
+A query that will not bind is a line rather than an absence, and that turned out to be the first thing the gate found. rudb declines to run TPC-H, because every join in it is a nested loop and timing that would be timing a hang, so nobody had ever found out which of the twenty two queries rudb can bind. Planning executes nothing, so the answer is now in the file and is checked on every commit:
+
+```
+planned   21 of 22
+refused   q11  Binder Error: column a column must appear in the GROUP BY clause or must be part of an aggregate function
+```
+
+Twenty one of twenty two, for the price of eight empty Parquet files. A query that stops binding is a regression and a query that starts binding is progress, and both of them are a diff here. The doubled word in that error is rudb's, and it is a second thing this found: the message substitutes an empty column name into a sentence that already says "column".
+
+The gate fails on any change at all, including a change somebody meant. A plan that moved on purpose wants `rudb-bench plans --suite <name> --record` in the same pull request as the change that moved it, which is the whole point: the diff gets reviewed next to its cause. A category of plan change that only printed a warning would be the category people stop reading.
+
+ClickBench has no baseline yet and that is a gap rather than an oversight. The only `hits` schema this repository has written down is the one after the suite's own conversion, and rudb reads the raw file and applies that conversion in a view, so a fixture built from what is written down would be a table that does not exist on disk anywhere. `fixtures/README.md` says what the honest fix is and it is one command on either of the two machines that has the file.
+
 ### The attribution ledger
 
 Section 2.8 of the engine specification asks for a series rather than a table. Each layer of the engine closes with a row, the row carries the before and the after on total time, CPU seconds, peak resident and bytes read on the same machine, and the release notes are written from it. The argument for it is that a release note claiming the hash table made joins faster and unable to point at a row is a release note that is guessing.

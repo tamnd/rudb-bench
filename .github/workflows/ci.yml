@@ -102,6 +102,54 @@ jobs:
       - name: the smoke suite still measures something
         run: cargo run -q --release -- run smoke --check
 
+  # The plan gate. Milestone E1 asks for committed plan baselines diffed in CI so that a plan change
+  # is a reviewed diff rather than something noticed three weeks later in a performance run, and
+  # this is the job that makes the second half of that sentence true.
+  #
+  # It is the only job here that needs rudb, and the only one that measures nothing at all. A plan
+  # needs a schema and no rows, so it runs against the zero row Parquet files in fixtures/, which
+  # are 36 KB for every suite that has them. Nothing is timed and nothing here would mean anything
+  # if it were.
+  #
+  # rudb is pinned to a tag for the same reason DuckDB above is: a check whose other side moved on
+  # its own is not a check. Bumping RUDB_VERSION and re-recording the baselines is one reviewed pull
+  # request, and that pull request is where a plan change gets looked at, which is what the
+  # milestone asked for. The cost of the pin is that a plan change in rudb is caught when the pin
+  # moves rather than on the commit that made it, and the engine's own nightly job calls these
+  # subcommands by name, which is where it gets caught sooner.
+  plans:
+    name: plan baselines
+    needs: quick
+    runs-on: ubuntu-24.04
+    env:
+      RUDB_VERSION: v0.3.33
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: tamnd/rudb
+          ref: ${{ env.RUDB_VERSION }}
+          path: rudb
+      - uses: Swatinem/rust-cache@v2.9.2
+        with:
+          # Its own cache, keyed off the pinned tag. Sharing one with the jobs above would mean the
+          # engine's dependency tree evicting the harness's on every run.
+          key: rudb-${{ env.RUDB_VERSION }}
+          workspaces: |
+            .
+            rudb
+      - name: build the pinned rudb
+        working-directory: rudb
+        # The shell binary and not the workspace, because the plan gate drives rudb the same way
+        # every other subcommand does, through the command line. A debug build, because nothing
+        # here is timed and a release build of thirty three crates would be minutes spent making a
+        # binary that prints the same plan.
+        run: cargo build -p rudb-cli --bin rudb
+      - name: every plan is the one that was written down
+        env:
+          RUDB_BENCH_RUDB: ${{ github.workspace }}/rudb/target/debug/rudb
+        run: cargo run -q -- plans
+
   docs:
     name: documentation
     needs: quick
@@ -114,7 +162,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [quick, test, docs]
+    needs: [quick, test, plans, docs]
     runs-on: ubuntu-24.04
     steps:
       - name: fail if anything upstream failed
