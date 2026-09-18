@@ -287,6 +287,20 @@ reference                1.375s      1.240s    35.31 MiB      10.5%      1.00x
 
 The reference always runs first, whatever order the engine lists the implementations in, because the ratio column is against the first row and a ratio against whichever implementation happened to be registered first would change meaning when somebody reorders a registration file. A variant that will not run is a row saying so rather than an abandoned sweep, since the interesting case is exactly the one where a new implementation is wrong on one query.
 
+### What the optimizer was worth
+
+`rudb-bench attribute --engine <name> --suite <name>` runs one suite twice on one engine, once as it comes and once with every optimizer it has turned off, and prints one row per query with the two times and the ratio. It is the sibling of the sweep and the same idea one level up: the sweep moves a single decision inside the engine and holds the rest fixed, and this turns the whole rewrite pipeline off and holds the rest fixed. Milestone E1 asks for it as an attribution row rather than as a claim, and the difference between those two is the whole point of the command.
+
+A claim is "the optimizer makes rudb three times faster". An attribution is forty three rows, most of them near one and a handful that are not, with the query names attached. The second is the one that says where to work, and it is also the only one of the two that cannot be produced by running the suite until it flatters you. So the total prints with a sentence under it saying that it is a sum of the rows and not a claim about the engine, and the queries the optimizer made *slower* get a list of their own under the table, because that is the half nobody publishes and the half worth reading.
+
+Which passes were turned off is asked of the engine through `duckdb_optimizers()` and never written down here, and the names are printed under the table. A harness holding its own copy of the list would leave a pass on the day the engine added one, and would report the optimizer as worth slightly less than it is with nothing in the output saying so. Both DuckDB and rudb answer that table function and both take the names back through `SET disabled_optimizers`, which is why `--engine` is a flag: attributing DuckDB the same way is the only way to find out whether a number this prints about rudb is a number about rudb or a number about the apparatus.
+
+The command exits non-zero when a query answered differently with the passes off. That is the one result here that is a property of the engine rather than of the machine, and it is a bug rather than a timing, so the row says so instead of printing a ratio between two different answers. The gate that actually chases it down is the whole corpus run in `tamnd/rudb-compat`, and this only checks the handful of queries it happens to be timing, which is worth having anyway because a benchmark comparing a right answer against a wrong one is not slower or faster, it is meaningless.
+
+This is not a quick command and it is not wired into any gate. The unoptimized half runs the plan the binder emitted, which for a join is a cross product filtered afterwards, and nothing in this harness has a clock on it. On the smoke suite against DuckDB the five queries that are scans and aggregates are unaffected to within the noise, and q6, the join, is the entire result.
+
+REPLACEME
+
 ### The attribution ledger
 
 Section 2.8 of the engine specification asks for a series rather than a table. Each layer of the engine closes with a row, the row carries the before and the after on total time, CPU seconds, peak resident and bytes read on the same machine, and the release notes are written from it. The argument for it is that a release note claiming the hash table made joins faster and unable to point at a row is a release note that is guessing.
