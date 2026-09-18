@@ -551,12 +551,16 @@ pub(crate) enum Finished {
 /// `write` and never reaches its own exit, so a parent that waited first and read afterwards would
 /// hang on exactly the queries this exists to catch, and would report them as timeouts whatever
 /// they were really doing.
+///
+/// The child is started in a process group of its own, so that the limit can kill everything it
+/// went on to start rather than only the process this spawned. See [`stop`] for what that is worth.
 pub(crate) fn both_within(
     command: &mut Command,
     what: &str,
     limit: Option<Duration>,
 ) -> Result<Finished, BenchError> {
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    own_group(command);
     let mut child =
         command.spawn().map_err(|e| BenchError::new(format!("cannot run {what}: {e}")))?;
     let mut out = child.stdout.take().ok_or_else(|| BenchError::new("no stdout pipe"))?;
@@ -619,7 +623,7 @@ fn wait_within(
         if started.elapsed() >= limit {
             // Killed rather than asked politely. There is no portable way to ask, and a query that
             // ignored the request would leave the harness waiting again on the thing it gave up on.
-            let _ = child.kill();
+            stop(child);
             let _ = child.wait();
             return Ok(None);
         }
@@ -629,6 +633,67 @@ fn wait_within(
 
 /// How often a run that has a limit is asked whether it is done.
 const POLL: Duration = Duration::from_millis(20);
+
+/// Starts the command in a process group of its own, so that [`stop`] has a group to signal.
+///
+/// Unix only, because there is nothing to put a process into on Windows and the fallback there is
+/// the behaviour this replaced.
+#[cfg(unix)]
+fn own_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
+#[cfg(not(unix))]
+fn own_group(_command: &mut Command) {}
+
+/// Kills a child and everything it started, so the pipes it was holding actually close.
+///
+/// `Child::kill` reaches the process that was spawned and nothing below it, and that is not enough
+/// here. The harness starts its engines through a shell, and a shell that forks rather than execs
+/// leaves the real work running as a grandchild with both pipe ends still open. The parent then
+/// kills the shell, reads to the end of a pipe nobody closed, and waits for the query it had just
+/// given up on. `sh -c 'sleep 60'` came back after sixty seconds on a limit of three hundred
+/// milliseconds, which is the whole of what the limit was for.
+///
+/// That went unnoticed because it depends on the shell. macOS runs bash as `/bin/sh`, which execs a
+/// lone command and so is the child itself, and the test passed there for a year while Ubuntu, where
+/// `/bin/sh` is dash and dash forks, failed. Which shell is on the machine is not something the
+/// harness gets to assume, so the group is signalled rather than the process.
+///
+/// `kill` the program rather than the system call, because this crate has no dependencies and the
+/// alternative is an `unsafe` block declaring the symbol by hand, which `memory.rs` already argues
+/// against for `getrusage` on the same grounds. The child is killed afterwards as well, for the case
+/// where `kill` is not on the path.
+///
+/// The `--` is not decoration. Ubuntu's `kill` is the one from procps, which reads a leading `-` as
+/// the start of an option, so `kill -KILL -12345` exits zero having signalled nothing at all. That
+/// is the same green-and-did-nothing failure as the one above, one layer down, and it is why this
+/// landed twice. macOS takes `--` as well, so there is one spelling rather than two.
+///
+/// What it costs is that a group of its own no longer receives the interrupt a terminal sends to
+/// the harness, so a Ctrl-C during a long run leaves the engine running and somebody has to kill it
+/// by hand. That is one stray process against a whole suite lost to one hang.
+#[cfg(unix)]
+fn stop(child: &mut Child) {
+    // The group id is the child's own pid, because `own_group` asked for a new group rather than a
+    // named one.
+    let group = child.id();
+    let _ = Command::new("kill")
+        .arg("-KILL")
+        .arg("--")
+        .arg(format!("-{group}"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+}
+
+#[cfg(not(unix))]
+fn stop(child: &mut Child) {
+    let _ = child.kill();
+}
 
 #[cfg(test)]
 mod tests {
@@ -667,6 +732,26 @@ mod tests {
         let started = Instant::now();
         let got = both_within(&mut command, "a sleep", Some(Duration::from_millis(300)))
             .expect("giving up on a sleep is not a failure");
+        let waited = started.elapsed();
+        assert!(matches!(got, Finished::TimedOut), "{got:?}");
+        assert!(waited < Duration::from_secs(10), "waited {waited:?} on a limit of 300ms");
+    }
+
+    /// The same thing where the process holding the pipe is not the process that was spawned.
+    ///
+    /// The test above only asks this on a machine whose `/bin/sh` forks, and whether it does is not
+    /// something either the harness or this file gets to choose: bash execs a lone command and is
+    /// then the sleep itself, where killing the child is enough, and dash forks and is not. Two
+    /// commands make every shell fork, so the sleep is a grandchild whatever is installed, which is
+    /// also the shape an engine driven through a wrapper actually takes.
+    #[test]
+    fn a_command_whose_own_child_holds_the_pipe_is_stopped_too() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("sleep 60; true");
+        let started = Instant::now();
+        let got =
+            both_within(&mut command, "a sleep behind a shell", Some(Duration::from_millis(300)))
+                .expect("giving up on a sleep is not a failure");
         let waited = started.elapsed();
         assert!(matches!(got, Finished::TimedOut), "{got:?}");
         assert!(waited < Duration::from_secs(10), "waited {waited:?} on a limit of 300ms");
