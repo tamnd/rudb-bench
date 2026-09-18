@@ -325,7 +325,7 @@ this total is the sum of the rows and not a claim about the engine. The rows are
 
 That is the argument for the per query column in one table. Five of the six rows are between 1.00 and 1.39, which is to say the optimizer is worth nothing measurable on a scan or an aggregate, and the sixth is 3292x. A total would have reported the optimizer as worth 1188x on the smoke suite, which is a number about q6 wearing a suite's name, and a suite with one more scan in it would have reported a different one for no reason that has anything to do with the optimizer. The rows do not have that problem: q6 is 3292x and the rest are noise, on this suite and on any other.
 
-The same command on rudb, which is the engine this is for, was recorded back when rudb declined the join on the smoke suite, so it has five rows rather than six. It does not decline it any more: a query that does not come back is a limit and a row saying so, which is a measurement, and refusing the shape was hiding the one number the G series exists to produce. The five rows here agree both ways, which is the exit code, and the spread is 1.53x to 49.99x:
+The same command on rudb, which is the engine this is for, has five rows rather than six because the smoke suite has no rudb text for q6. Every join in rudb is still a nested loop, so the number would be about the loop rather than about the join, and the suite says so next to the query. The table says so too now, under the total, because the header says six and the total says five and a reader who spots that gap deserves the reason. The five rows agree both ways, which is the exit code, and the spread is 1.53x to 49.99x:
 
 ```
 $ rudb-bench attribute --engine rudb --suite smoke --hot 3
@@ -344,6 +344,38 @@ q5          count distinct          1.650s      2.522s  1.53x faster
     4.409s with optimizer on, over 5 queries
    11.480s without it
 ```
+
+Turning off `statistics` instead is the same table with a different layer in it. On `mba-m2`, against a debug build of rudb, three hot runs:
+
+```
+$ rudb-bench attribute --engine rudb --suite smoke --hot 3 --off statistics
+
+suite       smoke, 6 queries
+engine      rudb rudb 0.3.36
+ablation    statistics, 1 name turned off
+
+query       shape                     with     without  what it was worth
+q1          count                188.449ms   206.517ms  1.10x faster
+q2          filter and sum          4.282s      3.232s  1.32x slower
+q3          group by, low card     10.267s      8.244s  1.25x slower
+q4          group by and top k      8.754s      7.524s  1.16x slower
+q5          count distinct          8.942s      8.694s  1.03x slower
+
+   32.434s with statistics on, over 5 queries
+   27.901s without it
+q6 did not run on rudb: every join in rudb is a nested loop, so this is a hundred thousand rows against a hundred thousand rows and the number would be about the loop rather than about the join. spec/07-execution.md section 7.4, milestone E3
+this total is the sum of the rows and not a claim about the engine. The rows are the result
+
+4 queries statistics made slower, worst first
+    q3          2.023s slower
+    q4          1.231s slower
+    q2          1.050s slower
+    q5          247.816ms slower
+
+turned off: statistics
+```
+
+That is the format and not a finding. It is a debug build on a laptop, and an earlier run of the same command put q1, q2 and q3 on the other side of one, which is what a set of differences inside the noise looks like when it is printed anyway. The numbers G0 reports will be a release build on a settled machine at the sample count rule two asks for. What is worth taking from this one is the shape: the layer being measured is named in every line that used to say optimizer, the queries it cost time on get their own list, and the query the suite withholds from this engine says so under the total instead of leaving the header at six and the count at five.
 
 Forty four names against DuckDB's thirty three, and rudb has nine passes. That is not a discrepancy, it is what the setting is: a corpus file that disables a pass rudb has not written yet has to be accepted rather than rejected, so `duckdb_optimizers()` answers with the whole DuckDB list. The printed line is therefore the truthful answer to what was turned off and is not a count of the optimizer's parts. Which of the nine did the work is a different question with its own command, `rudb-compat sweep` in `tamnd/rudb-compat`, which runs the corpus with pass k on and the rest off so that a difference localizes to one pass. This says what the pipeline was worth and that says which pass it was.
 

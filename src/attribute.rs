@@ -176,6 +176,13 @@ pub struct Attributed {
     /// It is printed under the table, because an attribution against a layer whose contents are not
     /// stated is an attribution against nothing in particular.
     pub turned_off: Vec<String>,
+    /// Queries this engine has no text for, with the suite's reason, and empty for most engines.
+    ///
+    /// Not a failure and not a timeout. The suite withholds a query from an engine when the number
+    /// it would produce is about something other than the query, and the reason is written down
+    /// next to the text. It is printed because the row count under the table is otherwise smaller
+    /// than the suite's and nothing says why, and a reader who notices that is right to wonder.
+    pub not_run: Vec<(String, String)>,
     /// One row per query the two runs have in common, in suite order.
     pub rows: Vec<Attribution>,
     /// Queries that came back from one run and not the other, with which side had them.
@@ -279,22 +286,59 @@ pub fn attribute(
         })?;
     engine.unload();
 
-    Ok(join(suite, name, version, ablation, turned_off, &with, &without))
+    // From the run rather than from the suite, because which queries an engine has no text for is
+    // the run's answer and not something this module should work out a second time. Both runs are
+    // the same engine, so both skipped the same ones, and the first is enough.
+    let not_run = withheld(&name, queries, &with.missing);
+
+    let head = Head { suite, engine: name, version, ablation, turned_off, not_run };
+    Ok(join(head, &with, &without))
 }
 
 /// Line the two runs up by query name.
 ///
 /// By name and not by position, because a run that lost a query would otherwise shift every row
 /// after it and the table would compare one query's time against the next query's.
-fn join(
+/// The queries this engine had no text for, paired with the suite's reason for withholding them.
+///
+/// The reason comes out of the suite rather than being written again here, because it is already
+/// next to the query text and two copies of a sentence like that one start disagreeing.
+fn withheld(engine: &str, queries: &[Query], missing: &[String]) -> Vec<(String, String)> {
+    missing
+        .iter()
+        .map(|name| {
+            let why = queries
+                .iter()
+                .find(|query| query.name == name)
+                .and_then(|query| {
+                    query
+                        .absent()
+                        .into_iter()
+                        .find(|(who, _)| *who == engine)
+                        .map(|(_, why)| why.to_owned())
+                })
+                .unwrap_or_else(|| "this engine has no text for it".to_owned());
+            (name.clone(), why)
+        })
+        .collect()
+}
+
+/// Everything about the run that is not a timing.
+///
+/// Gathered into one value so that [`join`] takes a run and two results rather than eight loose
+/// arguments, four of which are strings that would sit next to each other unnoticed if two of them
+/// ever swapped places.
+struct Head {
     suite: &'static Suite,
     engine: String,
     version: String,
     ablation: Ablation,
     turned_off: Vec<String>,
-    with: &SuiteResult,
-    without: &SuiteResult,
-) -> Attributed {
+    not_run: Vec<(String, String)>,
+}
+
+fn join(head: Head, with: &SuiteResult, without: &SuiteResult) -> Attributed {
+    let Head { suite, engine, version, ablation, turned_off, not_run } = head;
     let mut rows = Vec::new();
     let mut lost = Vec::new();
     for on in &with.queries {
@@ -320,7 +364,7 @@ fn join(
             ));
         }
     }
-    Attributed { suite, engine, version, ablation, turned_off, rows, lost }
+    Attributed { suite, engine, version, ablation, turned_off, not_run, rows, lost }
 }
 
 /// The attribution as a table, one row per query.
@@ -372,6 +416,12 @@ pub fn table(attributed: &Attributed) -> String {
         attributed.rows.len()
     ));
     out.push_str(&format!("{:>10} without it\n", show(without)));
+    // Said here rather than left to arithmetic, because the header says how many queries the suite
+    // has and the line above says how many ran, and a reader who spots the gap deserves the reason
+    // rather than a guess.
+    for (name, why) in &attributed.not_run {
+        out.push_str(&format!("{name} did not run on {}: {why}\n", attributed.engine));
+    }
     // A sum of attributions and never a headline. It is printed because somebody will want it and
     // leaving it out would only mean it gets computed by hand from the rows above, which is the
     // same number with nothing underneath it saying what it is.
@@ -418,7 +468,7 @@ pub fn table(attributed: &Attributed) -> String {
 mod tests {
     use std::time::Duration;
 
-    use super::{Ablation, Attributed, Attribution, table};
+    use super::{Ablation, Attributed, Attribution, table, withheld};
     use crate::suite::find;
 
     fn ms(n: u64) -> Duration {
@@ -446,6 +496,7 @@ mod tests {
             version: "0.3.31".to_owned(),
             ablation,
             turned_off,
+            not_run: Vec::new(),
             rows,
             lost: Vec::new(),
         }
@@ -552,6 +603,32 @@ mod tests {
             vec![row("q1", 100, 400)],
         );
         assert!(table(&one).contains("ablation    statistics, 1 name turned off"), "{one:?}");
+    }
+
+    /// The header says six and the total says five, and without this line the gap between them is
+    /// left for the reader to invent an explanation for.
+    #[test]
+    fn a_query_the_suite_withholds_from_this_engine_is_named_with_its_reason() {
+        let mut one = attributed(vec![row("q1", 100, 400)]);
+        one.not_run.push(("q6".to_owned(), "every join in rudb is a nested loop".to_owned()));
+        let printed = table(&one);
+        assert!(printed.contains("q6 did not run on rudb: every join"), "{printed}");
+    }
+
+    /// Against the real smoke suite, because the first version of this looked the reason up under
+    /// the query's name instead of the engine's and printed a fallback sentence that was true and
+    /// said nothing. A fixture would have agreed with the bug.
+    #[test]
+    fn the_reason_a_query_was_withheld_comes_from_the_suite_and_not_from_a_fallback() {
+        let smoke = crate::suite::queries("smoke").expect("the smoke suite has its queries");
+        let found = withheld("rudb", smoke, &["q6".to_owned()]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, "q6");
+        assert!(found[0].1.contains("nested loop"), "{:?}", found[0]);
+
+        // duckdb has text for q6, so there is nothing to look up and the fallback is what is left.
+        let other = withheld("duckdb", smoke, &["q6".to_owned()]);
+        assert_eq!(other[0].1, "this engine has no text for it");
     }
 
     #[test]
