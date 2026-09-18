@@ -33,6 +33,14 @@
 //! gives. Which names those were is printed under the table, because an attribution against an
 //! optimizer whose contents are not stated is an attribution against nothing in particular.
 //!
+//! The count in that line is how many names the engine gave and not how many passes it has. rudb
+//! answers with 44 and runs 9, because the setting is DuckDB's and a corpus file that disables a
+//! pass rudb has not written yet has to be accepted rather than rejected. So the printed list is
+//! the truthful answer to "what was turned off" and is not a count of the optimizer's parts. Which
+//! of the nine did the work is a different question, and it has its own command: `rudb-compat
+//! sweep` in `tamnd/rudb-compat` runs the corpus with pass k on and the rest off, so a difference
+//! localizes to one pass. This says what the pipeline was worth; that says which pass it was.
+//!
 //! It is also not the same thing as no planning at all. Binding, and whatever the engine does
 //! before the pass list runs, still happen. What this measures is the passes, which is what the
 //! setting turns off and what the milestone is about.
@@ -245,7 +253,10 @@ pub fn table(attributed: &Attributed) -> String {
     out.push_str(&format!("engine      {} {}\n", attributed.engine, attributed.version));
     out.push_str(&format!("optimizers  {} turned off\n\n", attributed.optimizers.len()));
 
-    out.push_str("query       shape                 with        without     what it was worth\n");
+    out.push_str(&format!(
+        "{:<10}  {:<18}  {:>10}  {:>10}  {}\n",
+        "query", "shape", "with", "without", "what it was worth"
+    ));
     for row in &attributed.rows {
         let worth = match row.ratio() {
             None if !row.agreed => "different answers".to_owned(),
