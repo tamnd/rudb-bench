@@ -38,6 +38,13 @@ pub struct Document {
     pub sql: String,
     /// `ok`, or whatever the engine called the way it ended.
     pub state: String,
+    /// How much the planner knew, one decision per operator.
+    ///
+    /// All zero for a record written by an engine that does not report one, which is every engine
+    /// here except rudb, and all zero is also what rudb reports until the statistics layer has
+    /// anything in it. Those two are told apart by the total: a query that made no decisions at all
+    /// is a query with no operators.
+    pub estimates: Classes,
     /// Parse, bind, optimize, build and execute, together.
     ///
     /// It was only the build and the execute until rudb 0.3.36, because nothing above the executor
@@ -220,6 +227,7 @@ impl Document {
                 .and_then(|o| o.at("state"))
                 .and_then(Json::text)
                 .unwrap_or_default(),
+            estimates: json.at("estimates").map(Classes::read).unwrap_or_default(),
             total: nanos(timing, "total_ns"),
             execute: nanos(timing, "execute_ns"),
             planning: nanos(timing, "total_ns").saturating_sub(nanos(timing, "execute_ns")),
@@ -502,6 +510,83 @@ impl Accounting {
             drift * 100.0,
             TOLERANCE * 100.0
         ))
+    }
+}
+
+/// How much the planner knew, one decision per operator.
+///
+/// The class histogram of `spec/stats/09-measurement.md` section 9.5. Summed over a suite it is the
+/// fraction of the planner's cardinality decisions that rested on a counted number, a bounded one, a
+/// guess, or nothing at all, and that fraction is the direct measurement of whether the statistics
+/// layer is doing its job. It is more diagnostic than q-error for the first several milestones,
+/// because early on the estimates are bad for the boring reason that there are none.
+///
+/// Four counts rather than four fractions, because a suite's histogram is the sum of its queries'
+/// and fractions do not add.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Classes {
+    /// Decisions made on a counted number.
+    pub exact: u64,
+    /// Decisions made on a number with a proven bound.
+    pub certified: u64,
+    /// Decisions made on a guess.
+    pub estimated: u64,
+    /// Decisions made with no number at all.
+    pub unknown: u64,
+}
+
+impl Classes {
+    /// Every decision counted.
+    #[must_use]
+    pub const fn total(&self) -> u64 {
+        self.exact + self.certified + self.estimated + self.unknown
+    }
+
+    /// Adds another query's decisions to these.
+    pub const fn add(&mut self, other: &Self) {
+        self.exact += other.exact;
+        self.certified += other.certified;
+        self.estimated += other.estimated;
+        self.unknown += other.unknown;
+    }
+
+    /// The four shares, in the order the sentence reads, as whole percentages.
+    ///
+    /// Rounded rather than exact, and the four can add to ninety nine or a hundred and one because
+    /// of it. That is the right trade for a line somebody reads at a glance, and the counts are
+    /// beside it for anybody who wants to add them up.
+    #[must_use]
+    pub fn shares(&self) -> [f64; 4] {
+        let total = self.total();
+        if total == 0 {
+            return [0.0; 4];
+        }
+        let share = |n: u64| (n as f64) * 100.0 / (total as f64);
+        [share(self.exact), share(self.certified), share(self.estimated), share(self.unknown)]
+    }
+
+    /// The histogram as the one line a report carries.
+    #[must_use]
+    pub fn sentence(&self) -> String {
+        let total = self.total();
+        if total == 0 {
+            return "the engine reported no cardinality decisions".to_owned();
+        }
+        let [exact, certified, estimated, unknown] = self.shares();
+        format!(
+            "{total} decisions, {exact:.0}% exact, {certified:.0}% certified, {estimated:.0}% \
+             estimated, {unknown:.0}% unknown"
+        )
+    }
+
+    /// One histogram, reading a missing key as a zero.
+    fn read(json: &Json) -> Self {
+        Self {
+            exact: count(json, "exact"),
+            certified: count(json, "certified"),
+            estimated: count(json, "estimated"),
+            unknown: count(json, "unknown"),
+        }
     }
 }
 
@@ -797,7 +882,7 @@ impl Reader<'_> {
 mod tests {
     use std::time::Duration;
 
-    use super::{Accounting, Document, Json, Spend, TOLERANCE, folded};
+    use super::{Accounting, Classes, Document, Json, Spend, TOLERANCE, folded};
 
     /// A document the shape rudb writes, small enough to read.
     fn one(cpu_ns: u64, operators: &str) -> String {
@@ -850,6 +935,55 @@ mod tests {
         // nanoseconds between the two is the loop that made the calls.
         assert_eq!(document.accounted_cpu(), Duration::from_nanos(1200));
         assert_eq!(document.internal(None).driver, Duration::from_nanos(200));
+        // No histogram in the document, which reads as no decisions rather than as a refusal to
+        // parse. Every engine but rudb writes no breakdown at all, and rudb wrote none of these
+        // until the statistics layer existed.
+        assert_eq!(document.estimates, Classes::default());
+    }
+
+    #[test]
+    fn a_document_that_says_what_the_planner_knew_is_read_for_it() {
+        let text = one(1000, &operator(0, "Get", 600, true)).replace(
+            "\"strategies\":[]",
+            "\"estimates\":{\"exact\":1,\"certified\":2,\"estimated\":3,\"unknown\":4},\
+             \"strategies\":[]",
+        );
+        let document = Document::parse(&text).expect("this is the shape rudb writes");
+        assert_eq!(
+            document.estimates,
+            Classes { exact: 1, certified: 2, estimated: 3, unknown: 4 }
+        );
+        assert_eq!(document.estimates.total(), 10);
+        assert_eq!(document.estimates.shares(), [10.0, 20.0, 30.0, 40.0]);
+    }
+
+    /// The line G0 exists to put on the page, and the two things it has to tell apart.
+    #[test]
+    fn a_histogram_of_nothing_and_a_histogram_of_no_decisions_read_differently() {
+        // Where G0 starts. The engine is asked, the engine answers, and every answer is that it
+        // does not know. That is a measurement and it has to read as one.
+        let nothing_known = Classes { exact: 0, certified: 0, estimated: 0, unknown: 22 };
+        let said = nothing_known.sentence();
+        assert_eq!(said, "22 decisions, 0% exact, 0% certified, 0% estimated, 100% unknown");
+
+        // No operators to decide anything about, which is not the same sentence and must not read
+        // as a hundred percent of anything.
+        assert_eq!(Classes::default().sentence(), "the engine reported no cardinality decisions");
+        assert_eq!(Classes::default().shares(), [0.0; 4]);
+    }
+
+    /// A suite's histogram is the sum of its queries', which is why these are counts.
+    #[test]
+    fn two_queries_of_decisions_add_up() {
+        let mut total = Classes::default();
+        total.add(&Classes { exact: 1, certified: 0, estimated: 2, unknown: 1 });
+        total.add(&Classes { exact: 3, certified: 4, estimated: 0, unknown: 9 });
+        assert_eq!(total, Classes { exact: 4, certified: 4, estimated: 2, unknown: 10 });
+        assert_eq!(total.total(), 20);
+        assert_eq!(
+            total.sentence(),
+            "20 decisions, 20% exact, 20% certified, 10% estimated, 50% unknown"
+        );
     }
 
     #[test]

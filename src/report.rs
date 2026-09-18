@@ -19,7 +19,7 @@ use crate::data::{Dataset, Sample};
 use crate::engine::{BenchError, Engine, Loaded, Outcome};
 use crate::measure::{Distribution, Runs, show};
 use crate::memory::{Cost, Peak};
-use crate::metrics::{Internal, Spend};
+use crate::metrics::{Classes, Internal, Spend};
 use crate::suite::{Query, Suite};
 
 /// How wide a spread has to be before a run is called disturbed rather than measured.
@@ -114,6 +114,11 @@ pub struct QueryResult {
     /// fixed handful of numbers a saved record writes on one line, and this is a list whose length
     /// is however many kinds of operator the plan happened to use.
     pub spend: Vec<Spend>,
+    /// How much the planner knew when it planned this query, one decision per operator.
+    ///
+    /// `None` for an engine with no breakdown to read, which is every engine here except rudb. All
+    /// zero is a different answer and means the engine reported a histogram with nothing in it.
+    pub estimates: Option<Classes>,
     /// Whether this row is a measurement, and when it is not, what happened instead.
     pub outcome: Outcome,
 }
@@ -144,6 +149,9 @@ impl QueryResult {
             answer: String::new(),
             planning: Vec::new(),
             spend: Vec::new(),
+            // Nothing. The engine was stopped before it wrote a breakdown, so there is no histogram
+            // to read, which is a different thing from a histogram of nothing.
+            estimates: None,
             internal: None,
             outcome: Outcome::TimedOut { limit },
         }
@@ -278,6 +286,26 @@ pub struct SuiteResult {
 }
 
 impl SuiteResult {
+    /// The class histogram over every query in this suite, or nothing when the engine reports none.
+    ///
+    /// Summed rather than averaged, because a suite's histogram is the sum of its queries' and a
+    /// mean of fractions would weight a two operator query the same as a twenty operator one. A
+    /// query that timed out contributes nothing, because the engine was stopped before it wrote a
+    /// breakdown, so the total is over the queries that finished and the report says how many that
+    /// was rather than implying it was all of them.
+    #[must_use]
+    pub fn estimates(&self) -> Option<Classes> {
+        let mut total = Classes::default();
+        let mut any = false;
+        for query in &self.queries {
+            if let Some(classes) = query.estimates {
+                total.add(&classes);
+                any = true;
+            }
+        }
+        any.then_some(total)
+    }
+
     /// How busy the machine was with work that was not this run's.
     ///
     /// The reading from before the suite started, and not the larger of the two. The one taken
@@ -875,6 +903,7 @@ pub fn run(
             answer,
             planning,
             spend: breakdown.as_ref().map(|(document, _)| document.by_kind()).unwrap_or_default(),
+            estimates: breakdown.as_ref().map(|(document, _)| document.estimates),
             internal: breakdown.map(|(document, cpu)| document.internal(cpu)),
             outcome: Outcome::Completed,
         });
@@ -979,6 +1008,12 @@ pub fn table(result: &SuiteResult) -> String {
     line(&mut out, &format!("on disk  is {}", result.loaded.on_disk_is));
     if let Some(corpus) = &result.corpus {
         line(&mut out, &format!("corpus   {corpus}"));
+    }
+    // The class histogram, for the engine that reports one. It reads a hundred percent unknown
+    // until the statistics layer has anything in it, and that is the point of printing it now: the
+    // zero has to be on the page before the numbers that are supposed to move away from it.
+    if let Some(classes) = result.estimates() {
+        line(&mut out, &format!("planner  {}", classes.sentence()));
     }
     if let Some(sample) = result.sample {
         line(&mut out, &format!("data     {}", sample.sentence()));
@@ -1809,6 +1844,7 @@ mod tests {
     use crate::engine::{Loaded, Outcome};
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
+    use crate::metrics::Classes;
     use crate::suite::find;
 
     fn cost(peak: Peak, read: Option<u64>) -> Cost {
@@ -1840,6 +1876,7 @@ mod tests {
                 internal: None,
                 planning: Vec::new(),
                 spend: Vec::new(),
+                estimates: None,
             }],
             sample: None,
             rows: None,
@@ -1884,6 +1921,47 @@ mod tests {
         second.answer = answer;
         result.queries[1] = second;
         result
+    }
+
+    /// The G0 reading. Every decision is unknown, the header says so, and the number it says is
+    /// the sum over the queries rather than one of them.
+    #[test]
+    fn the_header_says_what_the_planner_knew_over_the_whole_suite() {
+        let mut result = two("rudb", 10);
+        result.queries[0].estimates =
+            Some(Classes { exact: 0, certified: 0, estimated: 0, unknown: 4 });
+        result.queries[1].estimates =
+            Some(Classes { exact: 0, certified: 0, estimated: 0, unknown: 6 });
+        assert_eq!(
+            result.estimates(),
+            Some(Classes { exact: 0, certified: 0, estimated: 0, unknown: 10 })
+        );
+        let printed = table(&result);
+        assert!(printed.contains("planner  10 decisions"), "{printed}");
+        assert!(printed.contains("100% unknown"), "{printed}");
+    }
+
+    /// Four engines here are black boxes and have no histogram to report. A line of zeroes for them
+    /// would read as a measurement of a planner nobody looked inside.
+    #[test]
+    fn an_engine_that_reports_no_histogram_gets_no_line_about_one() {
+        let result = two("duckdb", 10);
+        assert_eq!(result.estimates(), None);
+        assert!(!table(&result).contains("planner"), "{}", table(&result));
+    }
+
+    /// A query that was stopped never wrote a breakdown, so it has no decisions to contribute, and
+    /// the suite total is over what finished rather than over what was asked for.
+    #[test]
+    fn a_query_that_ran_out_of_time_contributes_no_decisions() {
+        let mut result = timed_out("rudb", 10, Duration::from_secs(30));
+        result.queries[0].estimates =
+            Some(Classes { exact: 1, certified: 0, estimated: 0, unknown: 3 });
+        assert_eq!(result.queries[1].estimates, None);
+        assert_eq!(
+            result.estimates(),
+            Some(Classes { exact: 1, certified: 0, estimated: 0, unknown: 3 })
+        );
     }
 
     /// A query that ran out of time is a row saying so, not a number that reads as a measurement.

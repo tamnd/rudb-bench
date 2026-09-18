@@ -751,6 +751,7 @@ mod tests {
                 internal: None,
                 planning: Vec::new(),
                 spend: Vec::new(),
+                estimates: None,
             }],
             sample: None,
             rows: None,
