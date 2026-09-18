@@ -30,13 +30,13 @@ query     q6              26119      26516      28384
 suite     smoke
 machine   gamingpc-wsl
 engine    rudb
-version   rudb 0.2.16
-recorded  2026-09-11
-query     q1               1803       1833       1861
-query     q2              88695      89992      90820
-query     q3             394999     399532     402107
-query     q4             498408     505141     507413
-query     q5             411543     413342     417391
+version   rudb 0.3.35
+recorded  2026-09-18
+query     q1               4738       4912       5188
+query     q2              11512      11715      11850
+query     q3              22845      23167      23460
+query     q4              28610      28966      29447
+query     q5              22168      22584      22828
 
 [record]
 suite     smoke
