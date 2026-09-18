@@ -22,7 +22,7 @@
 [plans]
 suite     smoke
 engine    rudb
-version   rudb 0.3.39
+version   rudb 0.3.40
 recorded  2026-09-18
 planned   5 of 5
 
