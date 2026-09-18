@@ -607,6 +607,7 @@ fn detail(result: &SuiteResult, source_bytes: u64) -> String {
         ));
     }
     out.push_str(&inside(result));
+    out.push_str(&planner(result));
     out.push_str(&spend(result));
     out
 }
@@ -683,6 +684,61 @@ fn inside(result: &SuiteResult) -> String {
          operators ran the reference implementation of their seam, which is the slow path kept \
          for differential testing.\n\n",
     );
+    out
+}
+
+/// What the planner knew when it planned each query, and what it knew over the whole suite.
+///
+/// The class histogram of `spec/stats/09-measurement.md` section 9.5. Empty for the engines driven
+/// as black boxes, which do not report one.
+///
+/// It is published now, while it reads a hundred percent unknown, because that reading is the
+/// point. Everything the G series does to the statistics layer is supposed to move decisions out of
+/// the last column and into the first three, and a measurement that arrives after the work has
+/// started cannot say whether the work moved anything.
+fn planner(result: &SuiteResult) -> String {
+    let Some(total) = result.estimates() else {
+        return String::new();
+    };
+    let mut rows: Vec<Vec<String>> = result
+        .queries
+        .iter()
+        .filter_map(|query| {
+            let classes = query.estimates?;
+            Some(vec![
+                query.name.clone(),
+                classes.total().to_string(),
+                classes.exact.to_string(),
+                classes.certified.to_string(),
+                classes.estimated.to_string(),
+                classes.unknown.to_string(),
+            ])
+        })
+        .collect();
+    rows.push(vec![
+        "whole suite".to_owned(),
+        total.total().to_string(),
+        total.exact.to_string(),
+        total.certified.to_string(),
+        total.estimated.to_string(),
+        total.unknown.to_string(),
+    ]);
+    let [exact, certified, estimated, unknown] = total.shares();
+    let mut out = String::new();
+    heading(&mut out, 4, "What the planner knew");
+    out.push_str(&table(
+        &["query", "decisions", "exact", "certified", "estimated", "unknown"],
+        &rows,
+    ));
+    out.push_str(&format!(
+        "One row per query and one decision per operator, counted by what the planner had behind \
+         the cardinality it used. Over the whole suite that is {exact:.0}% exact, {certified:.0}% \
+         certified, {estimated:.0}% estimated and {unknown:.0}% unknown. `exact` is a counted \
+         number, `certified` is a number with a proven bound, `estimated` is a guess, and \
+         `unknown` is no number at all, which is an answer an operator has to handle rather than a \
+         null to paper over. Counts rather than fractions in the table because a suite's histogram \
+         is the sum of its queries' and fractions do not add.\n\n"
+    ));
     out
 }
 
@@ -984,6 +1040,7 @@ mod tests {
     use crate::machine::Fact;
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
+    use crate::metrics::Classes;
     use crate::report::{Abstention, Comparison, QueryResult, SuiteResult};
     use crate::suite::find;
 
@@ -1017,6 +1074,7 @@ mod tests {
             internal: None,
             planning: Vec::new(),
             spend: Vec::new(),
+            estimates: None,
         }
     }
 
@@ -1113,6 +1171,25 @@ mod tests {
         ] {
             assert!(text.contains(wanted), "{wanted} is not in the report:\n{text}");
         }
+    }
+
+    /// G0 publishes the class histogram, and the published file is where it has to appear.
+    #[test]
+    fn what_the_planner_knew_is_published_per_query_and_over_the_suite() {
+        let mut compared = compared();
+        for (query, unknown) in compared.results[1].queries.iter_mut().zip([4, 6]) {
+            query.estimates = Some(Classes { exact: 0, certified: 0, estimated: 0, unknown });
+        }
+        let text = render(&compared, &facts(), "testbox");
+        assert!(text.contains("What the planner knew"), "{text}");
+        assert!(text.contains("| query | decisions | exact | certified | estimated | unknown |"));
+        assert!(text.contains("| whole suite | 10 | 0 | 0 | 0 | 10 |"), "{text}");
+        assert!(text.contains("100% unknown"), "{text}");
+
+        // And the engine that reports nothing gets no table, rather than a table of zeroes that
+        // reads as a planner somebody measured.
+        assert_eq!(compared.results[0].estimates(), None);
+        assert_eq!(text.matches("What the planner knew").count(), 1, "{text}");
     }
 
     /// The two clocks are both in the file, and the ratio is taken against the engine's own.

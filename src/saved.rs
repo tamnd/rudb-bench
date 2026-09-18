@@ -27,7 +27,7 @@ use crate::data::Sample;
 use crate::engine::{Loaded, Outcome};
 use crate::measure::{Convention, Distribution, Runs};
 use crate::memory::{Cost, Peak};
-use crate::metrics::{Accounting, Internal, Spend};
+use crate::metrics::{Accounting, Classes, Internal, Spend};
 use crate::report::{Abstention, Comparison, QueryResult, SuiteResult};
 use crate::suite::find;
 
@@ -81,6 +81,11 @@ const PREAMBLE: &str = "\
 # the rows handed in, the rows handed on, how many operators that was, and how many of them were
 # reference implementations. `inside` asks whether the breakdown adds up and this asks what to go
 # and make faster, which is why both are here and neither replaces the other.
+#
+# `planner` is the class histogram: how many of that query's cardinality decisions rested on a
+# counted number, a number with a proven bound, a guess, and nothing at all, in that order. Four
+# counts rather than four fractions, because a suite's histogram is the sum of its queries' and
+# fractions do not add.
 ";
 
 /// Add this result to the file, replacing whatever that engine had there before.
@@ -544,6 +549,13 @@ fn write_one(result: &SuiteResult, machine: &str, source_bytes: u64) -> String {
         for s in &q.spend {
             let _ = writeln!(out, "  spend   {}", spent(s));
         }
+        if let Some(c) = q.estimates {
+            let _ = writeln!(
+                out,
+                "  planner {} {} {} {}",
+                c.exact, c.certified, c.estimated, c.unknown
+            );
+        }
         // Only written when the limit fired. A block saved before this line existed reads back as
         // a query that finished, which is what every query in it did.
         if let Outcome::TimedOut { limit } = q.outcome {
@@ -626,6 +638,23 @@ fn read_one(engine: &str, block: &str) -> Result<(SuiteResult, u64), String> {
     ))
 }
 
+/// One class histogram, from the four counts on a `planner` line.
+fn classes(text: &str) -> Result<Classes, String> {
+    let fields: Vec<&str> = text.split_whitespace().collect();
+    let [exact, certified, estimated, unknown] = fields.as_slice() else {
+        return Err(format!("a planner line needs four counts and this has `{text}`"));
+    };
+    let number = |what: &str, field: &str| {
+        field.parse::<u64>().map_err(|_| format!("{field} is not a count of {what} decisions"))
+    };
+    Ok(Classes {
+        exact: number("exact", exact)?,
+        certified: number("certified", certified)?,
+        estimated: number("estimated", estimated)?,
+        unknown: number("unknown", unknown)?,
+    })
+}
+
 /// One query, from the piece of a block that starts at its name.
 fn one_query(engine: &str, piece: &str) -> Result<QueryResult, String> {
     let mut lines = piece.lines();
@@ -697,6 +726,10 @@ fn one_query(engine: &str, piece: &str) -> Result<QueryResult, String> {
         // recorded from a run rather than from a record.
         planning: Vec::new(),
         spend: values(&body, "spend").map(unspend).collect::<Result<Vec<_>, _>>()?,
+        estimates: match value(&body, "planner") {
+            Some(text) => Some(classes(text)?),
+            None => None,
+        },
     })
 }
 
@@ -708,7 +741,7 @@ mod tests {
     use crate::engine::{Loaded, Outcome};
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
-    use crate::metrics::{Accounting, Internal, Spend};
+    use crate::metrics::{Accounting, Classes, Internal, Spend};
     use crate::report::{QueryResult, SuiteResult};
     use crate::suite::find;
 
@@ -721,6 +754,7 @@ mod tests {
             name: name.to_owned(),
             shape: "group by, low card".to_owned(),
             outcome: Outcome::Completed,
+            estimates: Some(Classes { exact: 0, certified: 0, estimated: 0, unknown: 7 }),
             // A record does not carry these, so a round trip through one comes back empty and the
             // fixture starts there. Putting a value here would make the round trip test assert that
             // a field survives a format that has no room for it.
@@ -834,6 +868,35 @@ mod tests {
         let (after, bytes) = read_one("duckdb", &text).unwrap();
         assert_eq!(before, after);
         assert_eq!(bytes, 15_848_298);
+    }
+
+    /// A record written before the histogram existed is most of the history the board is built
+    /// from, and reading it as a query with no decisions would be reading a measurement into a file
+    /// that never took one.
+    #[test]
+    fn a_record_with_no_planner_line_comes_back_as_no_histogram_rather_than_zeroes() {
+        let mut before = result();
+        for query in &mut before.queries {
+            query.estimates = None;
+        }
+        let text = write_one(&before, "here", 1);
+        assert!(!text.contains("planner"), "{text}");
+        let (after, _) = read_one("duckdb", &text).unwrap();
+        assert_eq!(after.queries[0].estimates, None);
+        assert_eq!(after, before);
+    }
+
+    /// Four counts, and a line that is not four counts is a file to refuse rather than a row to
+    /// guess at.
+    #[test]
+    fn a_planner_line_that_is_not_four_counts_is_refused() {
+        let text = write_one(&result(), "here", 1).replace("planner 0 0 0 7", "planner 0 0 7");
+        let e = read_one("duckdb", &text).expect_err("three counts is not a histogram");
+        assert!(e.contains("four counts"), "{e}");
+
+        let text = write_one(&result(), "here", 1).replace("planner 0 0 0 7", "planner 0 0 0 lots");
+        let e = read_one("duckdb", &text).expect_err("lots is not a count");
+        assert!(e.contains("not a count of unknown decisions"), "{e}");
     }
 
     #[test]
