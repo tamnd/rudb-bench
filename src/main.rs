@@ -24,7 +24,8 @@ use std::process::ExitCode;
 
 use rudb_bench::data::Rows;
 use rudb_bench::engine::{
-    BenchError, ClickhouseLocal, ClickhouseServer, Datafusion, Duckdb, Engine, Polars, Rudb,
+    Ability, BenchError, ClickhouseLocal, ClickhouseServer, Datafusion, Duckdb, Engine, Polars,
+    Rudb,
 };
 use rudb_bench::kernels;
 use rudb_bench::ledger;
@@ -63,6 +64,7 @@ fn main() -> ExitCode {
         Some("kernels") => kernels(&args[1..]),
         Some("sweep") => sweep(&args[1..]),
         Some("attribute") => attribute(&args[1..]),
+        Some("plans") => plans(&args[1..]),
         Some("seams") => seams(),
         Some("run") => match plan(&args[1..]) {
             Ok(plan) => run(&plan),
@@ -1009,6 +1011,164 @@ fn attribute(args: &[String]) -> ExitCode {
     }
 }
 
+/// Check every committed plan baseline, or record one.
+///
+/// The one subcommand here that measures nothing. It asks rudb to `EXPLAIN` each query in a suite
+/// against the zero row tables in `fixtures/`, settles the machine out of what came back, and
+/// compares it to `baselines/plans-<suite>.txt`. Milestone E1 asks for it so that a plan change is a
+/// reviewed diff rather than something noticed three weeks later in a performance run, and
+/// [`rudb_bench::plans`] makes the argument at length.
+///
+/// No `--suite` means every suite that has fixtures committed for it, which is what CI runs and
+/// what makes adding a suite a matter of committing its empty tables rather than of editing a
+/// workflow. `--record` writes the file instead of checking it, and takes one suite at a time,
+/// because recording everything at once is how a plan change in the suite nobody was looking at
+/// gets committed along with the one somebody meant.
+///
+/// It exits non-zero on any change at all, including a query that started binding. The reasoning is
+/// in [`rudb_bench::plans::Change::fails`]: a category of plan change that only printed a warning
+/// would be the category people stop reading.
+fn plans(args: &[String]) -> ExitCode {
+    let mut wanted: Option<String> = None;
+    let mut record = false;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--record" => record = true,
+            "--suite" => match rest.next() {
+                Some(name) => wanted = Some(name.clone()),
+                None => {
+                    eprintln!("rudb-bench: --suite wants a suite name after it");
+                    return ExitCode::FAILURE;
+                }
+            },
+            other => {
+                eprintln!("rudb-bench: unknown argument {other}");
+                eprintln!("rudb-bench: plans [--suite s] [--record]");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let root = rudb_bench::plans::root();
+    let chosen: Vec<&'static Suite> = match wanted.as_deref() {
+        Some(name) => match rudb_bench::suite::find(name) {
+            Some(suite) => vec![suite],
+            None => {
+                eprintln!("rudb-bench: no suite called {name}");
+                eprintln!("rudb-bench: try `rudb-bench suites`");
+                return ExitCode::FAILURE;
+            }
+        },
+        // Every suite whose empty tables are committed, which today is two of the five. The other
+        // three have no fixtures because nobody has written down a schema for them that is the
+        // schema of the real file, and a baseline captured against a guessed schema would be worse
+        // than no baseline: it would pass, and it would be a plan of a query over a table that does
+        // not exist anywhere.
+        None => SUITES
+            .iter()
+            .filter(|suite| rudb_bench::plans::fixtures(&root, suite.name).is_dir())
+            .collect(),
+    };
+    if chosen.is_empty() {
+        eprintln!("rudb-bench: no suite here has fixtures committed, so there is nothing to check");
+        eprintln!("rudb-bench: see fixtures/README.md for what one is and how it was made");
+        return ExitCode::FAILURE;
+    }
+    if record && chosen.len() > 1 {
+        eprintln!("rudb-bench: --record takes one suite at a time, so say which with --suite");
+        return ExitCode::FAILURE;
+    }
+
+    let scratch = match scratch() {
+        Ok(at) => at,
+        Err(e) => {
+            eprintln!("rudb-bench: cannot make the scratch directory: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut worst = ExitCode::SUCCESS;
+    for suite in chosen {
+        // A fresh engine per suite, because the view declarations a capture leaves behind are the
+        // previous suite's tables and a plan over those is a plan of a different query.
+        let mut engine = Rudb::discover(&scratch, suite);
+        // Asked about the smoke suite and not about this one, which is deliberate. rudb declines
+        // TPC-H because every join in it is a nested loop, and that is a statement about execution:
+        // planning executes nothing, and that refusal is exactly why nobody has ever found out
+        // which of the twenty two queries rudb can bind. Smoke is the suite whose only reason to be
+        // declined is that rudb is not built, which is the one refusal that does apply here.
+        if let Ability::No(why) = engine.can_run(built()) {
+            eprintln!("rudb-bench: {why}");
+            let _ = std::fs::remove_dir_all(&scratch);
+            return ExitCode::FAILURE;
+        }
+        match one_suite(&root, &mut engine, suite, record) {
+            Ok(false) => worst = ExitCode::FAILURE,
+            Ok(true) => {}
+            Err(e) => {
+                eprintln!("rudb-bench: {e}");
+                worst = ExitCode::FAILURE;
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+    worst
+}
+
+/// The smoke suite, which is the one rudb declines only when it is not built.
+fn built() -> &'static Suite {
+    rudb_bench::suite::find("smoke").expect("the smoke suite is compiled in")
+}
+
+/// Capture one suite's plans, and either write them down or say what moved.
+///
+/// `Ok(true)` when there was nothing to say. Separate from [`plans`] so that a suite failing is one
+/// suite failing: a check over two suites should report both rather than stop at the first, because
+/// the second one's diff is the thing somebody is about to need.
+fn one_suite(
+    root: &std::path::Path,
+    engine: &mut dyn Engine,
+    suite: &'static Suite,
+    record: bool,
+) -> Result<bool, String> {
+    let Some(queries) = queries(suite.name) else {
+        return Err(format!("the {} suite needs {}", suite.name, suite.needs));
+    };
+    let tables = rudb_bench::plans::tables(root, suite)?;
+    let today = regress::today();
+    let captured = rudb_bench::plans::capture(engine, suite, queries, &tables, &today)?;
+    let at = rudb_bench::plans::path(root, suite.name);
+
+    if record {
+        let text = rudb_bench::plans::render(&captured);
+        if let Some(under) = at.parent() {
+            std::fs::create_dir_all(under)
+                .map_err(|e| format!("cannot make {}: {e}", under.display()))?;
+        }
+        std::fs::write(&at, text).map_err(|e| format!("cannot write {}: {e}", at.display()))?;
+        println!(
+            "wrote {}: {} plans, {} refused, against {}",
+            at.display(),
+            captured.plans.len(),
+            captured.refused.len(),
+            captured.version
+        );
+        return Ok(true);
+    }
+
+    let text = std::fs::read_to_string(&at).map_err(|e| {
+        format!(
+            "{}: {e}. Record it with `rudb-bench plans --suite {} --record`",
+            at.display(),
+            suite.name
+        )
+    })?;
+    let committed =
+        rudb_bench::plans::parse(&text).map_err(|e| format!("{}: {e}", at.display()))?;
+    let changes = rudb_bench::plans::compare(&committed, &captured);
+    print!("{}", rudb_bench::plans::report(suite.name, &changes));
+    Ok(changes.iter().all(|change| !change.fails()))
+}
+
 /// Every engine on this machine, and a sentence for every one that is not.
 ///
 /// DuckDB first, because it is the reference column of the comparison and the ratio row is stated
@@ -1163,6 +1323,12 @@ fn help() {
     println!("    --suite <name>  the suite to run twice, default smoke");
     println!("    --hot n         hot runs per query, default five");
     println!("    --rows n        run over this many rows instead of the whole table");
+    println!("  plans         check the committed plan baselines, rudb only. Asks for the plan of");
+    println!("                every query in a suite against the zero row tables in fixtures/ and");
+    println!("                fails when one is not the plan that was written down. Measures");
+    println!("                nothing and needs no data");
+    println!("    --suite <name>  one suite, default every suite that has fixtures committed");
+    println!("    --record        write baselines/plans-<suite>.txt instead of checking it");
     println!("  kernels       measure rudb's own loops in rudb's process, per row");
     println!("    --repo <path>   the rudb checkout, default ../rudb");
     println!("    --record        replace this machine's block in baselines/kernels.txt");
@@ -1194,6 +1360,8 @@ fn help() {
     println!("  RUDB_BENCH_BASELINE     the records file, default baselines/<suite>.txt");
     println!("  RUDB_BENCH_RUDB_REPO    the rudb checkout the kernel suite measures");
     println!("  RUDB_BENCH_KERNELS      the kernel records file, default baselines/kernels.txt");
+    println!("  RUDB_BENCH_ROOT         the checkout the plan baselines and fixtures are read out");
+    println!("                          of, default the working directory");
     println!();
     println!("`run` works on the smoke suite, which generates its own data and measures nothing");
     println!("anybody should quote. The suites that matter need a download or a generator and");

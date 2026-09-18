@@ -367,6 +367,27 @@ pub trait Engine {
             self.name()
         ))
     }
+
+    /// Print the plan for one query, against whatever was last handed to [`Engine::load`].
+    ///
+    /// Nothing is run and nothing is timed. This is [`crate::plans`] asking what shape a query came
+    /// out of the optimizer as, so that the shape can be written down and compared on the next
+    /// commit, and the answer has to be the plan of the query as the benchmark would run it rather
+    /// than of a query typed at a shell.
+    ///
+    /// The default is a refusal naming the engine, and every engine but rudb takes it. A committed
+    /// baseline of somebody else's plans would go red on the morning somebody upgrades them, which
+    /// is a true statement about that engine and not one anybody in this repository can act on.
+    ///
+    /// # Errors
+    ///
+    /// When the engine does not print a plan this harness reads, and when the query will not bind.
+    /// The second one is a result rather than a failure as far as [`crate::plans`] is concerned:
+    /// which queries an engine can bind at all is one of the things a baseline is for.
+    fn plan(&mut self, sql: &str) -> Result<String, String> {
+        let _ = sql;
+        Err(format!("{} does not print a plan this harness can read", self.name()))
+    }
 }
 
 /// Read what `duckdb_optimizers()` answered into the list `SET disabled_optimizers` takes.
@@ -1799,6 +1820,60 @@ impl Engine for Rudb {
         self.prelude.push(disable(&names));
         Ok(names)
     }
+
+    fn plan(&mut self, sql: &str) -> Result<String, String> {
+        let binary = self.binary.as_ref().ok_or("there is no rudb to ask for a plan")?;
+        // The views and not [`Rudb::ask`], which deliberately replays nothing. A plan of a query
+        // over a table that does not exist is not a plan, and a plan over a table declared some
+        // other way is a plan of a different query than the one the suite runs.
+        //
+        // Not `self.runner.command`, because that is the timed path: it puts the run under the
+        // memory watcher and asks for a metrics file, and neither of those is a thing a plan has.
+        let mut command = Command::new(binary);
+        command.arg("-batch").arg("-csv").arg("-noheader");
+        for (seam, implementation) in &self.pins {
+            command.arg("--set").arg(format!("{seam}={implementation}"));
+        }
+        for statement in &self.ddl {
+            command.arg("-c").arg(statement);
+        }
+        command.arg("-c").arg(format!("EXPLAIN {sql}"));
+
+        let out = command
+            .output()
+            .map_err(|e| format!("cannot run {} for a plan: {e}", binary.display()))?;
+        if !out.status.success() {
+            // The first line and not the last six. A binder error prints its sentence, then the
+            // statement, then a caret under the column, and the sentence is the part that means
+            // something in a committed file. The other two are a copy of the query and a number
+            // that moves when the query is reindented.
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let first = stderr.lines().map(str::trim).find(|l| !l.is_empty());
+            return Err(first.unwrap_or("rudb would not plan it and said nothing").to_owned());
+        }
+        explained(&String::from_utf8_lossy(&out.stdout))
+    }
+}
+
+/// Take the plan back out of the one row, one column CSV the shell printed it as.
+///
+/// `EXPLAIN` answers a table with a `logical_plan` column holding a multi line string, and `-csv`
+/// quotes it and doubles the quotes inside it. So this is the smallest possible CSV reader: drop the
+/// column name, unwrap the quotes, undouble what is between them.
+///
+/// It is written here rather than taken from a crate because it has one shape to read and a
+/// dependency that could read any CSV would also silently accept a second row or a second column,
+/// which for this caller means the engine printed something other than a plan.
+fn explained(text: &str) -> Result<String, String> {
+    let body = text
+        .trim_end()
+        .strip_prefix("logical_plan,")
+        .ok_or("rudb printed something that is not an EXPLAIN result")?;
+    let quoted = body
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .ok_or("rudb printed an EXPLAIN result that is not one quoted value")?;
+    Ok(quoted.replace("\"\"", "\"").trim_end().to_owned())
 }
 
 /// Ask a binary what it is, and turn every way that can fail into one sentence naming the override.
@@ -1847,8 +1922,8 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        Ability, Duckdb, Engine, PINNED, POLARS_SCRIPT, Reported, Rudb, Runner, elapsed, on_path,
-        run_time, seconds, took,
+        Ability, Duckdb, Engine, PINNED, POLARS_SCRIPT, Reported, Rudb, Runner, elapsed, explained,
+        on_path, run_time, seconds, took,
     };
     use crate::data::Table;
     use crate::suite::{Suite, find};
@@ -1870,6 +1945,21 @@ mod tests {
             pins: Vec::new(),
             prelude: Vec::new(),
         }
+    }
+
+    /// A plan holds a column alias in double quotes, and `-csv` doubles them on the way out. Losing
+    /// that would put a plan in a committed baseline that is not the plan the engine printed.
+    #[test]
+    fn the_quotes_inside_a_plan_survive_coming_back_out_of_the_csv() {
+        let printed = "logical_plan,\"Project [#0 AS \"\"count_star()\"\"]\n  Get x\"\n";
+        assert_eq!(explained(printed).unwrap(), "Project [#0 AS \"count_star()\"]\n  Get x");
+    }
+
+    #[test]
+    fn something_that_is_not_an_explain_result_is_an_error_rather_than_a_plan() {
+        assert!(explained("").is_err());
+        assert!(explained("physical_plan,\"Get x\"").is_err());
+        assert!(explained("logical_plan,Get x").is_err());
     }
 
     #[test]

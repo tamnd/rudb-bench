@@ -1,0 +1,78 @@
+# Committed plan baselines, read by the plan gate.
+#
+# Written by `rudb-bench plans --suite <name> --record` and read by `rudb-bench plans --suite
+# <name>`, which fails when a query plans differently than it does here. Milestone E1 in tamnd/rudb
+# asks for this so that a plan change is a reviewed diff rather than something noticed three weeks
+# later in a performance run.
+#
+# Captured against the zero row tables in fixtures/<suite>, which have the schema and none of the
+# data. That is what lets this run on a GitHub runner, and what it costs is that any pass deciding
+# something from a row count is not exercised here the way a real run exercises it. rudb prints
+# `rows unknown` on almost every node below rather than an estimate, which is the same fact seen
+# from the other side.
+#
+# Nothing here is a measurement and no number in it is a time. A plan is a shape, and the only
+# question this file asks is whether it is still the same shape.
+
+[plans]
+suite     smoke
+engine    rudb
+version   rudb 0.3.33
+recorded  2026-09-18
+planned   5 of 5
+
+query     q1
+  Project #3 [#2.0::BIGINT AS "count_star()"]  [~1 rows] [pipeline 0] [reference]
+    Aggregate #2 groups=[] aggregates=[count_star()::BIGINT]  [~1 rows] [pipeline 1] [reference]
+      Project #1 []  [rows unknown] [pipeline 1] [reference]
+        TableFunction read_parquet args=['<fixture>/smoke.parquet'::VARCHAR] #0 []  [rows unknown] [pipeline 1] [reference]
+  .
+  Pipelines
+    pipeline 0 waits for 1, and the answer comes out of it
+    pipeline 1 waits for nothing
+
+query     q2
+  Project #3 [#2.0::DOUBLE AS "sum(v)"]  [~1 rows] [pipeline 0] [reference]
+    Aggregate #2 groups=[] aggregates=[sum(#1.0::DOUBLE)::DOUBLE]  [~1 rows] [pipeline 1] [reference]
+      Project #1 [#0.1::DOUBLE AS v]  [rows unknown] [pipeline 1] [reference]
+        Filter (#0.0::BIGINT < 100::BIGINT)::BOOLEAN  [rows unknown] [pipeline 1] [reference]
+          TableFunction read_parquet args=['<fixture>/smoke.parquet'::VARCHAR] #0 [k::BIGINT, v::DOUBLE]  [rows unknown] [pipeline 1] [reference]
+  .
+  Pipelines
+    pipeline 0 waits for 1, and the answer comes out of it
+    pipeline 1 waits for nothing
+
+query     q3
+  Project #3 [#2.0::VARCHAR AS tag, #2.1::BIGINT AS "count_star()"]  [rows unknown] [pipeline 0] [reference]
+    Aggregate #2 groups=[#1.0::VARCHAR] aggregates=[count_star()::BIGINT]  [rows unknown] [pipeline 1] [reference]
+      Project #1 [#0.0::VARCHAR AS tag]  [rows unknown] [pipeline 1] [reference]
+        TableFunction read_parquet args=['<fixture>/smoke.parquet'::VARCHAR] #0 [tag::VARCHAR]  [rows unknown] [pipeline 1] [reference]
+  .
+  Pipelines
+    pipeline 0 waits for 1, and the answer comes out of it
+    pipeline 1 waits for nothing
+
+query     q4
+  TopN 10 offset 0 [#3.1::DOUBLE DESC NULLS LAST]  [~10 rows] [pipeline 1] [reference]
+    Project #3 [#2.0::BIGINT AS k, #2.1::DOUBLE AS total]  [rows unknown] [pipeline 1] [reference]
+      Aggregate #2 groups=[#1.0::BIGINT] aggregates=[sum(#1.1::DOUBLE)::DOUBLE]  [rows unknown] [pipeline 2] [reference]
+        Project #1 [#0.0::BIGINT AS k, #0.1::DOUBLE AS v]  [rows unknown] [pipeline 2] [reference]
+          TableFunction read_parquet args=['<fixture>/smoke.parquet'::VARCHAR] #0 [k::BIGINT, v::DOUBLE]  [rows unknown] [pipeline 2] [reference]
+  .
+  Pipelines
+    pipeline 0 waits for 1, and the answer comes out of it
+    pipeline 1 waits for 2
+    pipeline 2 waits for nothing
+
+query     q5
+  Project #3 [#2.0::BIGINT AS "count(DISTINCT tag)"]  [~1 rows] [pipeline 0] [reference]
+    Aggregate #2 groups=[] aggregates=[count(#4.0::VARCHAR)::BIGINT]  [~1 rows] [pipeline 1] [reference]
+      Aggregate #4 groups=[#1.0::VARCHAR] aggregates=[]  [rows unknown] [pipeline 2] [reference]
+        Project #1 [#0.1::VARCHAR AS tag]  [rows unknown] [pipeline 2] [reference]
+          Filter (#0.0::DOUBLE > 5.0::DOUBLE)::BOOLEAN  [rows unknown] [pipeline 2] [reference]
+            TableFunction read_parquet args=['<fixture>/smoke.parquet'::VARCHAR] #0 [v::DOUBLE, tag::VARCHAR]  [rows unknown] [pipeline 2] [reference]
+  .
+  Pipelines
+    pipeline 0 waits for 1, and the answer comes out of it
+    pipeline 1 waits for 2
+    pipeline 2 waits for nothing
