@@ -86,6 +86,12 @@ const PREAMBLE: &str = "\
 # counted number, a number with a proven bound, a guess, and nothing at all, in that order. Four
 # counts rather than four fractions, because a suite's histogram is the sum of its queries' and
 # fractions do not add.
+#
+# `timeout` and `failed` are the two ways a query can be in this file without a measurement in it.
+# A query that ran out of its limit has the limit written down, because the limit is a true lower
+# bound on what it would have taken. A query the engine could not answer has what the engine said
+# instead, and it contributes nothing at all to any total, which is why a column with one of these
+# in it prints its totals with a `>` in front of them.
 ";
 
 /// Add this result to the file, replacing whatever that engine had there before.
@@ -561,6 +567,12 @@ fn write_one(result: &SuiteResult, machine: &str, source_bytes: u64) -> String {
         if let Outcome::TimedOut { limit } = q.outcome {
             let _ = writeln!(out, "  timeout {}", micros(limit));
         }
+        // The same idea for the other way a row can carry no measurement. Without this line a
+        // failure would read back as a query that finished in no time at all, which is the one
+        // reading this whole file exists to make impossible.
+        if let Outcome::Failed { message } = &q.outcome {
+            let _ = writeln!(out, "  failed  {}", escape(message));
+        }
         let _ = writeln!(out, "  answer  {}", escape(&q.answer));
     }
     out
@@ -692,8 +704,9 @@ fn one_query(engine: &str, piece: &str) -> Result<QueryResult, String> {
             format!("{engine} {name} has a timeout that is not a number of microseconds")
         })?)),
     };
+    let failed = value(&body, "failed").map(unescape);
     let mut runs = split_runs(&at("wall")?)?;
-    if timeout.is_some() {
+    if timeout.is_some() || failed.is_some() {
         runs.hot = runs.hot.with_timeouts(1);
     }
 
@@ -701,9 +714,12 @@ fn one_query(engine: &str, piece: &str) -> Result<QueryResult, String> {
         name: name.to_owned(),
         shape: unescape(shape),
         runs,
-        outcome: match timeout {
-            Some(limit) => Outcome::TimedOut { limit },
-            None => Outcome::Completed,
+        // The limit first, because a query can only be one of these and a block that somehow had
+        // both lines is a block whose query ran long before it fell over.
+        outcome: match (timeout, failed) {
+            (Some(limit), _) => Outcome::TimedOut { limit },
+            (None, Some(message)) => Outcome::Failed { message },
+            (None, None) => Outcome::Completed,
         },
         reported: match value(&body, "said") {
             Some(text) => Some(split_runs(text)?),
@@ -743,7 +759,7 @@ mod tests {
     use crate::memory::{Cost, Peak};
     use crate::metrics::{Accounting, Classes, Internal, Spend};
     use crate::report::{QueryResult, SuiteResult};
-    use crate::suite::find;
+    use crate::suite::{Query, find};
 
     fn ms(values: &[u64]) -> Vec<Duration> {
         values.iter().copied().map(Duration::from_millis).collect()
@@ -952,7 +968,27 @@ mod tests {
         assert_eq!(after.queries[0].outcome, Outcome::TimedOut { limit });
         assert_eq!(after.queries[0].runs.hot.timeouts(), 1);
         assert!(!after.queries[0].runs.hot.publishable());
-        assert_eq!(after.timeouts(), 1);
+        assert_eq!(after.unmeasured(), 1);
+    }
+
+    /// A query the engine could not answer has to come back as one too, and for a worse reason. It
+    /// has no samples of its own, so read back as an ordinary row it would be a query that finished
+    /// instantly, which is the fastest number in the file.
+    #[test]
+    fn a_query_the_engine_could_not_answer_comes_back_out_of_the_file_as_one() {
+        let said = "rudb failed: Binder Error: column must appear in the GROUP BY clause";
+        let mut before = result();
+        let query =
+            Query { name: "q1", sql: "SELECT 1", shape: "group by, low card", dialects: &[] };
+        before.queries[0] = QueryResult::that_failed(&query, said.to_owned());
+
+        let text = write_one(&before, "here", 1);
+        assert!(text.contains("  failed  "), "{text}");
+        let after = read_one("duckdb", &text).unwrap().0;
+        assert_eq!(after.queries[0].outcome, Outcome::Failed { message: said.to_owned() });
+        assert!(!after.queries[0].runs.hot.publishable());
+        assert_eq!(after.unmeasured(), 1);
+        assert_eq!(after.queries[0], before.queries[0]);
     }
 
     /// And a block written before the line existed is a block where every query finished, which is
@@ -961,7 +997,7 @@ mod tests {
     fn a_block_from_before_the_limit_existed_reads_as_a_run_where_everything_finished() {
         let after = read_one("duckdb", &write_one(&result(), "here", 1)).unwrap().0;
         assert_eq!(after.queries[0].outcome, Outcome::Completed);
-        assert_eq!(after.timeouts(), 0);
+        assert_eq!(after.unmeasured(), 0);
     }
 
     #[test]
