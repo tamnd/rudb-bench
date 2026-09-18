@@ -227,9 +227,20 @@ pub fn name_for(host: &str, under_wsl: bool) -> Option<&'static str> {
     }
 }
 
+/// Whether a run filed under `name` came off a machine this file knows.
+///
+/// A laptop, a container and a hosted CI runner all run the harness happily and none of them is in
+/// here, so this is a question and not a check. It is asked wherever a rule holds for the fleet and
+/// does not hold for hardware nobody has measured, and the per commit drift check is the first
+/// place that turned out to matter.
+#[must_use]
+pub fn is_fleet(name: &str) -> bool {
+    FLEET.iter().any(|m| m.name.eq_ignore_ascii_case(name.trim()))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{FLEET, name_for};
+    use super::{FLEET, is_fleet, name_for};
 
     #[test]
     fn every_machine_is_found_by_the_hostname_it_actually_prints() {
@@ -260,6 +271,19 @@ mod tests {
         // Not an error. A laptop is allowed to run the harness, it just does not get a fleet name
         // and its saved runs are filed under whatever it calls itself.
         assert_eq!(name_for("some-laptop", false), None);
+    }
+
+    #[test]
+    fn a_machine_is_in_the_fleet_by_the_name_a_record_files_it_under() {
+        // The name and not the hostname, because that is what a committed record holds and what a
+        // rule scoped to the fleet is given to ask about.
+        for machine in FLEET {
+            assert!(is_fleet(machine.name), "{} is in the table", machine.name);
+        }
+        assert!(is_fleet("  GamingPC-WSL "), "padded and shouted is the same machine");
+        assert!(!is_fleet("runnervmlun5p"), "a GitHub runner is not one of ours");
+        assert!(!is_fleet("some-laptop"));
+        assert!(!is_fleet(""));
     }
 
     #[test]

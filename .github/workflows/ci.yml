@@ -96,9 +96,15 @@ jobs:
       #
       # `--check` compares the run against baselines/smoke.txt and fails when a query got twice as
       # slow and left the recorded range behind. There is no record for a GitHub runner in that file
-      # and there should not be, since the hardware underneath varies between runs, so today this
-      # prints the sentence saying it had nothing to compare and passes. That is the read path being
-      # exercised rather than a gate being satisfied, and the output says which of the two it was.
+      # and there should not be, since the hardware underneath varies between runs, so this prints
+      # the sentence saying it refused to compare and passes. That is the read path being exercised
+      # rather than a gate being satisfied, and the output says which of the two it was.
+      #
+      # It used to compare anyway, against the record from gamingpc-wsl, and q6 is three times
+      # slower on a hosted runner than on that desktop, so this step failed on every commit for
+      # twelve runs before anybody read the log. tamnd/rudb-bench#122 has the detail. The timing
+      # gate that means something is `--check-drift` on a fleet machine, and nothing schedules it
+      # yet.
       - name: the smoke suite still measures something
         run: cargo run -q --release -- run smoke --check
 
