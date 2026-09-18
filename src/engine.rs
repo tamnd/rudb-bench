@@ -416,6 +416,35 @@ pub trait Engine {
         ))
     }
 
+    /// Turn one of this engine's rules on or off for the rest of its life.
+    ///
+    /// The other half of [`Engine::no_optimizer`], and the same idea one step smaller. That one
+    /// turns off the whole optimizer and this one turns off a named layer, which is what
+    /// `spec/stats/09-measurement.md` section 9.3 and `spec/graph/09-measurement.md` section 9.2
+    /// both ask for. Three documents asking for the same ablation should be one implementation of
+    /// one idea and not three, which is why this takes a name rather than there being a method per
+    /// layer.
+    ///
+    /// Both runs of an attribution set the rule explicitly, one on and one off, rather than the
+    /// first run taking the default. Which way a default points is a decision that moves: rudb has
+    /// `statistics` on and `graph_sections` off today and the second of those is expected to flip,
+    /// and a result that silently changed meaning on the day it flipped would be worse than no
+    /// result. Setting both ends means the table says what it measured whatever the default is.
+    ///
+    /// Setting the same rule twice replaces the first, so the two runs of one attribution do not
+    /// stack.
+    ///
+    /// # Errors
+    ///
+    /// When the engine has no such rule, or is not one this harness can set rules on. The default
+    /// is a refusal naming the engine, for the reason [`Engine::no_optimizer`] gives: an engine
+    /// that quietly ignored this would produce an attribution whose two columns are the same run
+    /// twice, and two identical columns look exactly like a layer that is worth nothing.
+    fn set_rule(&mut self, name: &str, on: bool) -> Result<(), String> {
+        let _ = (name, on);
+        Err(format!("{} has no rules this harness can set, they are rudb's own", self.name()))
+    }
+
     /// Print the plan for one query, against whatever was last handed to [`Engine::load`].
     ///
     /// Nothing is run and nothing is timed. This is [`crate::plans`] asking what shape a query came
@@ -458,6 +487,15 @@ fn optimizer_names(text: &str) -> Result<Vec<String>, String> {
 /// The statement that turns all of them off, in the spelling both engines take.
 fn disable(names: &[String]) -> String {
     format!("SET disabled_optimizers = '{}'", names.join(","))
+}
+
+/// The statement that turns one rule on or off.
+///
+/// Quoted, because a bare word on the right of a `SET` is a column reference and the binder says
+/// so. `on` and `off` rather than `true` and `false` because that is how the specification
+/// documents write these switches, and rudb takes either.
+fn rule(name: &str, on: bool) -> String {
+    format!("SET {name} = '{}'", if on { "on" } else { "off" })
 }
 
 /// Whether the run was asked to leave every engine's copy of the data behind.
@@ -589,7 +627,8 @@ pub struct Duckdb {
     /// Statements replayed in front of every query, and empty for every ordinary run.
     ///
     /// This harness starts a fresh process per run on purpose, so a session setting has to be
-    /// replayed or it is not set. Only [`Engine::no_optimizer`] puts anything here today.
+    /// replayed or it is not set. [`Engine::no_optimizer`] and [`Engine::set_rule`] are the two
+    /// things that put anything here.
     prelude: Vec<String>,
 }
 
@@ -1925,6 +1964,21 @@ impl Engine for Rudb {
         Ok(names)
     }
 
+    fn set_rule(&mut self, name: &str, on: bool) -> Result<(), String> {
+        let statement = rule(name, on);
+        // Run it once now, against no data, so that a name the engine has never heard of is an
+        // error where it was asked for rather than a query failing four minutes into a suite. It
+        // costs one process that starts and exits, which is what every other question the apparatus
+        // asks costs.
+        self.ask(&statement).map_err(|e| format!("rudb would not take `{statement}`: {e}"))?;
+        // Replaced rather than appended, because the two runs of one attribution set the same rule
+        // opposite ways and a prelude holding both would run whichever came last on both runs.
+        let head = format!("SET {name} = ");
+        self.prelude.retain(|had| !had.starts_with(&head));
+        self.prelude.push(statement);
+        Ok(())
+    }
+
     fn plan(&mut self, sql: &str) -> Result<String, String> {
         let binary = self.binary.as_ref().ok_or("there is no rudb to ask for a plan")?;
         // The views and not [`Rudb::ask`], which deliberately replays nothing. A plan of a query
@@ -2027,7 +2081,7 @@ mod tests {
 
     use super::{
         Ability, Duckdb, Engine, PINNED, POLARS_SCRIPT, Reported, Rudb, Runner, elapsed, explained,
-        on_path, run_time, seconds, took,
+        on_path, rule, run_time, seconds, took,
     };
     use crate::data::Table;
     use crate::suite::{Suite, find};
@@ -2344,6 +2398,44 @@ mod tests {
         let (found, answer) = Reported::Seconds.parse("99998", "0.046");
         assert_eq!(found, Some(Duration::from_micros(46000)));
         assert_eq!(answer, "99998");
+    }
+
+    /// A bare word on the right of a `SET` is a column reference, so `SET statistics = off` is the
+    /// binder looking for a column called off rather than the switch anybody meant.
+    #[test]
+    fn a_rule_is_set_to_a_quoted_word_because_an_unquoted_one_is_a_column() {
+        assert_eq!(rule("statistics", true), "SET statistics = 'on'");
+        assert_eq!(rule("graph_sections", false), "SET graph_sections = 'off'");
+    }
+
+    /// The same trade [`Engine::no_optimizer`] makes. An engine that took this and did nothing
+    /// would produce an attribution whose two columns are the same run twice, and two identical
+    /// columns read exactly like a layer that is worth nothing at all.
+    #[test]
+    fn an_engine_with_no_rules_of_its_own_refuses_rather_than_ignoring_the_ask() {
+        let mut one = Duckdb {
+            name: "duckdb",
+            binary: std::path::PathBuf::from("duckdb"),
+            version: "under test".to_owned(),
+            database: scratch("duckdb-rules").join("bench.duckdb"),
+            runner: Runner::new(&scratch("duckdb-rules"), "duckdb", Reported::RunTime),
+            suite: "smoke",
+            prelude: Vec::new(),
+        };
+        let why = one.set_rule("statistics", false).expect_err("duckdb has no rudb rules");
+        assert!(why.contains("duckdb"), "{why}");
+    }
+
+    /// The `SET` runs before the suite does, so a name the engine has never heard of comes back
+    /// here and not four minutes into the second run, and the statement is in the message so the
+    /// reader knows which spelling was tried.
+    #[test]
+    fn a_rule_that_cannot_be_asked_about_is_not_quietly_written_into_the_prelude() {
+        let mut one = built(find("smoke").expect("the smoke suite is compiled in"));
+        one.binary = None;
+        let why = one.set_rule("statistics", false).expect_err("there is no rudb to ask");
+        assert!(why.contains("SET statistics = 'off'"), "{why}");
+        assert!(one.prelude.is_empty(), "{:?}", one.prelude);
     }
 
     #[test]

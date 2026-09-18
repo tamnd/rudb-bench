@@ -23,6 +23,7 @@
 use std::process::ExitCode;
 use std::time::Duration;
 
+use rudb_bench::attribute::Ablation;
 use rudb_bench::data::Rows;
 use rudb_bench::engine::{
     Ability, BenchError, ClickhouseLocal, ClickhouseServer, Datafusion, Duckdb, Engine, Polars,
@@ -1037,13 +1038,17 @@ fn sweep(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Run one suite twice on one engine, with its optimizer and without it, per query.
+/// Run one suite twice on one engine, with one layer on and then off, per query.
 ///
 /// The sibling of `sweep` and the same idea one level up. `sweep` moves a single decision inside the
-/// engine and holds the rest fixed; this turns the whole rewrite pipeline off and holds the rest
-/// fixed. What it produces is an attribution and not a claim, for the reason
-/// [`rudb_bench::attribute`] gives at length: the per query column is what says where the optimizer
-/// is worth something and, more usefully, where it is not.
+/// engine and holds the rest fixed; this turns a whole layer off and holds the rest fixed. What it
+/// produces is an attribution and not a claim, for the reason [`rudb_bench::attribute`] gives at
+/// length: the per query column is what says where the layer is worth something and, more usefully,
+/// where it is not.
+///
+/// Which layer is `--off`: the optimizer by default, and otherwise a rudb rule by name, which is
+/// how `statistics` and `graph_sections` get the same treatment without a second command that would
+/// slowly stop agreeing with this one.
 ///
 /// One engine rather than every engine, because the two runs have to be the same engine for the
 /// difference between them to mean anything, and a table with a column per engine would invite
@@ -1058,6 +1063,7 @@ fn attribute(args: &[String]) -> ExitCode {
     let mut suite_name = "smoke".to_owned();
     let mut hot = 5usize;
     let mut rows = None;
+    let mut ablation = Ablation::Optimizer;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -1072,6 +1078,18 @@ fn attribute(args: &[String]) -> ExitCode {
                 Some(name) => suite_name = name.clone(),
                 None => {
                     eprintln!("rudb-bench: --suite wants a suite name after it");
+                    return ExitCode::FAILURE;
+                }
+            },
+            // Not checked against a list here. Which rules exist is the engine's to say, and a copy
+            // of that list in the harness would be wrong on the day rudb gains one.
+            "--off" => match rest.next() {
+                Some(what) => ablation = Ablation::parse(what),
+                None => {
+                    eprintln!(
+                        "rudb-bench: --off wants something to turn off after it, such as \
+                         `--off statistics`"
+                    );
                     return ExitCode::FAILURE;
                 }
             },
@@ -1095,7 +1113,10 @@ fn attribute(args: &[String]) -> ExitCode {
             },
             other => {
                 eprintln!("rudb-bench: unknown argument {other}");
-                eprintln!("rudb-bench: attribute [--engine e] [--suite s] [--hot n] [--rows n]");
+                eprintln!(
+                    "rudb-bench: attribute [--engine e] [--suite s] [--hot n] [--rows n] \
+                     [--off what]"
+                );
                 return ExitCode::FAILURE;
             }
         }
@@ -1138,7 +1159,8 @@ fn attribute(args: &[String]) -> ExitCode {
         }
     };
     let limit = Some(suite.timeout(None));
-    let attributed = rudb_bench::attribute::attribute(engine, suite, queries, &dataset, hot, limit);
+    let attributed =
+        rudb_bench::attribute::attribute(engine, suite, queries, &dataset, hot, limit, ablation);
     let _ = std::fs::remove_dir_all(&scratch);
     match attributed {
         Ok(attributed) => {
@@ -1469,13 +1491,16 @@ fn help() {
     println!("    --suite <name>  the suite to hold fixed, default smoke");
     println!("    --runs n        hot runs per query, default five");
     println!("    --rows n        run over this many rows instead of the whole table");
-    println!("  attribute     run a suite twice on one engine, with its optimizer and without,");
-    println!("                and print what the optimizer was worth per query. Exits non-zero");
+    println!("  attribute     run a suite twice on one engine, with one layer on and then off,");
+    println!("                and print what that layer was worth per query. Exits non-zero");
     println!("                when the two runs answered differently, which is an engine bug");
     println!("    --engine <name> the engine to attribute, default rudb");
     println!("    --suite <name>  the suite to run twice, default smoke");
     println!("    --hot n         hot runs per query, default five");
     println!("    --rows n        run over this many rows instead of the whole table");
+    println!("    --off <what>    the layer to turn off, default optimizer. Anything else is a");
+    println!("                    rudb rule name, such as statistics or graph_sections, and both");
+    println!("                    runs set it rather than leaning on whichever way it defaults");
     println!("  plans         check the committed plan baselines, rudb only. Asks for the plan of");
     println!("                every query in a suite against the zero row tables in fixtures/ and");
     println!("                fails when one is not the plan that was written down. Measures");

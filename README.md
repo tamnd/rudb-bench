@@ -287,24 +287,28 @@ reference                1.375s      1.240s    35.31 MiB      10.5%      1.00x
 
 The reference always runs first, whatever order the engine lists the implementations in, because the ratio column is against the first row and a ratio against whichever implementation happened to be registered first would change meaning when somebody reorders a registration file. A variant that will not run is a row saying so rather than an abandoned sweep, since the interesting case is exactly the one where a new implementation is wrong on one query.
 
-### What the optimizer was worth
+### What a layer was worth
 
-`rudb-bench attribute --engine <name> --suite <name>` runs one suite twice on one engine, once as it comes and once with every optimizer it has turned off, and prints one row per query with the two times and the ratio. It is the sibling of the sweep and the same idea one level up: the sweep moves a single decision inside the engine and holds the rest fixed, and this turns the whole rewrite pipeline off and holds the rest fixed. Milestone E1 asks for it as an attribution row rather than as a claim, and the difference between those two is the whole point of the command.
+`rudb-bench attribute --engine <name> --suite <name>` runs one suite twice on one engine, once with a layer on and once with it off, and prints one row per query with the two times and the ratio. It is the sibling of the sweep and the same idea one level up: the sweep moves a single decision inside the engine and holds the rest fixed, and this turns a whole layer off and holds the rest fixed. Milestone E1 asks for it as an attribution row rather than as a claim, and the difference between those two is the whole point of the command.
 
 A claim is "the optimizer makes rudb three times faster". An attribution is forty three rows, most of them near one and a handful that are not, with the query names attached. The second is the one that says where to work, and it is also the only one of the two that cannot be produced by running the suite until it flatters you. So the total prints with a sentence under it saying that it is a sum of the rows and not a claim about the engine, and the queries the optimizer made *slower* get a list of their own under the table, because that is the half nobody publishes and the half worth reading.
 
 Which passes were turned off is asked of the engine through `duckdb_optimizers()` and never written down here, and the names are printed under the table. A harness holding its own copy of the list would leave a pass on the day the engine added one, and would report the optimizer as worth slightly less than it is with nothing in the output saying so. Both DuckDB and rudb answer that table function and both take the names back through `SET disabled_optimizers`, which is why `--engine` is a flag: attributing DuckDB the same way is the only way to find out whether a number this prints about rudb is a number about rudb or a number about the apparatus.
 
-The command exits non-zero when a query answered differently with the passes off. That is the one result here that is a property of the engine rather than of the machine, and it is a bug rather than a timing, so the row says so instead of printing a ratio between two different answers. The gate that actually chases it down is the whole corpus run in `tamnd/rudb-compat`, and this only checks the handful of queries it happens to be timing, which is worth having anyway because a benchmark comparing a right answer against a wrong one is not slower or faster, it is meaningless.
+`--off` picks the layer, and it is the optimizer unless it is told otherwise. Anything else is a rudb rule name, which is how `--off statistics` and `--off graph_sections` get the same table without a second command. Milestone G0 asks for those two, section 9.3 of the statistics spec and section 9.2 of the graph spec respectively, and they are the same question the optimizer one asks: a layer is on, a layer is off, the same queries run both ways, the difference is a table. Three commands would have given three tables that slowly stopped agreeing with each other about column widths, timeouts and answer checking, and only the first of those would have been cosmetic.
 
-This is not a quick command and it is not wired into any gate. The unoptimized half runs the plan the binder emitted, which for a join is a cross product filtered afterwards, and nothing in this harness has a clock on it. The first run of it, on `mba-m2`, took half an hour, and all but a minute of that was six runs of one query.
+A rule ablation sets the rule on both runs, explicitly, rather than leaving the first one to whatever the rule defaults to. `graph_sections` currently starts off, so a run that only turned it off would print two identical columns and a page of ratios at 1.00x, and a result that quietly changes meaning on the day a default moves is worse than no result. The name is not checked against a list here either. Which rules exist is rudb's to say, so the harness runs the `SET` once against no data before the suite starts, and a name the engine has never heard of is an error where it was asked for rather than a failure four minutes in.
+
+The command exits non-zero when a query answered differently with the layer off. That is the one result here that is a property of the engine rather than of the machine, and it is a bug rather than a timing, so the row says so instead of printing a ratio between two different answers. The gate that actually chases it down is the whole corpus run in `tamnd/rudb-compat`, and this only checks the handful of queries it happens to be timing, which is worth having anyway because a benchmark comparing a right answer against a wrong one is not slower or faster, it is meaningless.
+
+This is not a quick command and it is not wired into any gate. The unoptimized half runs the plan the binder emitted, which for a join is a cross product filtered afterwards. Every query gets the suite's default limit, so a shape that does not come back costs that query and not the run, and the row it leaves says so. The first run of it, on `mba-m2`, took half an hour, and all but a minute of that was six runs of one query.
 
 ```
 $ rudb-bench attribute --engine duckdb --suite smoke --hot 5
 
 suite       smoke, 6 queries
 engine      duckdb v1.5.5 (Variegata) d8cdaa33fd
-optimizers  33 turned off
+ablation    optimizer, 33 names turned off
 
 query       shape                     with     without  what it was worth
 q1          count                 19.448ms    19.476ms  1.00x faster
@@ -314,21 +318,21 @@ q4          group by and top k    33.273ms    46.294ms  1.39x faster
 q5          count distinct        36.806ms    38.212ms  1.04x faster
 q6          join and group by     81.712ms    269.045s  3292.61x faster
 
- 226.686ms with the optimizer, over 6 queries
+ 226.686ms with optimizer on, over 6 queries
   269.207s without it
 this total is the sum of the rows and not a claim about the engine. The rows are the result
 ```
 
 That is the argument for the per query column in one table. Five of the six rows are between 1.00 and 1.39, which is to say the optimizer is worth nothing measurable on a scan or an aggregate, and the sixth is 3292x. A total would have reported the optimizer as worth 1188x on the smoke suite, which is a number about q6 wearing a suite's name, and a suite with one more scan in it would have reported a different one for no reason that has anything to do with the optimizer. The rows do not have that problem: q6 is 3292x and the rest are noise, on this suite and on any other.
 
-The same command on rudb, which is the engine this is for, runs five queries rather than six because rudb declines the join on the smoke suite until it has something better than a nested loop. The five it does run agree both ways, which is the exit code, and the spread is 1.53x to 49.99x:
+The same command on rudb, which is the engine this is for, was recorded back when rudb declined the join on the smoke suite, so it has five rows rather than six. It does not decline it any more: a query that does not come back is a limit and a row saying so, which is a measurement, and refusing the shape was hiding the one number the G series exists to produce. The five rows here agree both ways, which is the exit code, and the spread is 1.53x to 49.99x:
 
 ```
 $ rudb-bench attribute --engine rudb --suite smoke --hot 3
 
 suite       smoke, 6 queries
 engine      rudb rudb 0.3.31
-optimizers  44 turned off
+ablation    optimizer, 44 names turned off
 
 query       shape                     with     without  what it was worth
 q1          count                 45.206ms      2.260s  49.99x faster
@@ -337,7 +341,7 @@ q3          group by, low card      1.105s      2.466s  2.23x faster
 q4          group by and top k      1.107s      2.578s  2.33x faster
 q5          count distinct          1.650s      2.522s  1.53x faster
 
-    4.409s with the optimizer, over 5 queries
+    4.409s with optimizer on, over 5 queries
    11.480s without it
 ```
 
