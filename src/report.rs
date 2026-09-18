@@ -157,6 +157,38 @@ impl QueryResult {
         }
     }
 
+    /// A row for a query the engine started and could not answer.
+    ///
+    /// A zero rather than a duration, because there is no honest number here at all. A timeout has
+    /// one, the limit, which is a true lower bound on what the query would have taken. A binder
+    /// error at three hundred microseconds is not a measurement of anything, so it goes in as
+    /// nothing and the column it is in prints its totals with a `>` in front of them.
+    ///
+    /// Marked as a timeout in the distribution because that field is what makes a row unpublishable,
+    /// and a query that failed is unpublishable for a stronger reason than one that ran long. What
+    /// happened is in the outcome, which is where the report reads it from.
+    #[must_use]
+    pub fn that_failed(query: &Query, message: String) -> Self {
+        let why = format!("the engine could not answer this query: {message}");
+        Self {
+            name: query.name.to_owned(),
+            shape: query.shape.to_owned(),
+            runs: Runs {
+                cold: Duration::ZERO,
+                hot: Distribution::median(vec![Duration::ZERO]).with_timeouts(1),
+            },
+            reported: None,
+            cold: Cost::unavailable(why.clone()),
+            hot: Cost::unavailable(why),
+            answer: String::new(),
+            planning: Vec::new(),
+            spend: Vec::new(),
+            estimates: None,
+            internal: None,
+            outcome: Outcome::Failed { message },
+        }
+    }
+
     /// The largest peak resident set any run of this query reached.
     ///
     /// Over cold and hot together, because rule six is about what the query costs and a peak that
@@ -336,13 +368,15 @@ impl SuiteResult {
         self.queries.iter().map(|q| q.runs.cold).sum()
     }
 
-    /// How many of this column's queries ran out of time rather than finishing.
+    /// How many of this column's queries produced no measurement, whatever the reason was.
     ///
     /// What makes a total in this column a lower bound. A query that hit the limit contributes the
     /// limit to every sum here, and the limit is by definition less than what the query would have
-    /// taken, so a column with one of these is faster on paper than it was in life.
+    /// taken. A query the engine could not answer contributes nothing at all, which flatters the
+    /// column harder still. Either way the column is faster on paper than it was in life, and the
+    /// two are counted together because the thing the caller needs to know is the same for both.
     #[must_use]
-    pub fn timeouts(&self) -> usize {
+    pub fn unmeasured(&self) -> usize {
         self.queries.iter().filter(|q| !q.outcome.measured()).count()
     }
 
@@ -703,6 +737,18 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
             ));
             continue;
         }
+        // The same treatment and a worse number. A query that ran out of time put the limit into
+        // the totals and this one put nothing in, so the column is flattered by more than the row
+        // it is missing.
+        if let Outcome::Failed { message } = &query.outcome {
+            reasons.push(format!(
+                "{} failed, so it contributes nothing to any total in this column and every one of \
+                 them is a floor: {}",
+                query.name,
+                first_line(message)
+            ));
+            continue;
+        }
         if !query.runs.hot.publishable() {
             reasons.push(format!(
                 "{} has {} hot runs and rule two wants at least five",
@@ -864,10 +910,28 @@ pub fn run(
         let runs = match collected {
             Ok(runs) => runs,
             Err(why) => {
-                // Only the timeout is caught. Anything else is still a reason to stop, because an
-                // engine that cannot start or a query that is not valid SQL is a fact about the run
-                // rather than about the query, and turning it into a cell would hide it.
-                let Some(limit) = hit else { return Err(why) };
+                // Both of these are facts about one query, so both become one row and the suite
+                // carries on. The engine demonstrably starts, because the load above it ran, so
+                // what is left for a query to fail on is the query: a binder error, a function
+                // this engine does not have, a plan it cannot build. Stopping the whole column for
+                // one of those is how a run of twenty two queries came back with nothing in it
+                // because query eleven used a HAVING the engine could not bind yet.
+                //
+                // An engine that cannot start at all still stops the run, and it stops it earlier,
+                // where the load is.
+                let Some(limit) = hit else {
+                    let message = why.to_string();
+                    if progress() {
+                        eprintln!(
+                            "{who}: {} of {}, {}, failed, {message}",
+                            at + 1,
+                            queries.len(),
+                            query.name
+                        );
+                    }
+                    results.push(QueryResult::that_failed(query, message));
+                    continue;
+                };
                 if progress() {
                     eprintln!(
                         "{who}: {} of {}, {}, no result inside {}s",
@@ -1801,13 +1865,31 @@ fn grid(compared: &Comparison) -> String {
     out
 }
 
-/// A total over a column where something ran out of time, which is a floor rather than a sum.
+/// How much of an engine's complaint a table can carry.
+const COMPLAINT: usize = 140;
+
+/// The first line of what an engine said when it could not answer a query, cut to fit.
 ///
-/// The limit went into the sum because there was nothing else to put there, and the limit is less
-/// than whatever the query would have taken. So the cell says so with a `>` rather than printing a
-/// number that reads like the rest of the column.
+/// Engines say a lot when they fail. rudb prints its timer lines, the error, the whole statement
+/// and a caret under the column it objected to, which is exactly what somebody debugging it wants
+/// and is four hundred characters under a table nobody can then read. The whole message is kept on
+/// the outcome, so nothing is lost by shortening it here.
+fn first_line(message: &str) -> String {
+    let line = message.lines().next().unwrap_or(message).trim();
+    match line.char_indices().nth(COMPLAINT) {
+        None => line.to_owned(),
+        Some((at, _)) => format!("{} and more", line[..at].trim_end()),
+    }
+}
+
+/// A total over a column with a query in it that produced no number, which is a floor and not a sum.
+///
+/// A query that ran out of time put the limit into the sum because there was nothing else to put
+/// there, and the limit is less than whatever the query would have taken. A query that failed put
+/// nothing in. So the cell says so with a `>` rather than printing a number that reads like the rest
+/// of the column.
 pub(crate) fn at_least(result: &SuiteResult, total: String) -> String {
-    if result.timeouts() == 0 { total } else { format!(">{total}") }
+    if result.unmeasured() == 0 { total } else { format!(">{total}") }
 }
 
 /// One supporting row of the cross engine table.
@@ -1983,8 +2065,8 @@ mod tests {
         let limit = Duration::from_secs(30);
         let one = rival("duckdb", 10, "1");
         let two = timed_out("rudb", 10, limit);
-        assert_eq!(one.timeouts(), 0);
-        assert_eq!(two.timeouts(), 1);
+        assert_eq!(one.unmeasured(), 0);
+        assert_eq!(two.unmeasured(), 1);
         assert_eq!(at_least(&one, "1.00s".to_owned()), "1.00s");
         assert_eq!(at_least(&two, "1.00s".to_owned()), ">1.00s");
     }

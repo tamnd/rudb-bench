@@ -16,7 +16,7 @@
 //! skipped on every laptop and therefore never run.
 
 use rudb_bench::data::{Dataset, Table};
-use rudb_bench::engine::{ClickhouseLocal, Datafusion, Duckdb, Engine, Polars, Rudb};
+use rudb_bench::engine::{ClickhouseLocal, Datafusion, Duckdb, Engine, Outcome, Polars, Rudb};
 use rudb_bench::report::{compare, comparison, publishable, run, table};
 use rudb_bench::suite::{Query, find};
 
@@ -113,8 +113,18 @@ fn a_number_measured_here_can_never_be_published() {
     let _ = std::fs::remove_dir_all(&at);
 }
 
+/// A query the engine cannot answer is one row of the table and not the end of the column.
+///
+/// It used to stop the whole run, on the reasoning that a query which is not valid SQL is a fact
+/// about the run rather than about the query. That reasoning holds for an engine that cannot start
+/// and does not hold for one that started, loaded the data and then objected to query eleven. An
+/// SF1 run here came back with no rudb column at all because of a HAVING the engine could not bind
+/// yet, and the twenty one queries it did answer went in the bin with it.
+///
+/// What it must never become is a zero that reads as a fast query, which is what the rest of this
+/// checks.
 #[test]
-fn a_query_that_does_not_run_stops_the_suite_rather_than_scoring_zero() {
+fn a_query_that_does_not_run_is_a_row_saying_so_rather_than_a_fast_one() {
     let at = scratch("bad");
     let Ok(mut duckdb) = Duckdb::discover(&at, find("smoke").unwrap()) else {
         eprintln!("skipping, no DuckDB on this machine");
@@ -124,8 +134,28 @@ fn a_query_that_does_not_run_stops_the_suite_rather_than_scoring_zero() {
     let suite = find("smoke").unwrap();
     let broken: &[Query] =
         &[Query { name: "q1", sql: "SELECT nope FROM t", shape: "not a column", dialects: &[] }];
-    let got = run(&mut duckdb, suite, broken, &dataset, 5, None);
-    assert!(got.is_err(), "a failing query is a broken run and not a fast one");
+    let result = run(&mut duckdb, suite, broken, &dataset, 5, None)
+        .expect("one query the engine cannot answer is a row and not the end of the run");
+
+    assert_eq!(result.queries.len(), 1);
+    let query = &result.queries[0];
+    let Outcome::Failed { message } = &query.outcome else {
+        panic!("{:?} is not a failure", query.outcome);
+    };
+    assert!(message.contains("nope"), "{message}");
+    assert_eq!(query.outcome.cell(), "failed");
+
+    // No number anywhere on it, and nothing downstream may read one.
+    assert!(!query.outcome.measured());
+    assert!(!query.runs.hot.publishable());
+    assert!(!query.cold.peak.measured());
+    assert_eq!(result.unmeasured(), 1);
+
+    // And the column says so in words, because a total of zero over one query is the most
+    // flattering number this harness could print.
+    let reasons = publishable(&result);
+    assert!(reasons.iter().any(|r| r.contains("q1 failed")), "{reasons:?}");
+    assert!(reasons.iter().any(|r| r.contains("floor")), "{reasons:?}");
 
     let _ = std::fs::remove_dir_all(&at);
 }
