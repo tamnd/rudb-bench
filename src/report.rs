@@ -90,6 +90,23 @@ pub struct QueryResult {
     /// From the cold run, for the same reason the answer is. [`publishable`] refuses a result
     /// whose breakdown does not add up to the run it came from.
     pub internal: Option<Internal>,
+    /// What each run spent planning and what it spent running, in the order the runs happened.
+    ///
+    /// Beside `internal` rather than inside it, because `internal` is one run's document and has to
+    /// stay one run's document for its numbers to add up. This is the one thing worth gathering
+    /// across every run: a share is a ratio of two spans of the same run on the same clock, so
+    /// unlike a duration it can be put beside the next run's without rule seven having anything to
+    /// say about it.
+    ///
+    /// Gathering it is the difference between a budget asserted on a sample of one and a budget
+    /// asserted on a distribution, and the cold run is the worst single sample available. Its
+    /// execute span is the one carrying the page cache miss, and for a query the engine answers out
+    /// of the file's directory that span is short enough that the ratio is mostly denominator. Five
+    /// recordings of smoke q1 off the cold run alone gave shares of 1.7%, 1.7%, 2.0%, 14.9% and
+    /// 41.1%, against a planning span that never left the range 795us to 1662us.
+    ///
+    /// Empty for an engine with no breakdown to read.
+    pub planning: Vec<(Duration, Duration)>,
     /// The same cold run's operators, folded by kind, most expensive first.
     ///
     /// Empty for an engine with no breakdown to read, and empty for a statement that ran as no
@@ -111,6 +128,31 @@ impl QueryResult {
             _ if self.cold.peak.measured() => self.hot.peak.clone(),
             _ => self.cold.peak.clone(),
         }
+    }
+
+    /// The run whose planning share came out in the middle, as its planning, its execute and the
+    /// share the two make.
+    ///
+    /// The median rather than the mean because the thing being guarded against is a tail, and the
+    /// mean of a run set with one 41% in it is not a number any single run resembles. The median
+    /// rather than the worst because the worst of sixteen runs is a sample of one again, chosen
+    /// adversarially, and a ceiling recorded off it would be a ceiling nothing ever approaches.
+    ///
+    /// `None` for an engine with no breakdown, and for a query whose runs all reported no time at
+    /// all, which is a query with nothing to take a share of.
+    #[must_use]
+    pub fn planned(&self) -> Option<(Duration, Duration, f64)> {
+        let mut runs: Vec<(f64, Duration, Duration)> = self
+            .planning
+            .iter()
+            .filter_map(|&(planning, execute)| {
+                let whole = planning.saturating_add(execute).as_secs_f64();
+                (whole > 0.0).then(|| (planning.as_secs_f64() / whole, planning, execute))
+            })
+            .collect();
+        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let (share, planning, execute) = *runs.get(runs.len() / 2)?;
+        Some((planning, execute, share))
     }
 }
 
@@ -690,13 +732,19 @@ pub fn run(
         let mut said: Vec<Option<Duration>> = Vec::with_capacity(hot + 1);
         let mut answer = String::new();
         let mut breakdown = None;
+        let mut planning: Vec<(Duration, Duration)> = Vec::with_capacity(hot + 1);
         let runs = Runs::collect(hot, || {
             let ran = engine.run(sql)?;
             if answer.is_empty() {
                 answer = ran.answer;
             }
+            if let Some(document) = &ran.metrics {
+                planning.push((document.planning, document.execute));
+            }
             // The cold run's, taken on the way past. The hot runs measure the same operators over
             // the same rows, so keeping every one of them would be sixteen copies of one shape.
+            // The two spans above are the exception: they are a ratio rather than a shape, and one
+            // sample of a ratio is not enough to hold a gate up.
             if breakdown.is_none() {
                 breakdown = ran.metrics.map(|document| (document, ran.cost.cpu));
             }
@@ -724,6 +772,7 @@ pub fn run(
             cold: cold.clone(),
             hot: together(rest),
             answer,
+            planning,
             spend: breakdown.as_ref().map(|(document, _)| document.by_kind()).unwrap_or_default(),
             internal: breakdown.map(|(document, cpu)| document.internal(cpu)),
         });
@@ -1623,6 +1672,7 @@ mod tests {
                 hot: cost(peak, Some(0)),
                 answer: "10000000".to_owned(),
                 internal: None,
+                planning: Vec::new(),
                 spend: Vec::new(),
             }],
             sample: None,
@@ -2163,5 +2213,50 @@ mod tests {
         assert!(text.contains("median"));
         assert!(text.contains("p25"));
         assert!(text.contains("slowest"));
+    }
+
+    /// A result whose one query planned and ran for the given pairs of microseconds.
+    fn planning(runs: &[(u64, u64)]) -> SuiteResult {
+        let mut result = result(Peak::Bytes(1024), 5);
+        result.queries[0].planning = runs
+            .iter()
+            .map(|&(planning, execute)| {
+                (Duration::from_micros(planning), Duration::from_micros(execute))
+            })
+            .collect();
+        result
+    }
+
+    #[test]
+    fn a_share_is_planning_over_the_whole_statement() {
+        // A query that planned for a quarter as long as it ran spent a fifth of itself planning,
+        // not a quarter. The denominator being the whole statement is what makes the number read
+        // the way somebody expects a percentage to read.
+        let (_, _, share) = planning(&[(250, 1_000)]).queries[0].planned().expect("one run");
+        assert!((share - 0.2).abs() < 1e-9, "{share}");
+    }
+
+    #[test]
+    fn a_statement_that_took_no_time_at_all_has_no_share_rather_than_zero() {
+        // What an engine from before the planner had a clock on it looks like. Calling it zero
+        // percent would say the planner was free, which is a claim, and there is no evidence for it.
+        assert_eq!(planning(&[(0, 0)]).queries[0].planned(), None);
+        assert_eq!(planning(&[]).queries[0].planned(), None);
+    }
+
+    #[test]
+    fn the_share_is_the_middle_run_and_not_whichever_one_happened_to_be_first() {
+        // The measurement this exists for. Five recordings of smoke q1 off the cold run alone gave
+        // 1.7%, 1.7%, 2.0%, 14.9% and 41.1%, because the cold run of a count answered from the
+        // file's directory sometimes runs in about a millisecond and the share is then almost all
+        // denominator. Planning never moved. A gate recorded off the first of these runs is a gate
+        // that fails one run in five for a reason that has nothing to do with the optimizer.
+        let runs = [(1_000, 1_000), (1_000, 40_000), (1_000, 39_000), (1_000, 41_000)];
+        let (planned, ran, share) = planning(&runs).queries[0].planned().expect("four runs");
+        assert_eq!(planned, Duration::from_micros(1_000));
+        // The upper of the two middles, which is the smaller execute of the two and so the larger
+        // share. An even number of runs has no middle and this picks the less forgiving side of it.
+        assert_eq!(ran, Duration::from_micros(39_000));
+        assert!(share < 0.03, "the cold outlier is 50% and the middle of these is not: {share}");
     }
 }

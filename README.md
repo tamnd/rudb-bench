@@ -386,6 +386,38 @@ The gate fails on any change at all, including a change somebody meant. A plan t
 
 ClickBench has no baseline yet and that is a gap rather than an oversight. The only `hits` schema this repository has written down is the one after the suite's own conversion, and rudb reads the raw file and applies that conversion in a view, so a fixture built from what is written down would be a table that does not exist on disk anywhere. `fixtures/README.md` says what the honest fix is and it is one command on either of the two machines that has the file.
 
+### The planning budget
+
+The gate above watches what the optimizer decided. This one watches what deciding it cost.
+
+Every other number in this harness is about the part of a query that moves rows. Planning is the part before any row moves, and until rudb 0.3.35 it was not measured at all: parsing, binding and optimizing happen above the code that writes the metrics document, nothing up there was on a clock, and all three fields were zero in every document the engine had ever written. The total was the physical build plus the run, so planning could grow without a single number going up anywhere.
+
+That matters because of how an optimizer changes. It is only ever added to. Each pass arrives with a measurement showing it paid for itself on the query somebody wrote it for, and no pass arrives with a measurement of what it costs on the queries it does nothing for. The pass that saves four hundred milliseconds on a scan of ten million rows costs its two hundred microseconds on a point lookup too. Twenty passes later the point lookup plans for longer than it runs, and nobody has found out, because the query still returns the right answer and every profile anybody opens starts at the first operator.
+
+So planning is a column of its own next to the runtime, and `run <suite> --check` fails a query that spent a larger share of itself planning than `baselines/planning-<suite>.txt` allows.
+
+```
+baselines/planning-smoke.txt
+  rudb
+    q1          2.36% of 4.74% allowed   1388us planning, 57576us running
+    q2          0.54% of 2.84% allowed   1247us planning, 229119us running
+    q3          0.34% of 2.42% allowed   1352us planning, 396195us running
+    q4          0.23% of 2.20% allowed   1399us planning, 606076us running
+    q5          0.19% of 2.40% allowed   1598us planning, 842837us running
+```
+
+The microseconds are the more interesting half of that. Planning is about a millisecond and a half whatever the query is, because the work it does is proportional to the size of the statement and these five statements are all about the same size, while what they run over differs by a factor of fifteen. That is the shape of the problem: the cost of planning does not shrink when the query gets small, so the share is largest exactly where the absolute number matters least, and a pass added for the benefit of q5 is paid for by q1.
+
+The budget is a share and not a duration, and that is the whole design. A committed budget of nine hundred microseconds is a fact about the machine it was taken on, and checking it somewhere else breaks reporting rule seven. A share survives the trip, because planning and execution are two spans of the same run of the same query read off the same clock seconds apart, so the ratio between them is a property of the engine in a way that neither number is on its own. It is not perfectly portable, since planning does not get faster with more cores and execution does, but it errs the safe way: a slower machine runs the query for longer, which makes planning a smaller share, so a budget carried somewhere slower gets looser rather than crying wolf. The microseconds are printed beside the shares because eight percent of a two millisecond query is not the same news as eight percent of a two second one, and they are printed rather than stored for exactly the reason the share is stored rather than them.
+
+The share is taken over every run of the query and the middle one is the one recorded, which is the only part of this that had to be found by measuring rather than by arguing. The obvious thing to do is read the breakdown the harness already keeps, which is the cold run's, and five recordings of smoke q1 done that way gave 1.7%, 1.7%, 2.0%, 14.9% and 41.1%. Planning had not moved: it was between 795 and 1662 microseconds in every one of them, as it was for every other query. What moved was the denominator. q1 is a count that the engine answers out of the file's directory, so its execute span is sometimes a millisecond and the ratio is then almost entirely noise. A gate recorded off a sample of one fails one run in five for a reason that has nothing to do with the optimizer, and a gate like that gets switched off. The median is used rather than the worst because the worst of sixteen runs is a sample of one again, picked adversarially, and a ceiling recorded off it is a ceiling nothing ever comes near.
+
+Planning here is the whole statement less the execute span, rather than the three planning phases added together. The difference is the physical build, and leaving the build in is deliberate: work moved out of the optimizer and into the builder would otherwise meet the budget by changing which side of a line it sits on. What this measures is every nanosecond before the first row moved, and the only way to make it smaller is to do less.
+
+The recorded share is kept in the file next to the ceiling it produced. A file of ceilings alone cannot be reviewed, because nobody reading four percent can tell a budget that was just met from one with three times the headroom it needs, and so nobody can tell whether a diff raising one is somebody accepting a regression. The ceiling is the recorded share plus a quarter again, or plus two points of percentage, whichever is larger, because a proportional margin on a number that is half a percent is not a margin.
+
+A query the budget has never heard of is reported and never failed. Otherwise the commit that adds a query to a suite has to re-record the budgets, and a re-record that happens every time is a diff nobody reads.
+
 ### The attribution ledger
 
 Section 2.8 of the engine specification asks for a series rather than a table. Each layer of the engine closes with a row, the row carries the before and the after on total time, CPU seconds, peak resident and bytes read on the same machine, and the release notes are written from it. The argument for it is that a release note claiming the hash table made joins faster and unable to point at a row is a release note that is guessing.

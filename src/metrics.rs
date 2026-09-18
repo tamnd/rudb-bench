@@ -39,9 +39,22 @@ pub struct Document {
     /// `ok`, or whatever the engine called the way it ended.
     pub state: String,
     /// Parse, bind, optimize, build and execute, together.
+    ///
+    /// It was only the build and the execute until rudb 0.3.35, because nothing above the executor
+    /// was on a clock. A record written by an engine older than that has a total that excludes
+    /// planning, and the [`Self::planning`] read off it is zero for the same reason.
     pub total: Duration,
     /// The execute step on its own, which is the span the operators below are inside of.
     pub execute: Duration,
+    /// Everything before the first row moved: parse, bind, optimize and building the tree.
+    ///
+    /// Taken as `total - execute` rather than by adding up the three planning phases, and the
+    /// difference matters. Adding the phases would leave the build out, and the build is where work
+    /// moved out of the optimizer would land, so a budget written against the sum of the phases
+    /// could be met by moving a pass rather than by making it cheaper. This subtraction cannot be
+    /// satisfied that way: it is every nanosecond the engine spent before it produced anything, and
+    /// the only way to make it smaller is to do less.
+    pub planning: Duration,
     /// CPU the engine measured around building and running the tree.
     pub cpu: Duration,
     /// The part of `cpu` that went on building the tree rather than on running it.
@@ -209,6 +222,7 @@ impl Document {
                 .unwrap_or_default(),
             total: nanos(timing, "total_ns"),
             execute: nanos(timing, "execute_ns"),
+            planning: nanos(timing, "total_ns").saturating_sub(nanos(timing, "execute_ns")),
             cpu: nanos(resource, "cpu_ns"),
             build: nanos(resource, "build_cpu_ns"),
             peak_bytes: count(resource, "peak_bytes"),
@@ -334,6 +348,7 @@ impl Document {
         Internal {
             accounting: self.accounting(process),
             execute: self.execute,
+            planning: self.planning,
             driver: self.accounted_cpu().saturating_sub(self.operator_cpu()),
             peak_bytes: self.peak_bytes,
             pipelines: self.pipelines.len(),
@@ -355,6 +370,15 @@ pub struct Internal {
     pub accounting: Accounting,
     /// The execute step, by the engine's own clock.
     pub execute: Duration,
+    /// Everything before the first row moved, by the engine's own clock.
+    ///
+    /// Its own column because it is the one cost of a query nobody profiles. An optimizer only ever
+    /// gets passes added to it, each of them paying for itself on the query it was written for, and
+    /// the query it does not pay for is the short one that never gets looked at. A query that plans
+    /// for four hundred milliseconds and runs for two hundred is a query the optimizer made slower,
+    /// and without this number beside the runtime that case is not slow enough to notice and never
+    /// stops being true.
+    pub planning: Duration,
     /// CPU the pipelines spent outside any operator, which is the scheduling.
     ///
     /// Pulling a morsel, handing a chunk on, deciding there is nothing left. It is work an engine

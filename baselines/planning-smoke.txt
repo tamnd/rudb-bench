@@ -1,0 +1,33 @@
+# Committed planning budgets, read by the planning gate.
+#
+# One block per suite and engine. Written by `rudb-bench run <suite> --record` and read by
+# `rudb-bench run <suite> --check`, which fails a query that spent a larger share of itself planning
+# than the ceiling here allows.
+#
+# Shares, in hundredths of a percent, as integers. The first number is what the query spent planning
+# on the day this was written and the second is the ceiling derived from it. A share rather than a
+# duration because a duration is a fact about a machine: planning and execution are two spans of the
+# same run of the same query on the same clock, so the ratio between them travels and neither number
+# does. Reporting rule seven still applies to the microseconds the gate prints beside these, which
+# is why they are printed and not stored.
+#
+# The recorded share is kept next to the ceiling so that a diff raising a ceiling can be read as
+# what it is. A file of ceilings alone cannot be reviewed, because nobody can tell a tight budget
+# from one with three times the headroom it needs.
+#
+# Planning is everything before the first row moved: the parse, the bind, the optimizer passes and
+# building the operator tree. Taken as the whole statement less the execute span rather than by
+# adding the phases up, so that work moved out of the optimizer into the builder does not meet the
+# budget by changing which side of a line it is on.
+
+[budget]
+suite     smoke
+machine   server3
+engine    rudb
+version   rudb 0.3.34
+recorded  2026-09-18
+query     q1              274    474
+query     q2               84    284
+query     q3               42    242
+query     q4               20    220
+query     q5               40    240
