@@ -26,6 +26,7 @@
 
 pub mod answer;
 pub mod attribute;
+pub mod corpus;
 pub mod data;
 pub mod engine;
 pub mod fleet;

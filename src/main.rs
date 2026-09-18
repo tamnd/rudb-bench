@@ -68,6 +68,7 @@ fn main() -> ExitCode {
         Some("sweep") => sweep(&args[1..]),
         Some("attribute") => attribute(&args[1..]),
         Some("plans") => plans(&args[1..]),
+        Some("generate") => generate(&args[1..]),
         Some("seams") => seams(),
         Some("run") => match plan(&args[1..]) {
             Ok(plan) => run(&plan),
@@ -1174,6 +1175,112 @@ fn attribute(args: &[String]) -> ExitCode {
     }
 }
 
+/// Make a corpus for a generated suite, and write down what was made.
+///
+/// The one subcommand here that writes to the data root rather than to a scratch directory, which
+/// is why it is a command somebody types rather than something a run does on their behalf. A
+/// harness that fetched or generated seventy gigabytes because somebody typed a suite name is a
+/// harness people run once, which is the rule `data.rs` has always stated and this is the other
+/// half of it.
+///
+/// It says what it is about to write and where, and how much space that is about to take, before it
+/// writes any of it. `--yes` is how a script says it has read that. The figure printed is rough and
+/// says so; the exact one goes in the manifest, which cannot be written until the files exist.
+///
+/// What comes out is eight Parquet files and a manifest beside them. The manifest is the part worth
+/// having: see [`rudb_bench::corpus`] for why eight files under a directory are not a corpus.
+fn generate(args: &[String]) -> ExitCode {
+    let mut suite_name = None;
+    let mut scale_name = None;
+    let mut yes = false;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--scale" => match rest.next() {
+                Some(given) => scale_name = Some(given.trim().trim_start_matches("sf").to_owned()),
+                None => {
+                    eprintln!(
+                        "rudb-bench: --scale wants a scale factor after it, such as `--scale 1`"
+                    );
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--yes" => yes = true,
+            other if other.starts_with("--") => {
+                eprintln!("rudb-bench: unknown argument {other}");
+                eprintln!("rudb-bench: generate <suite> [--scale n] [--yes]");
+                return ExitCode::FAILURE;
+            }
+            other => suite_name = Some(other.to_owned()),
+        }
+    }
+    let Some(suite_name) = suite_name else {
+        eprintln!("rudb-bench: generate wants a suite name, such as `rudb-bench generate tpch`");
+        eprintln!("rudb-bench: try `rudb-bench suites`");
+        return ExitCode::FAILURE;
+    };
+    let Some(suite) = rudb_bench::suite::find(&suite_name) else {
+        eprintln!("rudb-bench: no suite called {suite_name}");
+        eprintln!("rudb-bench: try `rudb-bench suites`");
+        return ExitCode::FAILURE;
+    };
+    let scale = match chosen_scale(&suite_name, scale_name.as_deref()) {
+        Ok(Some(scale)) => scale,
+        // The default rather than a refusal, so that `generate tpch` is the same corpus a plain
+        // `run tpch` would look for. A generation that picked a different one from the run would be
+        // a directory full of files and a suite that still says nothing is there.
+        Ok(None) => match suite.default_scale() {
+            Some(scale) => scale,
+            None => {
+                eprintln!(
+                    "rudb-bench: the {suite_name} suite has one corpus of one size, so there is \
+                     nothing to generate at a scale factor"
+                );
+                return ExitCode::FAILURE;
+            }
+        },
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let plan = match rudb_bench::corpus::plan(suite, scale) {
+        Ok(plan) => plan,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    print!("{}", plan.say());
+    if !yes {
+        // Not offered when the scale is past the ceiling, because a line telling somebody to run a
+        // command that the line above it says will be refused is a line that wastes their run.
+        if !plan.beyond {
+            println!("nothing written. Run it again with --yes");
+        }
+        return ExitCode::SUCCESS;
+    }
+    let duckdb = rudb_bench::engine::duckdb();
+    match rudb_bench::corpus::generate(suite, scale, &duckdb, &mut |line| println!("{line}")) {
+        Ok(manifest) => {
+            println!();
+            println!("{} rows over {} tables", manifest.rows(), manifest.tables.len());
+            println!("corpus {}", manifest.digest());
+            // A property that did not hold does not stop a generation, for the reason the module
+            // gives, and it is the one thing in a manifest somebody has to be told rather than left
+            // to find. The graph layer's sizes are built on these.
+            for property in manifest.broken() {
+                println!("{} does not hold: {}", property.name, property.observed);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 /// Check every committed plan baseline, or record one.
 ///
 /// The one subcommand here that measures nothing. It asks rudb to `EXPLAIN` each query in a suite
@@ -1513,6 +1620,13 @@ fn help() {
     println!(
         "    --check         fail on a cell {FACTOR:.0}x slower, and on any cell that lost its loop"
     );
+    println!("  generate <suite> write the corpus a generated suite runs over, and the manifest");
+    println!("                that describes it. Needs DuckDB and nothing else. Prints what it");
+    println!("                would write and stops, unless --yes");
+    println!("    --scale n       which scale factor to write, such as 1 or 100, default the");
+    println!("                    suite's own. Above SF10 the DuckDB extension is not permitted");
+    println!("                    and this says so rather than writing a corpus nobody can quote");
+    println!("    --yes           actually write it. Without this it is a plan and a disk figure");
     println!("  load          load a suite's data into each engine and time it");
     println!("  report [suite] build the cross engine table out of the saved runs on this");
     println!("                machine, for the engines measured one at a time with --save");

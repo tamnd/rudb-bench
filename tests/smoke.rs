@@ -56,6 +56,7 @@ fn small(duckdb: &Duckdb, at: &std::path::Path) -> Dataset {
         rows: Some(100_000),
         scale: None,
         rows_exact: true,
+        manifest: None,
     }
 }
 
