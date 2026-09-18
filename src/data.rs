@@ -551,12 +551,31 @@ pub(crate) enum Finished {
 /// `write` and never reaches its own exit, so a parent that waited first and read afterwards would
 /// hang on exactly the queries this exists to catch, and would report them as timeouts whatever
 /// they were really doing.
+///
+/// The child is put in a process group of its own, which is what makes the limit mean anything.
+/// Every engine here is run under `/usr/bin/time`, so the process this harness spawns is the timer
+/// and the engine is the timer's child. Killing the process would kill the timer and leave the
+/// engine running, holding the write end of both pipes, and the two draining threads would then
+/// wait on an engine nobody is waiting for any more. A group is the handle on all of it.
+///
+/// The cost of that group is Ctrl-C. A terminal sends its interrupt to the foreground group, which
+/// the engine is no longer in, so a run stopped by hand leaves the query that was running to finish
+/// on its own. That is a worse trade in a terminal and a better one everywhere else, because the
+/// case it replaces left an engine behind on every query that ran out of its limit, and a suite at
+/// SF1 has twenty two of those. A run stopped by hand leaves one, and `kill -9 -<pid>` takes it.
 pub(crate) fn both_within(
     command: &mut Command,
     what: &str,
     limit: Option<Duration>,
 ) -> Result<Finished, BenchError> {
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Zero means the group takes the child's own pid, so the group id to kill later is the pid
+        // this side already has.
+        command.process_group(0);
+    }
     let mut child =
         command.spawn().map_err(|e| BenchError::new(format!("cannot run {what}: {e}")))?;
     let mut out = child.stdout.take().ok_or_else(|| BenchError::new("no stdout pipe"))?;
@@ -619,7 +638,7 @@ fn wait_within(
         if started.elapsed() >= limit {
             // Killed rather than asked politely. There is no portable way to ask, and a query that
             // ignored the request would leave the harness waiting again on the thing it gave up on.
-            let _ = child.kill();
+            stop(child);
             let _ = child.wait();
             return Ok(None);
         }
@@ -629,6 +648,39 @@ fn wait_within(
 
 /// How often a run that has a limit is asked whether it is done.
 const POLL: Duration = Duration::from_millis(20);
+
+/// Stop a child and everything it started.
+///
+/// The child is killed either way. On Unix the group it leads is killed first, which is the part
+/// that matters: the process this harness spawned is `/usr/bin/time` and the engine underneath it
+/// is a child of that, so killing the process alone stops the timer and leaves the engine to run
+/// for as long as the query takes. That is not a hypothetical. It is what a sixty second limit on
+/// TPC-H q02 did before this, which left one engine process on the machine for fifty minutes and a
+/// harness waiting on the pipes it still had open.
+///
+/// A group that is already gone is not an error here. The child may have exited between the poll
+/// that said it had not and this line, which is a race nothing can close and nothing needs to.
+///
+/// The group is killed by running `kill`, which is a subprocess to send a signal and is not how
+/// anybody would write this given a free hand. The free hand is the point: this crate forbids
+/// unsafe code and has no dependencies, so `kill(2)` is not reachable from it, and the choice is
+/// between one short lived process on the path where a query has already spent its whole limit and
+/// giving up one of the two properties everywhere. `-9` is the signal and `-<group>` is the group,
+/// which is POSIX and is what both the shell builtin and `/bin/kill` do.
+fn stop(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        let group = child.id();
+        let _ = Command::new("sh")
+            .arg("-c")
+            .arg(format!("kill -9 -{group}"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+}
 
 #[cfg(test)]
 mod tests {
@@ -667,6 +719,23 @@ mod tests {
         let started = Instant::now();
         let got = both_within(&mut command, "a sleep", Some(Duration::from_millis(300)))
             .expect("giving up on a sleep is not a failure");
+        let waited = started.elapsed();
+        assert!(matches!(got, Finished::TimedOut), "{got:?}");
+        assert!(waited < Duration::from_secs(10), "waited {waited:?} on a limit of 300ms");
+    }
+
+    /// The shape every engine here actually has. `/usr/bin/time` is what gets spawned and the
+    /// engine is its child, so a limit that only stopped the process it spawned would stop the
+    /// timer, leave the engine running, and then wait on the pipes the engine still holds. This is
+    /// that arrangement in one line of shell, and the limit has to get through both of them.
+    #[test]
+    fn a_command_that_started_another_one_is_stopped_along_with_it() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("sh -c 'sleep 30' & sleep 30");
+        let started = Instant::now();
+        let got =
+            both_within(&mut command, "a sleep under a sleep", Some(Duration::from_millis(300)))
+                .expect("giving up on a sleep is not a failure");
         let waited = started.elapsed();
         assert!(matches!(got, Finished::TimedOut), "{got:?}");
         assert!(waited < Duration::from_secs(10), "waited {waited:?} on a limit of 300ms");
