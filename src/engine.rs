@@ -45,7 +45,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::data::{Table, both, output, size_of_tree};
+use crate::data::{Finished, Table, both_within, output, size_of_tree};
 use crate::memory::{Cost, Timer};
 use crate::metrics::Document;
 use crate::suite::{Fixup, Loading, Suite, loading, sorting_key};
@@ -167,6 +167,54 @@ pub struct Ran {
     /// goes into the report, and the cross check in [`crate::metrics::Accounting`] decides whether
     /// the breakdown is worth publishing.
     pub metrics: Option<Document>,
+    /// Whether this is a measurement, and when it is not, what happened instead.
+    pub outcome: Outcome,
+}
+
+/// The four things a run can be.
+///
+/// A query that does not finish used to have nowhere to go. The harness had two states, a number or
+/// an error, and an error stopped the suite, so an engine that could not finish one query was
+/// refused the whole suite in `can_run` rather than run and reported. That is why TPC-H was refused
+/// here for a year: twenty two joins that are nested loops would have been a timing of a hang.
+///
+/// The refusal was the right reasoning about the wrong unit. Not finishing is a fact about one
+/// query, so it belongs in one cell, and the other twenty one queries get their numbers. A table
+/// with twenty timeouts in it looks like failure and is not: it is the zero that every later number
+/// is read against, and it is the output most likely to get skipped because of how it looks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Outcome {
+    /// It ran and the number beside it is a measurement.
+    Completed,
+    /// The limit came first. The limit travels with it, because a timeout is only readable next to
+    /// what it was measured against, and two reports with different limits are different reports.
+    TimedOut { limit: Duration },
+    /// It started and did not work, which is a different thing from being slow.
+    Failed { message: String },
+    /// It was never run, and this says why.
+    Refused { why: String },
+}
+
+impl Outcome {
+    /// Whether a number from this run may be published.
+    ///
+    /// Only a completed run has a number at all. The limit that fired is not a measurement of the
+    /// query, it is a measurement of the limit.
+    #[must_use]
+    pub const fn measured(&self) -> bool {
+        matches!(self, Self::Completed)
+    }
+
+    /// How this reads in a cell.
+    #[must_use]
+    pub fn cell(&self) -> String {
+        match self {
+            Self::Completed => String::new(),
+            Self::TimedOut { limit } => format!("timeout at {}s", limit.as_secs()),
+            Self::Failed { .. } => "failed".to_owned(),
+            Self::Refused { .. } => "not run".to_owned(),
+        }
+    }
 }
 
 /// How an engine says what a query cost it.
@@ -324,7 +372,7 @@ pub trait Engine {
     /// # Errors
     ///
     /// When the engine could not be started or the query failed.
-    fn run(&mut self, sql: &str) -> Result<Ran, BenchError>;
+    fn run(&mut self, sql: &str, limit: Option<Duration>) -> Result<Ran, BenchError>;
 
     /// Give back the disk this engine's copy of the data is taking, now that it is measured.
     ///
@@ -471,7 +519,16 @@ impl Runner {
     }
 
     /// Run it, and read back what it cost and what it printed.
-    fn go(&self, mut command: Command, what: &str) -> Result<Ran, BenchError> {
+    ///
+    /// `limit` is how long the query is given before the harness stops waiting. `None` waits as
+    /// long as it takes, which is right for the apparatus asking a question and wrong for a timed
+    /// query on a suite nobody has run before.
+    fn go(
+        &self,
+        mut command: Command,
+        what: &str,
+        limit: Option<Duration>,
+    ) -> Result<Ran, BenchError> {
         // Taken away before the run rather than after it, so that a query which measured nothing
         // reads as nothing. Left behind, the file from the run before would be read as this run's
         // breakdown, and a stale breakdown that looks plausible is the worst of the three states.
@@ -479,7 +536,25 @@ impl Runner {
             let _ = std::fs::remove_file(path);
         }
         let _ = std::fs::remove_file(&self.report);
-        let (stdout, stderr) = both(&mut command, what)?;
+        let (stdout, stderr) = match both_within(&mut command, what, limit)? {
+            Finished::Ran { stdout, stderr } => (stdout, stderr),
+            Finished::TimedOut => {
+                // The limit is the honest sample: the query took at least this long. The cost is
+                // whatever the timer wrote before the kill, which on a killed process is usually
+                // nothing, and `Cost` already knows how to say it has no number.
+                let limit = limit.unwrap_or_default();
+                return Ok(Ran {
+                    cost: Cost::unavailable(format!(
+                        "{what} was killed at its {}s limit",
+                        limit.as_secs()
+                    )),
+                    reported: None,
+                    answer: String::new(),
+                    metrics: None,
+                    outcome: Outcome::TimedOut { limit },
+                });
+            }
+        };
         let cost = match &self.timer {
             Ok(_) => Timer::read(&self.report),
             Err(why) => Cost::unavailable(why.clone()),
@@ -496,7 +571,7 @@ impl Runner {
             Some(path) => Document::last_in(path).map_err(BenchError::new)?,
             None => None,
         };
-        Ok(Ran { cost, reported, answer, metrics })
+        Ok(Ran { cost, reported, answer, metrics, outcome: Outcome::Completed })
     }
 }
 
@@ -642,7 +717,7 @@ impl Duckdb {
     }
 
     /// Run statements against the database, under the timer.
-    fn exec(&self, statements: &[&str]) -> Result<Ran, BenchError> {
+    fn exec(&self, statements: &[&str], limit: Option<Duration>) -> Result<Ran, BenchError> {
         let mut command = self.runner.command(&self.binary);
         // CSV with no header, which is what three of the four engines here are asked for so that
         // their answers can be compared without a parser each. The comparison itself reads numbers
@@ -656,7 +731,7 @@ impl Duckdb {
         for statement in statements {
             command.arg("-c").arg(statement);
         }
-        self.runner.go(command, self.name)
+        self.runner.go(command, self.name, limit)
     }
 }
 
@@ -709,12 +784,12 @@ impl Engine for Duckdb {
         let refs: Vec<&str> = statements.iter().map(String::as_str).collect();
 
         let start = Instant::now();
-        let build = self.exec(&refs)?;
+        let build = self.exec(&refs, None)?;
         // CHECKPOINT before the clock stops, because a load that left the write ahead log to be
         // replayed later is a load whose cost has been moved into the first query. Rule five puts
         // load time next to every runtime result precisely so that trade shows up, and it cannot
         // show up if the load stops timing before the data is durable.
-        let checkpoint = self.exec(&["CHECKPOINT"])?;
+        let checkpoint = self.exec(&["CHECKPOINT"], None)?;
         let took = start.elapsed();
 
         let on_disk = std::fs::metadata(&self.database).map(|m| m.len()).map_err(|e| {
@@ -729,16 +804,16 @@ impl Engine for Duckdb {
         })
     }
 
-    fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
+    fn run(&mut self, sql: &str, limit: Option<Duration>) -> Result<Ran, BenchError> {
         if self.prelude.is_empty() {
-            return self.exec(&[sql]);
+            return self.exec(&[sql], limit);
         }
         // In front of the query and not in front of the load, so that the two runs an attribution
         // compares built the same database and differ only in how the query was planned. A load
         // with the optimizer off would be a slower load reported as a cost of the optimizer.
         let mut statements: Vec<&str> = self.prelude.iter().map(String::as_str).collect();
         statements.push(sql);
-        self.exec(&statements)
+        self.exec(&statements, limit)
     }
 
     fn no_optimizer(&mut self) -> Result<Vec<String>, String> {
@@ -813,10 +888,10 @@ impl ClickhouseLocal {
     /// `None` rather than zero when the answer does not parse, so the caller falls back to the
     /// directory rather than publishing a table with no bytes in it.
     fn parts_bytes(&self) -> Option<u64> {
-        parts_bytes(&self.exec(PARTS).ok()?.answer)
+        parts_bytes(&self.exec(PARTS, None).ok()?.answer)
     }
 
-    fn exec(&self, sql: &str) -> Result<Ran, BenchError> {
+    fn exec(&self, sql: &str, limit: Option<Duration>) -> Result<Ran, BenchError> {
         let mut command = self.runner.command(&self.binary);
         command
             .arg("local")
@@ -828,7 +903,7 @@ impl ClickhouseLocal {
             .arg("--time")
             .arg("--query")
             .arg(sql);
-        self.runner.go(command, "clickhouse local")
+        self.runner.go(command, "clickhouse local", limit)
     }
 }
 
@@ -870,16 +945,19 @@ impl Engine for ClickhouseLocal {
                         table.name,
                         table.path.display()
                     );
-                    let made = self.exec(&create)?;
+                    let made = self.exec(&create, None)?;
                     cpu = add(cpu, made.cost.cpu);
-                    self.exec(&insert)?
+                    self.exec(&insert, None)?
                 }
-                None => self.exec(&format!(
-                    "CREATE TABLE {} ENGINE = MergeTree ORDER BY tuple() AS SELECT * FROM \
-                     file('{}', Parquet)",
-                    table.name,
-                    table.path.display()
-                ))?,
+                None => self.exec(
+                    &format!(
+                        "CREATE TABLE {} ENGINE = MergeTree ORDER BY tuple() AS SELECT * FROM \
+                         file('{}', Parquet)",
+                        table.name,
+                        table.path.display()
+                    ),
+                    None,
+                )?,
             };
             cpu = add(cpu, ran.cost.cpu);
         }
@@ -894,8 +972,8 @@ impl Engine for ClickhouseLocal {
         })
     }
 
-    fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
-        self.exec(sql)
+    fn run(&mut self, sql: &str, limit: Option<Duration>) -> Result<Ran, BenchError> {
+        self.exec(sql, limit)
     }
 
     fn unload(&mut self) {
@@ -1092,13 +1170,25 @@ impl ClickhouseServer {
     /// board measures, because the board drives a running ClickHouse through this same client with
     /// this same flag. The wall clock beside it is the client's, and the client is a process that
     /// starts, connects over a socket and prints a result set, none of which the server spent.
-    fn timed(&self, sql: &str) -> Result<(String, Option<Duration>), BenchError> {
+    fn timed(
+        &self,
+        sql: &str,
+        limit: Option<Duration>,
+    ) -> Result<Option<(String, Option<Duration>)>, BenchError> {
         let mut command = self.client();
         command.arg("--format").arg("CSV").arg("--time").arg("--query").arg(sql);
-        let (stdout, stderr) = both(&mut command, "clickhouse client")?;
+        // The client is killed, not the server, so the query it asked for may still be running on
+        // the other side of the socket. That is the server's to clean up and the next query pays
+        // for whatever is left, which is a reason a timeout makes the whole row unpublishable
+        // rather than just its own cell.
+        let Finished::Ran { stdout, stderr } =
+            both_within(&mut command, "clickhouse client", limit)?
+        else {
+            return Ok(None);
+        };
         let (reported, answer) = Reported::Seconds
             .parse(&String::from_utf8_lossy(&stdout), &String::from_utf8_lossy(&stderr));
-        Ok((answer, reported))
+        Ok(Some((answer, reported)))
     }
 
     /// The column list a Parquet file implies, as ClickHouse would write it.
@@ -1235,10 +1325,28 @@ impl Engine for ClickhouseServer {
         })
     }
 
-    fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
+    fn run(&mut self, sql: &str, limit: Option<Duration>) -> Result<Ran, BenchError> {
         self.start()?;
-        let (answer, reported) = self.timed(sql)?;
-        Ok(Ran { cost: Cost::unavailable(NOT_THE_SERVER), reported, answer, metrics: None })
+        let Some((answer, reported)) = self.timed(sql, limit)? else {
+            let limit = limit.unwrap_or_default();
+            return Ok(Ran {
+                cost: Cost::unavailable(format!(
+                    "the clickhouse client was killed at its {}s limit",
+                    limit.as_secs()
+                )),
+                reported: None,
+                answer: String::new(),
+                metrics: None,
+                outcome: Outcome::TimedOut { limit },
+            });
+        };
+        Ok(Ran {
+            cost: Cost::unavailable(NOT_THE_SERVER),
+            reported,
+            answer,
+            metrics: None,
+            outcome: Outcome::Completed,
+        })
     }
 
     fn unload(&mut self) {
@@ -1466,7 +1574,7 @@ impl Engine for Datafusion {
         })
     }
 
-    fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
+    fn run(&mut self, sql: &str, limit: Option<Duration>) -> Result<Ran, BenchError> {
         let mut command = self.runner.command(&self.binary);
         // Not quiet. `-q` used to be here, because without it every result is followed by a banner,
         // a line saying how many rows were fetched and a line saying how long it took, and those
@@ -1492,7 +1600,7 @@ impl Engine for Datafusion {
             command.arg("-c").arg(statement);
         }
         command.arg("-c").arg(sql);
-        self.runner.go(command, "datafusion-cli")
+        self.runner.go(command, "datafusion-cli", limit)
     }
 }
 
@@ -1614,7 +1722,7 @@ impl Engine for Polars {
         })
     }
 
-    fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
+    fn run(&mut self, sql: &str, limit: Option<Duration>) -> Result<Ran, BenchError> {
         let mut command = self.runner.command(&self.python);
         command.arg(&self.script).arg(sql);
         for table in &self.tables {
@@ -1628,7 +1736,7 @@ impl Engine for Polars {
             };
             command.arg(format!("{}={}\n{columns}", table.name, table.path.display()));
         }
-        self.runner.go(command, "polars")
+        self.runner.go(command, "polars", limit)
     }
 }
 
@@ -1721,20 +1829,16 @@ impl Engine for Rudb {
         &self.version
     }
 
-    fn can_run(&self, suite: &Suite) -> Ability {
+    fn can_run(&self, _suite: &Suite) -> Ability {
         if self.binary.is_none() {
             return Ability::no("no rudb on PATH, set RUDB_BENCH_RUDB");
         }
-        // Every join in rudb is a nested loop, so a suite that is twenty two joins would be timed on
-        // a hang rather than on a query. The smoke suite has one join and declares it absent for
-        // rudb by name in `suite.rs`, which keeps the gap in one place a reader can find. A whole
-        // suite of them is a refusal instead, because a table of twenty two absences is not a row.
-        if suite.name == "tpch" {
-            return Ability::no(
-                "every join in rudb is a nested loop and TPC-H is twenty two of them, so this \
-                 would be a timing of a hang. spec/07-execution.md section 7.4, milestone E3",
-            );
-        }
+        // TPC-H used to be refused here, on the grounds that every join in rudb is a nested loop
+        // and twenty two of them would be a timing of a hang rather than of a query. That was a
+        // reasonable thing to do when a query that did not come back took the whole run with it.
+        // It is not reasonable now: a query gets a limit, a query that runs out of it becomes a row
+        // in the table saying so, and the other twenty one still get measured. A refusal here would
+        // hide exactly the number G0 exists to produce, which is where rudb actually is on a join.
         Ability::Yes
     }
 
@@ -1779,7 +1883,7 @@ impl Engine for Rudb {
         })
     }
 
-    fn run(&mut self, sql: &str) -> Result<Ran, BenchError> {
+    fn run(&mut self, sql: &str, limit: Option<Duration>) -> Result<Ran, BenchError> {
         let Some(binary) = self.binary.clone() else {
             return Err(BenchError::new("there is no rudb to run"));
         };
@@ -1809,7 +1913,7 @@ impl Engine for Rudb {
             command.arg("-c").arg(statement);
         }
         command.arg("-c").arg(sql);
-        self.runner.go(command, "rudb")
+        self.runner.go(command, "rudb", limit)
     }
 
     fn no_optimizer(&mut self) -> Result<Vec<String>, String> {
@@ -2027,14 +2131,15 @@ mod tests {
         assert_eq!(rudb.ddl, ["CREATE VIEW smoke AS SELECT * FROM read_parquet('/tmp/s.parquet')"]);
     }
 
+    /// This used to be the test that rudb refuses TPC-H, on the grounds that twenty two joins
+    /// against a nested loop would time a hang. The limit is what changed: a query that runs out of
+    /// it is a row rather than a run nobody gets back, so refusing the suite now hides the number
+    /// G0 is here to produce.
     #[test]
-    fn rudb_refuses_tpch_with_a_reason_rather_than_timing_a_hang() {
+    fn rudb_runs_tpch_now_that_a_query_that_hangs_costs_one_row_rather_than_the_run() {
         let tpch = find("tpch").unwrap();
         let rudb = built(tpch);
-        assert!(!rudb.can_run(tpch).yes());
-        let why = rudb.can_run(tpch).why().expect("a refusal says why").to_owned();
-        assert!(why.contains("nested loop"), "{why}");
-        assert!(why.contains("E3"), "a refusal names the milestone that lifts it, {why}");
+        assert!(rudb.can_run(tpch).yes(), "{:?}", rudb.can_run(tpch).why());
     }
 
     #[test]
@@ -2047,7 +2152,7 @@ mod tests {
             return;
         }
         assert!(rudb.can_run(smoke).why().is_some_and(|why| why.contains("RUDB_BENCH_RUDB")));
-        assert!(rudb.run("SELECT 1").is_err());
+        assert!(rudb.run("SELECT 1", None).is_err());
         let _ = std::fs::remove_dir_all(&scratch);
     }
 
@@ -2089,7 +2194,7 @@ mod tests {
         assert!(loaded.took.as_nanos() > 0);
         assert!(loaded.on_disk_is.contains("database file"), "{}", loaded.on_disk_is);
 
-        let ran = duckdb.run("SELECT count(*) FROM t").expect("counting should work");
+        let ran = duckdb.run("SELECT count(*) FROM t", None).expect("counting should work");
         assert!(ran.answer.contains("100000"), "{}", ran.answer);
         // Either a number or a reason. On a machine with a /usr/bin/time it is a number, and
         // asserting that here would make the test a fact about the runner rather than the harness.
@@ -2119,7 +2224,7 @@ mod tests {
             eprintln!("skipping, no DuckDB on this machine");
             return;
         };
-        let got = duckdb.run("SELECT nope FROM nothing");
+        let got = duckdb.run("SELECT nope FROM nothing", None);
         assert!(got.is_err(), "a missing table should not time successfully");
         let _ = std::fs::remove_dir_all(&scratch);
     }

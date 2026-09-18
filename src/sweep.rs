@@ -20,6 +20,7 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 use crate::engine::{BenchError, Engine, Rudb};
 use crate::measure::show;
@@ -226,6 +227,7 @@ pub fn sweep(
     dataset: &crate::data::Dataset,
     scratch: &Path,
     hot: usize,
+    limit: Option<Duration>,
 ) -> Sweep {
     let mut rows = Vec::new();
     let mut version = String::new();
@@ -239,7 +241,7 @@ pub fn sweep(
         }
         let result = match engine.can_run(suite).why() {
             Some(why) => Err(why.to_owned()),
-            None => run(&mut engine, suite, queries, dataset, hot)
+            None => run(&mut engine, suite, queries, dataset, hot, limit)
                 .map_err(|e: BenchError| e.to_string()),
         };
         engine.unload();

@@ -10,6 +10,8 @@
 //! hot runs, a distribution, a peak resident set and a per-query table. It measures nothing anybody
 //! should quote and it proves the harness works, which is what M0 asks of it.
 
+use std::time::Duration;
+
 /// One scale factor of a generated suite.
 ///
 /// A suite stays one entry and the scale is a choice a run makes, rather than one suite per scale.
@@ -173,6 +175,24 @@ impl Suite {
                 Some(tables.iter().map(|table| table.rows(scale)).sum())
             }
         }
+    }
+
+    /// How long one query gets before the harness stops waiting for it, when nobody says otherwise.
+    ///
+    /// Taken off the row count rather than fixed, because a minute is generous over the hundred
+    /// thousand rows the smoke suite has and is a coin toss over ClickBench at a hundred million.
+    /// The number is deliberately loose. This exists to turn a hang into a row in the table, not to
+    /// fail a query that is merely slow, so anything an engine can actually finish it finishes well
+    /// inside this and the limit never comes up. A suite whose size is not settled gets the floor,
+    /// which is the same limit the smallest suite gets.
+    #[must_use]
+    pub fn timeout(&self, scale: Option<&Scale>) -> Duration {
+        let rows = self.rows(scale).unwrap_or(0);
+        // A minute for the first ten million rows and a minute for every ten million after that, up
+        // to an hour. An engine at a thousandth of the speed of the slowest thing here would still
+        // come in under it.
+        let minutes = 1 + rows / 10_000_000;
+        Duration::from_secs(60 * minutes.min(60))
     }
 
     /// How many rows one of this suite's tables holds at this scale.
@@ -1950,6 +1970,33 @@ mod tests {
         CLICKBENCH, DUCKDB_HITS, Fixup, HITS, SMOKE, SUITES, Size, TPCH, find, loading, queries,
         sorting_key,
     };
+
+    /// The limit moves with the data, because a minute is generous over a hundred thousand rows
+    /// and a coin toss over a hundred million.
+    #[test]
+    fn the_default_limit_grows_with_the_suite_and_stops_at_an_hour() {
+        let smoke = find("smoke").expect("smoke is a suite");
+        let tpch = find("tpch").expect("tpch is a suite");
+        // A whole number of minutes, at least one of them, whatever the suite is.
+        for suite in SUITES {
+            let limit = suite.timeout(None);
+            assert!(limit >= std::time::Duration::from_secs(60), "{} got {limit:?}", suite.name);
+            assert_eq!(limit.as_secs() % 60, 0, "{} got {limit:?}", suite.name);
+        }
+        assert!(smoke.timeout(None) < std::time::Duration::from_secs(3600));
+        // And it moves with the scale rather than with the suite's name. The smallest scale TPC-H
+        // has and the largest are two different amounts of data, so they are two different limits.
+        let scales = tpch.scales();
+        let small = tpch.timeout(scales.first());
+        let large = tpch.timeout(scales.last());
+        assert!(
+            large > small,
+            "sf{} got {small:?} and sf{} got {large:?}",
+            scales.first().map_or("?", |s| s.label),
+            scales.last().map_or("?", |s| s.label)
+        );
+        assert!(large <= std::time::Duration::from_secs(3600), "the ceiling is an hour, {large:?}");
+    }
 
     #[test]
     fn a_scale_factor_is_a_directory_under_the_suite_rather_than_a_suite_of_its_own() {

@@ -712,7 +712,7 @@ mod tests {
     use super::{
         Judgement, Record, Timing, Watch, check, civil, judge, parse, path, render, report, today,
     };
-    use crate::engine::Loaded;
+    use crate::engine::{Loaded, Outcome};
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
     use crate::report::{QueryResult, SuiteResult};
@@ -743,6 +743,7 @@ mod tests {
                 reported: None,
                 name: "q1".to_owned(),
                 shape: "count".to_owned(),
+                outcome: Outcome::Completed,
                 runs: Runs { cold: Duration::from_millis(40), hot: ms(millis) },
                 cold: cost(),
                 hot: cost(),

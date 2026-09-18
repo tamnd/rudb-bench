@@ -25,6 +25,12 @@ use std::time::Duration;
 pub struct Distribution {
     samples: Vec<Duration>,
     convention: Convention,
+    /// How many of the samples are a limit that fired rather than a query that finished.
+    ///
+    /// A timeout is a sample of the limit, not of the query, so a distribution holding one has no
+    /// median worth printing however many other runs went into it. Counted rather than kept as a
+    /// flag so that a report can say how many of the runs did not finish.
+    timeouts: usize,
 }
 
 /// Which of the two allowed summaries this is.
@@ -50,7 +56,7 @@ impl Distribution {
         assert!(!samples.is_empty(), "a distribution of nothing is not a measurement");
         let mut samples = samples;
         samples.sort_unstable();
-        Self { samples, convention: Convention::Median }
+        Self { samples, convention: Convention::Median, timeouts: 0 }
     }
 
     /// Summarize a set of runs the way the ClickBench board does, by the best.
@@ -63,7 +69,20 @@ impl Distribution {
         assert!(!samples.is_empty(), "a distribution of nothing is not a measurement");
         let mut samples = samples;
         samples.sort_unstable();
-        Self { samples, convention: Convention::Clickbench }
+        Self { samples, convention: Convention::Clickbench, timeouts: 0 }
+    }
+
+    /// The same distribution, recording that some of its runs hit the limit.
+    #[must_use]
+    pub fn with_timeouts(mut self, timeouts: usize) -> Self {
+        self.timeouts = timeouts;
+        self
+    }
+
+    /// How many of the runs hit the limit instead of finishing.
+    #[must_use]
+    pub const fn timeouts(&self) -> usize {
+        self.timeouts
     }
 
     /// Which summary this is, for the label.
@@ -150,9 +169,13 @@ impl Distribution {
     /// Five runs is the floor in rule two. A ClickBench-convention number is never publishable
     /// under this name, because it is a best of three and calling it a median would be a lie about
     /// the method rather than about the number.
+    ///
+    /// A run that hit the limit is refused on the same terms and for the same reason. The limit is
+    /// a number about the harness, so a median with one in it is partly a measurement of how long
+    /// somebody was willing to wait, and it would read as a query that took exactly that long.
     #[must_use]
     pub fn publishable(&self) -> bool {
-        self.convention == Convention::Median && self.samples.len() >= 5
+        self.convention == Convention::Median && self.samples.len() >= 5 && self.timeouts == 0
     }
 
     /// The sample at the nearest rank to a percentile.
@@ -234,6 +257,20 @@ mod tests {
 
     fn ms(values: &[u64]) -> Vec<Duration> {
         values.iter().copied().map(Duration::from_millis).collect()
+    }
+
+    /// Five samples and a limit among them is not a median of anything. The sample that hit the
+    /// limit is a number about how long somebody was willing to wait, and a median carrying one
+    /// reads as a query that happened to take exactly that long.
+    #[test]
+    fn a_distribution_with_a_limit_in_it_cannot_be_published_however_many_samples_it_has() {
+        let clean = Distribution::median(ms(&[10, 11, 12, 13, 14]));
+        assert!(clean.publishable());
+        let with = Distribution::median(ms(&[10, 11, 12, 13, 14])).with_timeouts(1);
+        assert!(!with.publishable());
+        assert_eq!(with.timeouts(), 1);
+        // And the samples are left alone, because what they were is still what the report prints.
+        assert_eq!(with.samples(), clean.samples());
     }
 
     #[test]

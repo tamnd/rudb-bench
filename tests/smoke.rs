@@ -69,7 +69,7 @@ fn the_whole_measurement_path_produces_a_table_a_person_can_read() {
     let dataset = small(&duckdb, &at);
     let suite = find("smoke").unwrap();
     let result =
-        run(&mut duckdb, suite, QUERIES, &dataset, 5).expect("a real engine should measure");
+        run(&mut duckdb, suite, QUERIES, &dataset, 5, None).expect("a real engine should measure");
 
     assert_eq!(result.queries.len(), 2, "the whole suite, losses included");
     assert!(result.loaded.on_disk > 0, "a loaded database takes space");
@@ -100,7 +100,7 @@ fn a_number_measured_here_can_never_be_published() {
     let dataset = small(&duckdb, &at);
     let suite = find("smoke").unwrap();
     let result =
-        run(&mut duckdb, suite, QUERIES, &dataset, 5).expect("a real engine should measure");
+        run(&mut duckdb, suite, QUERIES, &dataset, 5, None).expect("a real engine should measure");
 
     // Two reasons at least: no machine here is a c6a.4xlarge, and smoke is comparable to nothing.
     // This assertion is the one that has to fail before anybody publishes anything, which is the
@@ -123,7 +123,7 @@ fn a_query_that_does_not_run_stops_the_suite_rather_than_scoring_zero() {
     let suite = find("smoke").unwrap();
     let broken: &[Query] =
         &[Query { name: "q1", sql: "SELECT nope FROM t", shape: "not a column", dialects: &[] }];
-    let got = run(&mut duckdb, suite, broken, &dataset, 5);
+    let got = run(&mut duckdb, suite, broken, &dataset, 5, None);
     assert!(got.is_err(), "a failing query is a broken run and not a fast one");
 
     let _ = std::fs::remove_dir_all(&at);
@@ -158,7 +158,7 @@ fn every_engine_on_this_machine_gets_the_same_file_and_answers_the_same_thing() 
     // times two queries times a cold run and the hot ones is the longest thing the gate does, and
     // every run after the first tests the same code with a different number in it. The test above
     // is the one that holds rule two, and it asks for five.
-    let compared = compare(&mut engines, suite, QUERIES, &dataset, 1);
+    let compared = compare(&mut engines, suite, QUERIES, &dataset, 1, None);
 
     assert!(!compared.results.is_empty(), "DuckDB at least should have produced numbers");
     assert_eq!(compared.results[0].engine, "duckdb", "the reference column is DuckDB");

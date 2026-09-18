@@ -21,6 +21,7 @@
 #![forbid(unsafe_code)]
 
 use std::process::ExitCode;
+use std::time::Duration;
 
 use rudb_bench::data::Rows;
 use rudb_bench::engine::{
@@ -297,6 +298,13 @@ struct Plan {
     /// `rudb-bench report <suite>` builds the cross engine table afterwards out of everything that
     /// has been saved so far.
     save: bool,
+    /// How long any one query is given before the harness stops waiting for it.
+    ///
+    /// The suite's own default unless `--timeout` says otherwise, and `--timeout 0` means wait as
+    /// long as it takes. A limit is not a nuisance to be tuned away: it is what lets a suite nobody
+    /// has run before produce a table on the first attempt, with a cell per query saying which of
+    /// them finished, instead of one engine's first hang standing in for the whole run.
+    timeout: Option<Duration>,
 }
 
 /// Every engine this harness knows how to drive, in the order [`discover`] builds them.
@@ -328,6 +336,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     let mut scale = None;
     let mut report = false;
     let mut save = false;
+    let mut timeout = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let wanted = match arg.as_str() {
@@ -373,6 +382,20 @@ fn plan(args: &[String]) -> Result<Plan, String> {
                     .next()
                     .ok_or("--scale wants a scale factor after it, such as `--scale 1`")?;
                 scale = Some(given.trim().trim_start_matches("sf").to_owned());
+                continue;
+            }
+            "--timeout" => {
+                let given = rest.next().ok_or(
+                    "--timeout wants a number of seconds after it, such as `--timeout 120`",
+                )?;
+                let seconds: u64 = given
+                    .parse()
+                    .map_err(|e| format!("--timeout {given} is not a number of seconds, {e}"))?;
+                // Zero is the way to ask for no limit at all, which is what somebody debugging a
+                // query that takes twenty minutes wants. It is spelled as a value rather than as a
+                // second flag because the two are the same decision and a run should not be able to
+                // say both.
+                timeout = Some(Duration::from_secs(seconds));
                 continue;
             }
             "--report" => {
@@ -439,6 +462,13 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     }
     let suite = suite.unwrap_or_else(|| "smoke".to_owned());
     let scale = chosen_scale(&suite, scale.as_deref())?;
+    // Worked out here rather than in the initializer, because the suite's own default needs the
+    // suite and the suite has been moved into the plan by the time the field comes round.
+    let timeout = match timeout {
+        Some(given) if given.is_zero() => None,
+        Some(given) => Some(given),
+        None => rudb_bench::suite::find(&suite).map(|found| found.timeout(scale)),
+    };
     Ok(Plan {
         suite,
         gate,
@@ -449,6 +479,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
         scale,
         report,
         save,
+        timeout,
     })
 }
 
@@ -545,8 +576,14 @@ fn run(plan: &Plan) -> ExitCode {
     }
     println!();
 
-    let mut compared =
-        rudb_bench::report::compare(&mut engines, suite, queries, &dataset, plan.runs);
+    let mut compared = rudb_bench::report::compare(
+        &mut engines,
+        suite,
+        queries,
+        &dataset,
+        plan.runs,
+        plan.timeout,
+    );
     compared.skipped.extend(missing);
 
     for result in &compared.results {
@@ -987,7 +1024,11 @@ fn sweep(args: &[String]) -> ExitCode {
         println!("{:<10}  {}", file.name, file.path.display());
     }
     println!();
-    let swept = rudb_bench::sweep::sweep(&found, suite, queries, &dataset, &scratch, runs);
+    // The suite's own limit. This command has no flag for it, because a sweep is a comparison
+    // between variants of one engine and a variant that hangs is the answer rather than a run to
+    // abandon.
+    let limit = Some(suite.timeout(None));
+    let swept = rudb_bench::sweep::sweep(&found, suite, queries, &dataset, &scratch, runs, limit);
     print!("{}", rudb_bench::sweep::table(&swept));
     let _ = std::fs::remove_dir_all(&scratch);
     if swept.rows.iter().all(|row| row.result.is_err()) {
@@ -1096,7 +1137,8 @@ fn attribute(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let attributed = rudb_bench::attribute::attribute(engine, suite, queries, &dataset, hot);
+    let limit = Some(suite.timeout(None));
+    let attributed = rudb_bench::attribute::attribute(engine, suite, queries, &dataset, hot, limit);
     let _ = std::fs::remove_dir_all(&scratch);
     match attributed {
         Ok(attributed) => {
@@ -1408,6 +1450,11 @@ fn help() {
     println!("    --scale n       which scale factor of a generated suite to run, such as 1 or");
     println!("                    100. A corpus the generator built, so a number out of one is");
     println!("                    comparable to every other number at the same scale");
+    println!("    --timeout n     seconds one query gets before the harness stops waiting for");
+    println!("                    it, default the suite's own. A query that runs out of it is a");
+    println!("                    row in the table saying so and the rest of the suite carries");
+    println!("                    on, and it is left out of the ratio. 0 waits as long as it");
+    println!("                    takes, which is what a query being debugged wants");
     println!("    --save          add what each engine measured to reports/saved-<suite>-");
     println!("                    <machine>.txt, so that engines run on separate days end up");
     println!("                    in one table. Re-running an engine replaces its block");
@@ -1485,6 +1532,45 @@ mod tests {
 
     fn args(line: &str) -> Vec<String> {
         line.split_whitespace().map(str::to_owned).collect()
+    }
+
+    #[test]
+    fn a_run_that_says_nothing_about_a_limit_gets_the_suite_s_own() {
+        let got = plan(&args("tpch")).expect("tpch is a suite");
+        let suite = rudb_bench::suite::find("tpch").expect("tpch is a suite");
+        assert_eq!(got.timeout, Some(suite.timeout(None)));
+    }
+
+    #[test]
+    fn a_limit_given_in_seconds_is_the_limit() {
+        let got = plan(&args("tpch --timeout 45")).expect("tpch is a suite");
+        assert_eq!(got.timeout, Some(Duration::from_secs(45)));
+    }
+
+    /// Zero is how a query being debugged asks to be waited for however long it takes. It is a
+    /// value rather than a second flag, because the two are one decision and a run should not be
+    /// able to say both.
+    #[test]
+    fn a_limit_of_zero_is_no_limit_at_all() {
+        let got = plan(&args("tpch --timeout 0")).expect("tpch is a suite");
+        assert_eq!(got.timeout, None);
+    }
+
+    #[test]
+    fn a_limit_that_is_not_a_number_of_seconds_says_so() {
+        let got = plan(&args("tpch --timeout soon"));
+        let why = got.expect_err("soon is not a number");
+        assert!(why.contains("--timeout soon"), "{why}");
+        let got = plan(&args("tpch --timeout"));
+        assert!(got.expect_err("nothing follows it").contains("--timeout"));
+    }
+
+    /// The scale moves the data and the limit is taken off the data, so the two move together.
+    #[test]
+    fn the_default_limit_follows_the_scale_the_run_asked_for() {
+        let small = plan(&args("tpch --scale 1")).expect("tpch runs at scale 1");
+        let large = plan(&args("tpch --scale 100")).expect("tpch runs at scale 100");
+        assert!(large.timeout > small.timeout, "{:?} then {:?}", small.timeout, large.timeout);
     }
 
     /// The directory is made, and it is under the place rather than being the place.
