@@ -187,12 +187,12 @@ pub struct Attributed {
     pub rows: Vec<Attribution>,
     /// Queries that came back from one run and not the other, with which side had them.
     ///
-    /// Expected to be empty, and printed rather than dropped for when it is not. [`crate::report::run`]
-    /// gives up on the whole suite when a query fails, so the case this is really about, a query
-    /// that only finishes with the layer on, does not arrive here: it arrives as the whole
-    /// attribution failing with the side that could not finish named in the message. That is the
-    /// right trade for a suite result, and the sentence under the table says which side it was, so
-    /// the finding is not lost even though the other forty two rows are.
+    /// Expected to be empty, and printed rather than dropped for when it is not. A query that only
+    /// finishes with the layer on does not arrive here either: [`crate::report::run`] gives both
+    /// sides a row, and the side that could not answer gets one saying so, so the pair is still a
+    /// pair and the disagreement is on the row rather than in this list. What is left for this is
+    /// the case where the two runs do not even have the same queries in them, which would be a
+    /// suite that changed underneath the second run.
     pub lost: Vec<(String, String)>,
 }
 

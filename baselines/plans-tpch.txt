@@ -13,14 +13,18 @@
 #
 # Nothing here is a measurement and no number in it is a time. A plan is a shape, and the only
 # question this file asks is whether it is still the same shape.
+#
+# Every line of a plan is indented two spaces and a blank line inside one is written as a lone dot,
+# so that the blank line between two queries is the only blank line in the file and a reader can
+# see where one plan ends. The dot rather than two spaces and nothing, because trailing whitespace
+# is the kind of thing an editor removes on save and a baseline should not depend on it surviving.
 
 [plans]
 suite     tpch
 engine    rudb
-version   rudb 0.3.33
+version   rudb 0.3.38
 recorded  2026-09-18
-planned   21 of 22
-refused   q11  Binder Error: column a column must appear in the GROUP BY clause or must be part of an aggregate function
+planned   22 of 22
 
 query     q01
   Sort [#3.0::VARCHAR ASC NULLS LAST, #3.1::VARCHAR ASC NULLS LAST]  [rows unknown] [pipeline 1] [reference]
@@ -36,7 +40,7 @@ query     q01
     pipeline 2 waits for nothing
 
 query     q02
-  TopN 100 offset 0 [#20.0::DECIMAL(15,2) DESC NULLS LAST, #20.2::VARCHAR ASC NULLS LAST, #20.1::VARCHAR ASC NULLS LAST, #20.3::BIGINT ASC NULLS LAST]  [~100 rows] [pipeline 1] [reference]
+  TopN 100 offset 0 [#20.0::DECIMAL(15,2) DESC NULLS LAST, #20.2::VARCHAR ASC NULLS LAST, #20.1::VARCHAR ASC NULLS LAST, #20.3::BIGINT ASC NULLS LAST]  [100 rows certified to 100.00%] [pipeline 1] [reference]
     Project #20 [#3.5::DECIMAL(15,2) AS s_acctbal, #3.1::VARCHAR AS s_name, #7.1::VARCHAR AS n_name, #1.0::BIGINT AS p_partkey, #1.1::VARCHAR AS p_mfgr, #3.2::VARCHAR AS s_address, #3.4::VARCHAR AS s_phone, #3.6::VARCHAR AS s_comment]  [rows unknown] [pipeline 1] [reference]
       Filter (#5.2::DECIMAL(15,2) = #19.0::DECIMAL(15,2))::BOOLEAN  [rows unknown] [pipeline 1] [reference]
         Join SINGLE on=[(#1.0::BIGINT = #19.1::BIGINT)::BOOLEAN]  [rows unknown] [pipeline 3] [reference]
@@ -92,7 +96,7 @@ query     q02
     pipeline 11 waits for nothing
 
 query     q03
-  TopN 10 offset 0 [#7.1::DECIMAL(18,4) DESC NULLS LAST, #7.2::DATE ASC NULLS LAST]  [~10 rows] [pipeline 1] [reference]
+  TopN 10 offset 0 [#7.1::DECIMAL(18,4) DESC NULLS LAST, #7.2::DATE ASC NULLS LAST]  [10 rows certified to 100.00%] [pipeline 1] [reference]
     Project #7 [#6.0::BIGINT AS l_orderkey, #6.3::DECIMAL(18,4) AS revenue, #6.1::DATE AS o_orderdate, #6.2::INTEGER AS o_shippriority]  [rows unknown] [pipeline 1] [reference]
       Aggregate #6 groups=[#5.0::BIGINT, #3.2::DATE, #3.3::INTEGER] aggregates=[sum("*"(CAST(#5.1::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#5.2::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4))::DECIMAL(18,4)]  [rows unknown] [pipeline 2] [reference]
         Filter (#5.0::BIGINT = #3.0::BIGINT)::BOOLEAN  [rows unknown] [pipeline 2] [reference]
@@ -179,8 +183,8 @@ query     q05
     pipeline 7 waits for nothing
 
 query     q06
-  Project #3 [#2.0::DECIMAL(18,4) AS revenue]  [~1 rows] [pipeline 0] [reference]
-    Aggregate #2 groups=[] aggregates=[sum("*"(CAST(#1.0::DECIMAL(15,2))::DECIMAL(18,2), CAST(#1.1::DECIMAL(15,2))::DECIMAL(18,2))::DECIMAL(18,4))::DECIMAL(18,4)]  [~1 rows] [pipeline 1] [reference]
+  Project #3 [#2.0::DECIMAL(18,4) AS revenue]  [1 rows exact] [pipeline 0] [reference]
+    Aggregate #2 groups=[] aggregates=[sum("*"(CAST(#1.0::DECIMAL(15,2))::DECIMAL(18,2), CAST(#1.1::DECIMAL(15,2))::DECIMAL(18,2))::DECIMAL(18,4))::DECIMAL(18,4)]  [1 rows exact] [pipeline 1] [reference]
       Project #1 [#0.1::DECIMAL(15,2) AS l_extendedprice, #0.2::DECIMAL(15,2) AS l_discount]  [rows unknown] [pipeline 1] [reference]
         Filter ((#0.3::DATE >= 8766::DATE)::BOOLEAN AND (#0.3::DATE < 9131::DATE)::BOOLEAN AND (#0.2::DECIMAL(15,2) >= 0.05::DECIMAL(15,2))::BOOLEAN AND (#0.2::DECIMAL(15,2) <= 0.07::DECIMAL(15,2))::BOOLEAN AND (#0.0::DECIMAL(15,2) < 24.00::DECIMAL(15,2))::BOOLEAN)::BOOLEAN  [rows unknown] [pipeline 1] [reference]
           TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #0 [l_quantity::DECIMAL(15,2), l_extendedprice::DECIMAL(15,2), l_discount::DECIMAL(15,2), l_shipdate::DATE]  [rows unknown] [pipeline 1] [reference]
@@ -317,7 +321,7 @@ query     q09
     pipeline 7 waits for nothing
 
 query     q10
-  TopN 20 offset 0 [#9.2::DECIMAL(18,4) DESC NULLS LAST]  [~20 rows] [pipeline 1] [reference]
+  TopN 20 offset 0 [#9.2::DECIMAL(18,4) DESC NULLS LAST]  [20 rows certified to 100.00%] [pipeline 1] [reference]
     Project #9 [#8.0::BIGINT AS c_custkey, #8.1::VARCHAR AS c_name, #8.7::DECIMAL(18,4) AS revenue, #8.2::DECIMAL(15,2) AS c_acctbal, #8.4::VARCHAR AS n_name, #8.5::VARCHAR AS c_address, #8.3::VARCHAR AS c_phone, #8.6::VARCHAR AS c_comment]  [rows unknown] [pipeline 1] [reference]
       Aggregate #8 groups=[#1.0::BIGINT, #1.1::VARCHAR, #1.5::DECIMAL(15,2), #1.4::VARCHAR, #7.1::VARCHAR, #1.2::VARCHAR, #1.6::VARCHAR] aggregates=[sum("*"(CAST(#5.1::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#5.2::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4))::DECIMAL(18,4)]  [rows unknown] [pipeline 2] [reference]
         Filter (#1.3::INTEGER = #7.0::INTEGER)::BOOLEAN  [rows unknown] [pipeline 2] [reference]
@@ -344,6 +348,49 @@ query     q10
     pipeline 3 waits for nothing
     pipeline 4 waits for nothing
     pipeline 5 waits for nothing
+
+query     q11
+  Sort [#15.1::DECIMAL(34,2) DESC NULLS LAST]  [rows unknown] [pipeline 1] [reference]
+    Project #15 [#6.0::BIGINT AS ps_partkey, #6.1::DECIMAL(34,2) AS value]  [rows unknown] [pipeline 1] [reference]
+      Filter (CAST(#6.1::DECIMAL(34,2))::DECIMAL(38,12) > #14.0::DECIMAL(38,12))::BOOLEAN  [rows unknown] [pipeline 1] [reference]
+        Join SINGLE on=[]  [rows unknown] [pipeline 3] [reference]
+          Aggregate #6 groups=[#1.0::BIGINT] aggregates=[sum("*"(CAST(#1.3::DECIMAL(15,2))::DECIMAL(34,2), CAST(#1.2::BIGINT)::DECIMAL(34,0))::DECIMAL(34,2))::DECIMAL(34,2)]  [rows unknown] [pipeline 7] [reference]
+            Filter (#3.1::INTEGER = #5.0::INTEGER)::BOOLEAN  [rows unknown] [pipeline 7] [reference]
+              CrossProduct  [rows unknown] [pipeline 7] [reference]
+                Filter (#1.1::BIGINT = #3.0::BIGINT)::BOOLEAN  [rows unknown] [pipeline 7] [reference]
+                  CrossProduct  [rows unknown] [pipeline 7] [reference]
+                    Project #1 [#0.0::BIGINT AS ps_partkey, #0.1::BIGINT AS ps_suppkey, #0.2::BIGINT AS ps_availqty, #0.3::DECIMAL(15,2) AS ps_supplycost]  [rows unknown] [pipeline 7] [reference]
+                      TableFunction read_parquet args=['<fixture>/partsupp.parquet'::VARCHAR] #0 [ps_partkey::BIGINT, ps_suppkey::BIGINT, ps_availqty::BIGINT, ps_supplycost::DECIMAL(15,2)]  [rows unknown] [pipeline 7] [reference]
+                    Project #3 [#2.0::BIGINT AS s_suppkey, #2.1::INTEGER AS s_nationkey]  [rows unknown] [pipeline 9] [reference]
+                      TableFunction read_parquet args=['<fixture>/supplier.parquet'::VARCHAR] #2 [s_suppkey::BIGINT, s_nationkey::INTEGER]  [rows unknown] [pipeline 9] [reference]
+                Project #5 [#4.0::INTEGER AS n_nationkey]  [rows unknown] [pipeline 8] [reference]
+                  Filter (#4.1::VARCHAR = 'GERMANY'::VARCHAR)::BOOLEAN  [rows unknown] [pipeline 8] [reference]
+                    TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #4 [n_nationkey::INTEGER, n_name::VARCHAR]  [rows unknown] [pipeline 8] [reference]
+          Project #14 ["*"(CAST(#13.0::DECIMAL(34,2))::DECIMAL(38,2), 0.0001000000::DECIMAL(38,10))::DECIMAL(38,12) AS "(sum((ps_supplycost * ps_availqty)) * 0.0001000000)"]  [1 rows exact] [pipeline 2] [reference]
+            Aggregate #13 groups=[] aggregates=[sum("*"(CAST(#8.2::DECIMAL(15,2))::DECIMAL(34,2), CAST(#8.1::BIGINT)::DECIMAL(34,0))::DECIMAL(34,2))::DECIMAL(34,2)]  [1 rows exact] [pipeline 4] [reference]
+              Filter (#10.1::INTEGER = #12.0::INTEGER)::BOOLEAN  [rows unknown] [pipeline 4] [reference]
+                CrossProduct  [rows unknown] [pipeline 4] [reference]
+                  Filter (#8.0::BIGINT = #10.0::BIGINT)::BOOLEAN  [rows unknown] [pipeline 4] [reference]
+                    CrossProduct  [rows unknown] [pipeline 4] [reference]
+                      Project #8 [#7.0::BIGINT AS ps_suppkey, #7.1::BIGINT AS ps_availqty, #7.2::DECIMAL(15,2) AS ps_supplycost]  [rows unknown] [pipeline 4] [reference]
+                        TableFunction read_parquet args=['<fixture>/partsupp.parquet'::VARCHAR] #7 [ps_suppkey::BIGINT, ps_availqty::BIGINT, ps_supplycost::DECIMAL(15,2)]  [rows unknown] [pipeline 4] [reference]
+                      Project #10 [#9.0::BIGINT AS s_suppkey, #9.1::INTEGER AS s_nationkey]  [rows unknown] [pipeline 6] [reference]
+                        TableFunction read_parquet args=['<fixture>/supplier.parquet'::VARCHAR] #9 [s_suppkey::BIGINT, s_nationkey::INTEGER]  [rows unknown] [pipeline 6] [reference]
+                  Project #12 [#11.0::INTEGER AS n_nationkey]  [rows unknown] [pipeline 5] [reference]
+                    Filter (#11.1::VARCHAR = 'GERMANY'::VARCHAR)::BOOLEAN  [rows unknown] [pipeline 5] [reference]
+                      TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #11 [n_nationkey::INTEGER, n_name::VARCHAR]  [rows unknown] [pipeline 5] [reference]
+  .
+  Pipelines
+    pipeline 0 waits for 1, and the answer comes out of it
+    pipeline 1 waits for 3
+    pipeline 2 waits for 4
+    pipeline 3 waits for 2 and 7
+    pipeline 4 waits for 5 and 6
+    pipeline 5 waits for nothing
+    pipeline 6 waits for nothing
+    pipeline 7 waits for 8 and 9
+    pipeline 8 waits for nothing
+    pipeline 9 waits for nothing
 
 query     q12
   Sort [#5.0::VARCHAR ASC NULLS LAST]  [rows unknown] [pipeline 1] [reference]
@@ -384,8 +431,8 @@ query     q13
     pipeline 5 waits for 4
 
 query     q14
-  Project #5 ["/"(CAST("*"(100.00::DECIMAL(18,2), #4.0::DECIMAL(18,4))::DECIMAL(18,6))::DOUBLE, CAST(#4.1::DECIMAL(18,4))::DOUBLE)::DOUBLE AS promo_revenue]  [~1 rows] [pipeline 0] [reference]
-    Aggregate #4 groups=[] aggregates=[sum(CASE WHEN "~~"(#3.1::VARCHAR, 'PROMO%'::VARCHAR)::BOOLEAN THEN "*"(CAST(#1.1::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#1.2::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4) ELSE 0.0000::DECIMAL(18,4) END::DECIMAL(18,4))::DECIMAL(18,4), sum("*"(CAST(#1.1::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#1.2::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4))::DECIMAL(18,4)]  [~1 rows] [pipeline 1] [reference]
+  Project #5 ["/"(CAST("*"(100.00::DECIMAL(18,2), #4.0::DECIMAL(18,4))::DECIMAL(18,6))::DOUBLE, CAST(#4.1::DECIMAL(18,4))::DOUBLE)::DOUBLE AS promo_revenue]  [1 rows exact] [pipeline 0] [reference]
+    Aggregate #4 groups=[] aggregates=[sum(CASE WHEN "~~"(#3.1::VARCHAR, 'PROMO%'::VARCHAR)::BOOLEAN THEN "*"(CAST(#1.1::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#1.2::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4) ELSE 0.0000::DECIMAL(18,4) END::DECIMAL(18,4))::DECIMAL(18,4), sum("*"(CAST(#1.1::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#1.2::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4))::DECIMAL(18,4)]  [1 rows exact] [pipeline 1] [reference]
       Filter (#1.0::BIGINT = #3.0::BIGINT)::BOOLEAN  [rows unknown] [pipeline 1] [reference]
         CrossProduct  [rows unknown] [pipeline 1] [reference]
           Project #1 [#0.0::BIGINT AS l_partkey, #0.1::DECIMAL(15,2) AS l_extendedprice, #0.2::DECIMAL(15,2) AS l_discount]  [rows unknown] [pipeline 1] [reference]
@@ -413,8 +460,8 @@ query     q15
                   Project #3 [#2.0::BIGINT AS l_suppkey, #2.1::DECIMAL(15,2) AS l_extendedprice, #2.2::DECIMAL(15,2) AS l_discount]  [rows unknown] [pipeline 7] [reference]
                     Filter ((#2.3::DATE >= 9496::DATE)::BOOLEAN AND (#2.3::DATE < 9587::DATE)::BOOLEAN)::BOOLEAN  [rows unknown] [pipeline 7] [reference]
                       TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #2 [l_suppkey::BIGINT, l_extendedprice::DECIMAL(15,2), l_discount::DECIMAL(15,2), l_shipdate::DATE]  [rows unknown] [pipeline 7] [reference]
-          Project #11 [#10.0::DECIMAL(18,4) AS "max(total_revenue)"]  [~1 rows] [pipeline 2] [reference]
-            Aggregate #10 groups=[] aggregates=[max(#9.0::DECIMAL(18,4))::DECIMAL(18,4)]  [~1 rows] [pipeline 4] [reference]
+          Project #11 [#10.0::DECIMAL(18,4) AS "max(total_revenue)"]  [1 rows exact] [pipeline 2] [reference]
+            Aggregate #10 groups=[] aggregates=[max(#9.0::DECIMAL(18,4))::DECIMAL(18,4)]  [1 rows exact] [pipeline 4] [reference]
               Project #9 [#8.1::DECIMAL(18,4) AS total_revenue]  [rows unknown] [pipeline 4] [reference]
                 Aggregate #8 groups=[#7.0::BIGINT] aggregates=[sum("*"(CAST(#7.1::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#7.2::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4))::DECIMAL(18,4)]  [rows unknown] [pipeline 5] [reference]
                   Project #7 [#6.0::BIGINT AS l_suppkey, #6.1::DECIMAL(15,2) AS l_extendedprice, #6.2::DECIMAL(15,2) AS l_discount]  [rows unknown] [pipeline 5] [reference]
@@ -459,8 +506,8 @@ query     q16
     pipeline 5 waits for nothing
 
 query     q17
-  Project #9 ["/"(CAST(#8.0::DECIMAL(15,2))::DOUBLE, 7.0::DOUBLE)::DOUBLE AS avg_yearly]  [~1 rows] [pipeline 0] [reference]
-    Aggregate #8 groups=[] aggregates=[sum(#1.2::DECIMAL(15,2))::DECIMAL(15,2)]  [~1 rows] [pipeline 1] [reference]
+  Project #9 ["/"(CAST(#8.0::DECIMAL(15,2))::DOUBLE, 7.0::DOUBLE)::DOUBLE AS avg_yearly]  [1 rows exact] [pipeline 0] [reference]
+    Aggregate #8 groups=[] aggregates=[sum(#1.2::DECIMAL(15,2))::DECIMAL(15,2)]  [1 rows exact] [pipeline 1] [reference]
       Filter (CAST(#1.1::DECIMAL(15,2))::DOUBLE < #7.0::DOUBLE)::BOOLEAN  [rows unknown] [pipeline 1] [reference]
         Join SINGLE on=[(#7.1::BIGINT = #3.0::BIGINT)::BOOLEAN]  [rows unknown] [pipeline 3] [reference]
           Filter (#3.0::BIGINT = #1.0::BIGINT)::BOOLEAN  [rows unknown] [pipeline 3] [reference]
@@ -484,7 +531,7 @@ query     q17
     pipeline 5 waits for nothing
 
 query     q18
-  TopN 100 offset 0 [#12.4::DECIMAL(15,2) DESC NULLS LAST, #12.3::DATE ASC NULLS LAST]  [~100 rows] [pipeline 1] [reference]
+  TopN 100 offset 0 [#12.4::DECIMAL(15,2) DESC NULLS LAST, #12.3::DATE ASC NULLS LAST]  [100 rows certified to 100.00%] [pipeline 1] [reference]
     Project #12 [#11.0::VARCHAR AS c_name, #11.1::BIGINT AS c_custkey, #11.2::BIGINT AS o_orderkey, #11.3::DATE AS o_orderdate, #11.4::DECIMAL(15,2) AS o_totalprice, #11.5::DECIMAL(15,2) AS "sum(l_quantity)"]  [rows unknown] [pipeline 1] [reference]
       Aggregate #11 groups=[#1.1::VARCHAR, #1.0::BIGINT, #3.0::BIGINT, #3.3::DATE, #3.2::DECIMAL(15,2)] aggregates=[sum(#5.1::DECIMAL(15,2))::DECIMAL(15,2)]  [rows unknown] [pipeline 2] [reference]
         Filter #10.1::BOOLEAN  [rows unknown] [pipeline 2] [reference]
@@ -517,8 +564,8 @@ query     q18
     pipeline 7 waits for nothing
 
 query     q19
-  Project #5 [#4.0::DECIMAL(18,4) AS revenue]  [~1 rows] [pipeline 0] [reference]
-    Aggregate #4 groups=[] aggregates=[sum("*"(CAST(#1.2::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#1.3::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4))::DECIMAL(18,4)]  [~1 rows] [pipeline 1] [reference]
+  Project #5 [#4.0::DECIMAL(18,4) AS revenue]  [1 rows exact] [pipeline 0] [reference]
+    Aggregate #4 groups=[] aggregates=[sum("*"(CAST(#1.2::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#1.3::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4))::DECIMAL(18,4)]  [1 rows exact] [pipeline 1] [reference]
       Filter (((#3.0::BIGINT = #1.0::BIGINT)::BOOLEAN AND (#3.1::VARCHAR = 'Brand#12'::VARCHAR)::BOOLEAN AND ((#3.3::VARCHAR = 'SM CASE'::VARCHAR)::BOOLEAN OR (#3.3::VARCHAR = 'SM BOX'::VARCHAR)::BOOLEAN OR (#3.3::VARCHAR = 'SM PACK'::VARCHAR)::BOOLEAN OR (#3.3::VARCHAR = 'SM PKG'::VARCHAR)::BOOLEAN)::BOOLEAN AND (#1.1::DECIMAL(15,2) >= 1.00::DECIMAL(15,2))::BOOLEAN AND (#1.1::DECIMAL(15,2) <= 11.00::DECIMAL(15,2))::BOOLEAN AND (#3.2::INTEGER >= 1::INTEGER)::BOOLEAN AND (#3.2::INTEGER <= 5::INTEGER)::BOOLEAN AND ((#1.5::VARCHAR = 'AIR'::VARCHAR)::BOOLEAN OR (#1.5::VARCHAR = 'AIR REG'::VARCHAR)::BOOLEAN)::BOOLEAN AND (#1.4::VARCHAR = 'DELIVER IN PERSON'::VARCHAR)::BOOLEAN)::BOOLEAN OR ((#3.0::BIGINT = #1.0::BIGINT)::BOOLEAN AND (#3.1::VARCHAR = 'Brand#23'::VARCHAR)::BOOLEAN AND ((#3.3::VARCHAR = 'MED BAG'::VARCHAR)::BOOLEAN OR (#3.3::VARCHAR = 'MED BOX'::VARCHAR)::BOOLEAN OR (#3.3::VARCHAR = 'MED PKG'::VARCHAR)::BOOLEAN OR (#3.3::VARCHAR = 'MED PACK'::VARCHAR)::BOOLEAN)::BOOLEAN AND (#1.1::DECIMAL(15,2) >= 10.00::DECIMAL(15,2))::BOOLEAN AND (#1.1::DECIMAL(15,2) <= 20.00::DECIMAL(15,2))::BOOLEAN AND (#3.2::INTEGER >= 1::INTEGER)::BOOLEAN AND (#3.2::INTEGER <= 10::INTEGER)::BOOLEAN AND ((#1.5::VARCHAR = 'AIR'::VARCHAR)::BOOLEAN OR (#1.5::VARCHAR = 'AIR REG'::VARCHAR)::BOOLEAN)::BOOLEAN AND (#1.4::VARCHAR = 'DELIVER IN PERSON'::VARCHAR)::BOOLEAN)::BOOLEAN OR ((#3.0::BIGINT = #1.0::BIGINT)::BOOLEAN AND (#3.1::VARCHAR = 'Brand#34'::VARCHAR)::BOOLEAN AND ((#3.3::VARCHAR = 'LG CASE'::VARCHAR)::BOOLEAN OR (#3.3::VARCHAR = 'LG BOX'::VARCHAR)::BOOLEAN OR (#3.3::VARCHAR = 'LG PACK'::VARCHAR)::BOOLEAN OR (#3.3::VARCHAR = 'LG PKG'::VARCHAR)::BOOLEAN)::BOOLEAN AND (#1.1::DECIMAL(15,2) >= 20.00::DECIMAL(15,2))::BOOLEAN AND (#1.1::DECIMAL(15,2) <= 30.00::DECIMAL(15,2))::BOOLEAN AND (#3.2::INTEGER >= 1::INTEGER)::BOOLEAN AND (#3.2::INTEGER <= 15::INTEGER)::BOOLEAN AND ((#1.5::VARCHAR = 'AIR'::VARCHAR)::BOOLEAN OR (#1.5::VARCHAR = 'AIR REG'::VARCHAR)::BOOLEAN)::BOOLEAN AND (#1.4::VARCHAR = 'DELIVER IN PERSON'::VARCHAR)::BOOLEAN)::BOOLEAN)::BOOLEAN  [rows unknown] [pipeline 1] [reference]
         CrossProduct  [rows unknown] [pipeline 1] [reference]
           Project #1 [#0.0::BIGINT AS l_partkey, #0.1::DECIMAL(15,2) AS l_quantity, #0.2::DECIMAL(15,2) AS l_extendedprice, #0.3::DECIMAL(15,2) AS l_discount, #0.4::VARCHAR AS l_shipinstruct, #0.5::VARCHAR AS l_shipmode]  [rows unknown] [pipeline 1] [reference]
@@ -575,7 +622,7 @@ query     q20
     pipeline 9 waits for nothing
 
 query     q21
-  TopN 100 offset 0 [#17.1::BIGINT DESC NULLS LAST, #17.0::VARCHAR ASC NULLS LAST]  [~100 rows] [pipeline 1] [reference]
+  TopN 100 offset 0 [#17.1::BIGINT DESC NULLS LAST, #17.0::VARCHAR ASC NULLS LAST]  [100 rows certified to 100.00%] [pipeline 1] [reference]
     Project #17 [#16.0::VARCHAR AS s_name, #16.1::BIGINT AS numwait]  [rows unknown] [pipeline 1] [reference]
       Aggregate #16 groups=[#1.1::VARCHAR] aggregates=[count_star()::BIGINT]  [rows unknown] [pipeline 2] [reference]
         Filter not((#15.0::BOOLEAN IS DISTINCT FROM NULL::BOOLEAN)::BOOLEAN)::BOOLEAN  [rows unknown] [pipeline 2] [reference]
@@ -700,8 +747,8 @@ query     q22
                   Project #1 [#0.0::BIGINT AS c_custkey, #0.1::VARCHAR AS c_phone, #0.2::DECIMAL(15,2) AS c_acctbal]  [rows unknown] [pipeline 7] [reference]
                     Filter ((substring(#0.1::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '13'::VARCHAR)::BOOLEAN OR (substring(#0.1::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '31'::VARCHAR)::BOOLEAN OR (substring(#0.1::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '23'::VARCHAR)::BOOLEAN OR (substring(#0.1::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '29'::VARCHAR)::BOOLEAN OR (substring(#0.1::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '30'::VARCHAR)::BOOLEAN OR (substring(#0.1::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '18'::VARCHAR)::BOOLEAN OR (substring(#0.1::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '17'::VARCHAR)::BOOLEAN)::BOOLEAN  [rows unknown] [pipeline 7] [reference]
                       TableFunction read_parquet args=['<fixture>/customer.parquet'::VARCHAR] #0 [c_custkey::BIGINT, c_phone::VARCHAR, c_acctbal::DECIMAL(15,2)]  [rows unknown] [pipeline 7] [reference]
-                  Project #5 [#4.0::DOUBLE AS "avg(c_acctbal)"]  [~1 rows] [pipeline 6] [reference]
-                    Aggregate #4 groups=[] aggregates=[avg(#3.0::DECIMAL(15,2))::DOUBLE]  [~1 rows] [pipeline 8] [reference]
+                  Project #5 [#4.0::DOUBLE AS "avg(c_acctbal)"]  [1 rows exact] [pipeline 6] [reference]
+                    Aggregate #4 groups=[] aggregates=[avg(#3.0::DECIMAL(15,2))::DOUBLE]  [1 rows exact] [pipeline 8] [reference]
                       Project #3 [#2.1::DECIMAL(15,2) AS c_acctbal]  [rows unknown] [pipeline 8] [reference]
                         Filter ((#2.1::DECIMAL(15,2) > 0.00::DECIMAL(15,2))::BOOLEAN AND ((substring(#2.0::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '13'::VARCHAR)::BOOLEAN OR (substring(#2.0::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '31'::VARCHAR)::BOOLEAN OR (substring(#2.0::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '23'::VARCHAR)::BOOLEAN OR (substring(#2.0::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '29'::VARCHAR)::BOOLEAN OR (substring(#2.0::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '30'::VARCHAR)::BOOLEAN OR (substring(#2.0::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '18'::VARCHAR)::BOOLEAN OR (substring(#2.0::VARCHAR, 1::BIGINT, 2::BIGINT)::VARCHAR = '17'::VARCHAR)::BOOLEAN)::BOOLEAN)::BOOLEAN  [rows unknown] [pipeline 8] [reference]
                           TableFunction read_parquet args=['<fixture>/customer.parquet'::VARCHAR] #2 [c_phone::VARCHAR, c_acctbal::DECIMAL(15,2)]  [rows unknown] [pipeline 8] [reference]
