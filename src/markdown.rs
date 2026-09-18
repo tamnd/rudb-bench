@@ -148,6 +148,16 @@ fn what_ran(compared: &Comparison) -> String {
     if let Some(sample) = compared.sample {
         rows.push(vec!["sample".to_owned(), sample.sentence()]);
     }
+    // Which files this is a measurement of, in the words the manifest beside them uses. Reporting
+    // rule one wants the exact version of everything that could have moved, and the data is one of
+    // the things that can move: a corpus regenerated between two runs at the same scale factor is a
+    // different corpus and nothing else in the artifact would say so.
+    rows.push(vec![
+        "corpus".to_owned(),
+        compared.corpus.clone().unwrap_or_else(|| {
+            "no manifest beside the data, so this run cannot say where it came from".to_owned()
+        }),
+    ]);
     rows.push(vec![
         "summary".to_owned(),
         match compared.results.first().map(|r| r.queries.first().map(|q| q.runs.hot.convention())) {
@@ -1029,6 +1039,7 @@ mod tests {
             keeps_state: false,
             load: None,
             cold_forced: false,
+            corpus: None,
         }
     }
 
@@ -1049,6 +1060,7 @@ mod tests {
                 why: "not installed here".to_owned(),
                 unasked: false,
             }],
+            corpus: None,
         }
     }
 
