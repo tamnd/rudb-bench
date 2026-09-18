@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::data::Sample;
-use crate::engine::Loaded;
+use crate::engine::{Loaded, Outcome};
 use crate::measure::{Convention, Distribution, Runs};
 use crate::memory::{Cost, Peak};
 use crate::metrics::{Accounting, Internal, Spend};
@@ -183,7 +183,18 @@ pub fn restore(suite: &str, machine: &str, order: &[&str]) -> Result<Comparison,
         })
         .collect();
 
-    Ok(Comparison { suite: found, source_bytes, sample, rows, results: saved, skipped })
+    // Not saved and so not restored. The limit is a property of the command that ran, and each
+    // block in the file ran under its own. A query that hit one says so in its own row, which is
+    // the part a reader of a restored table needs.
+    Ok(Comparison {
+        suite: found,
+        source_bytes,
+        sample,
+        rows,
+        results: saved,
+        skipped,
+        timeout: None,
+    })
 }
 
 /// How much data a block ran over, in the words the refusal above needs.
@@ -499,6 +510,11 @@ fn write_one(result: &SuiteResult, machine: &str, source_bytes: u64) -> String {
         for s in &q.spend {
             let _ = writeln!(out, "  spend   {}", spent(s));
         }
+        // Only written when the limit fired. A block saved before this line existed reads back as
+        // a query that finished, which is what every query in it did.
+        if let Outcome::TimedOut { limit } = q.outcome {
+            let _ = writeln!(out, "  timeout {}", micros(limit));
+        }
         let _ = writeln!(out, "  answer  {}", escape(&q.answer));
     }
     out
@@ -602,10 +618,29 @@ fn one_query(engine: &str, piece: &str) -> Result<QueryResult, String> {
         Ok(Runs { cold: *cold, hot: summarize(hot.to_vec()) })
     };
 
+    // A limit that fired, if one did. It is kept out of the runs and put back in below, because a
+    // saved sample that is really a limit has to come back out of the file counted as one. Reading
+    // it as an ordinary sample would let a block that timed out be published, and the whole point
+    // of writing the line was that it cannot be.
+    let timeout = match value(&body, "timeout") {
+        None => None,
+        Some(text) => Some(Duration::from_micros(text.trim().parse::<u64>().map_err(|_| {
+            format!("{engine} {name} has a timeout that is not a number of microseconds")
+        })?)),
+    };
+    let mut runs = split_runs(&at("wall")?)?;
+    if timeout.is_some() {
+        runs.hot = runs.hot.with_timeouts(1);
+    }
+
     Ok(QueryResult {
         name: name.to_owned(),
         shape: unescape(shape),
-        runs: split_runs(&at("wall")?)?,
+        runs,
+        outcome: match timeout {
+            Some(limit) => Outcome::TimedOut { limit },
+            None => Outcome::Completed,
+        },
         reported: match value(&body, "said") {
             Some(text) => Some(split_runs(text)?),
             None => None,
@@ -635,7 +670,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{escape, read_one, unescape, write_one};
-    use crate::engine::Loaded;
+    use crate::engine::{Loaded, Outcome};
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
     use crate::metrics::{Accounting, Internal, Spend};
@@ -650,6 +685,7 @@ mod tests {
         QueryResult {
             name: name.to_owned(),
             shape: "group by, low card".to_owned(),
+            outcome: Outcome::Completed,
             // A record does not carry these, so a round trip through one comes back empty and the
             // fixture starts there. Putting a value here would make the round trip test assert that
             // a field survives a format that has no room for it.
@@ -777,6 +813,34 @@ mod tests {
         let mut quiet = result();
         quiet.load = None;
         assert_eq!(read_one("duckdb", &write_one(&quiet, "here", 1)).unwrap().0.load, None);
+    }
+
+    /// A query that ran out of time has to come back out of the file as one. Read back as an
+    /// ordinary sample it would be a query that took exactly the limit, which is both wrong and
+    /// publishable, and a table assembled a week later would print it next to real numbers.
+    #[test]
+    fn a_query_that_ran_out_of_time_comes_back_out_of_the_file_as_one() {
+        let limit = Duration::from_secs(30);
+        let mut before = result();
+        before.queries[0].outcome = Outcome::TimedOut { limit };
+        before.queries[0].runs.hot = Distribution::median(vec![limit]).with_timeouts(1);
+
+        let text = write_one(&before, "here", 1);
+        assert!(text.contains("  timeout "), "{text}");
+        let after = read_one("duckdb", &text).unwrap().0;
+        assert_eq!(after.queries[0].outcome, Outcome::TimedOut { limit });
+        assert_eq!(after.queries[0].runs.hot.timeouts(), 1);
+        assert!(!after.queries[0].runs.hot.publishable());
+        assert_eq!(after.timeouts(), 1);
+    }
+
+    /// And a block written before the line existed is a block where every query finished, which is
+    /// what those runs were: a query that did not come back took the whole run with it.
+    #[test]
+    fn a_block_from_before_the_limit_existed_reads_as_a_run_where_everything_finished() {
+        let after = read_one("duckdb", &write_one(&result(), "here", 1)).unwrap().0;
+        assert_eq!(after.queries[0].outcome, Outcome::Completed);
+        assert_eq!(after.timeouts(), 0);
     }
 
     #[test]

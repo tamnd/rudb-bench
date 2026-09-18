@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use crate::machine::Fact;
 use crate::measure::{Convention, Distribution, show};
 use crate::memory::{Peak, bytes};
-use crate::report::{Comparison, SuiteResult, publishable};
+use crate::report::{Comparison, SuiteResult, at_least, publishable};
 
 /// Where the report for one suite goes.
 ///
@@ -160,6 +160,28 @@ fn what_ran(compared: &Comparison) -> String {
             _ => "nothing ran".to_owned(),
         },
     ]);
+    // Said whether or not it fired. A limit that only appears when it caught something leaves a
+    // reader of a clean table guessing how much room the slowest query had, and four seconds under
+    // a sixty second limit is a different claim from four seconds under a five second one.
+    rows.push(vec![
+        "timeout".to_owned(),
+        match compared.timeout {
+            None => "none, every query was waited for".to_owned(),
+            Some(limit) => {
+                let hit = compared
+                    .results
+                    .iter()
+                    .flat_map(|r| &r.queries)
+                    .filter(|q| !q.outcome.measured())
+                    .count();
+                match hit {
+                    0 => format!("{}s per query, and no query reached it", limit.as_secs()),
+                    1 => format!("{}s per query, which one query reached", limit.as_secs()),
+                    n => format!("{}s per query, which {n} queries reached", limit.as_secs()),
+                }
+            }
+        },
+    ]);
     rows.push(vec!["harness".to_owned(), format!("rudb-bench {}", env!("CARGO_PKG_VERSION"))]);
     table(&["what", "it was"], &rows)
 }
@@ -187,6 +209,13 @@ fn reproduce(compared: &Comparison) -> String {
         .unwrap_or(0);
     if runs > 0 {
         command.push_str(&format!(" --runs {runs}"));
+    }
+    // Always, rather than only when it differs from the suite's default. The default moves with the
+    // row count and a reader running this command next year would get whatever the default is then,
+    // which is one more thing that quietly differs between the two runs.
+    match compared.timeout {
+        Some(limit) => command.push_str(&format!(" --timeout {}", limit.as_secs())),
+        None => command.push_str(" --timeout 0"),
     }
     command.push_str(" --report");
     format!(
@@ -355,7 +384,12 @@ fn totals(compared: &Comparison) -> String {
             .queries
             .iter()
             .map(|q| q.name.clone())
-            .filter(|name| compared.results.iter().all(|r| r.find(name).is_some()))
+            // Finished in every column, not merely present in it, for the reason the terminal
+            // table gives: a query somebody gave up on contributes its limit and a ratio over that
+            // is a ratio over the flag.
+            .filter(|name| {
+                compared.results.iter().all(|r| r.find(name).is_some_and(|q| q.outcome.measured()))
+            })
             .collect()
     });
     let ragged = compared.results.first().is_some_and(|first| shared.len() != first.queries.len());
@@ -373,10 +407,10 @@ fn totals(compared: &Comparison) -> String {
             vec![
                 r.engine.clone(),
                 r.reported_total().map_or_else(|| "not read".to_owned(), show),
-                show(r.hot_total()),
+                at_least(r, show(r.hot_total())),
                 r.overhead()
                     .map_or_else(|| "not read".to_owned(), |o| format!("{:+.0}%", o * 100.0)),
-                show(r.cold_total()),
+                at_least(r, show(r.cold_total())),
                 r.hot_cpu().map_or_else(|| "not read".to_owned(), show),
                 r.cores_used().map_or_else(|| "not read".to_owned(), |c| format!("{c:.2}")),
                 peak_cell(&r.peak()),
@@ -464,6 +498,10 @@ fn per_query(compared: &Comparison) -> String {
                 // The engine's own, falling back to the wall clock for an engine that would not
                 // say. A cell is one or the other and the per engine tables below carry both, so a
                 // reader who needs to know which this was has one place to look.
+                // A query that ran out of time gets the reason rather than the limit. Printing the
+                // limit would put a number in the column that reads as a measurement, and the one
+                // thing known about that query is that it takes longer than that.
+                Some(q) if !q.outcome.measured() => q.outcome.cell(),
                 Some(q) => {
                     show(q.reported.as_ref().map_or(q.runs.hot.headline(), |r| r.hot.headline()))
                 }
@@ -931,8 +969,8 @@ const fn plural(n: usize) -> &'static str {
 mod tests {
     use std::time::Duration;
 
-    use super::{Rounded, path, render, reproduce, table};
-    use crate::engine::Loaded;
+    use super::{Rounded, path, render, reproduce, table, what_ran};
+    use crate::engine::{Loaded, Outcome};
     use crate::machine::Fact;
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
@@ -947,6 +985,7 @@ mod tests {
         QueryResult {
             name: name.to_owned(),
             shape: "count".to_owned(),
+            outcome: Outcome::Completed,
             runs: Runs { cold: Duration::from_millis(90), hot: ms(hot) },
             // The engine's own clock, always a little under the wall clock beside it, because the
             // wall clock also paid for a process to start.
@@ -1003,6 +1042,7 @@ mod tests {
                 result("duckdb", &[10, 20, 30, 40, 50]),
                 result("rudb", &[5, 6, 7, 8, 9]),
             ],
+            timeout: Some(Duration::from_secs(60)),
             skipped: vec![Abstention {
                 engine: "polars".to_owned(),
                 version: "none".to_owned(),
@@ -1150,6 +1190,32 @@ mod tests {
         compared.skipped[0].unasked = true;
         let text = reproduce(&compared);
         assert!(text.contains("--engines duckdb,rudb"), "{text}");
+    }
+
+    /// Said whether or not it fired, because four seconds under a sixty second limit is a
+    /// different claim from four seconds under a five second one.
+    #[test]
+    fn the_report_says_what_the_limit_was_even_when_nothing_reached_it() {
+        let text = what_ran(&compared());
+        assert!(text.contains("60s per query, and no query reached it"), "{text}");
+
+        let mut none = compared();
+        none.timeout = None;
+        assert!(
+            what_ran(&none).contains("none, every query was waited for"),
+            "{}",
+            what_ran(&none)
+        );
+    }
+
+    /// And the command underneath it carries the limit, so that running it next year gives the same
+    /// table rather than whatever the default has moved to by then.
+    #[test]
+    fn the_reproduce_command_carries_the_limit_it_ran_under() {
+        assert!(reproduce(&compared()).contains("--timeout 60"), "{}", reproduce(&compared()));
+        let mut none = compared();
+        none.timeout = None;
+        assert!(reproduce(&none).contains("--timeout 0"), "{}", reproduce(&none));
     }
 
     #[test]

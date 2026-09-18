@@ -23,8 +23,10 @@
 //! a generator this project would then have to prove correct before it could use it to prove
 //! anything else.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::engine::BenchError;
 use crate::suite::{Scale, Suite};
@@ -439,11 +441,74 @@ pub(crate) fn output(command: &mut Command, what: &str) -> Result<Vec<u8>, Bench
 /// having to strip it back out. [`output`] throws that half away, so the timed path calls this one
 /// and the apparatus calls that one.
 pub(crate) fn both(command: &mut Command, what: &str) -> Result<(Vec<u8>, Vec<u8>), BenchError> {
-    let out = command.output().map_err(|e| BenchError::new(format!("cannot run {what}: {e}")))?;
-    if out.status.success() {
-        return Ok((out.stdout, out.stderr));
+    match both_within(command, what, None)? {
+        Finished::Ran { stdout, stderr } => Ok((stdout, stderr)),
+        // Unreachable with no limit, and an assertion rather than a panic because the caller that
+        // passed `None` is the one making the claim.
+        Finished::TimedOut => Err(BenchError::new(format!(
+            "{what} reported a timeout against no limit, which is a bug in the harness"
+        ))),
     }
-    let stderr = String::from_utf8_lossy(&out.stderr);
+}
+
+/// What waiting for a command produced.
+#[derive(Debug)]
+pub(crate) enum Finished {
+    /// It exited on its own, successfully.
+    Ran { stdout: Vec<u8>, stderr: Vec<u8> },
+    /// The limit came first, and the process was killed.
+    TimedOut,
+}
+
+/// The same as [`both`], giving up after a limit rather than waiting as long as it takes.
+///
+/// A query that does not finish is a fact about that query, and a harness with no limit turns it
+/// into a fact about the whole run: the suite stops, and the twenty one queries after it have no
+/// number for a reason that has nothing to do with them. So the limit fires, the process is killed,
+/// and the caller gets a result to put in a cell.
+///
+/// Both pipes are drained on threads of their own. A child that fills the pipe buffer blocks in
+/// `write` and never reaches its own exit, so a parent that waited first and read afterwards would
+/// hang on exactly the queries this exists to catch, and would report them as timeouts whatever
+/// they were really doing.
+pub(crate) fn both_within(
+    command: &mut Command,
+    what: &str,
+    limit: Option<Duration>,
+) -> Result<Finished, BenchError> {
+    command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child =
+        command.spawn().map_err(|e| BenchError::new(format!("cannot run {what}: {e}")))?;
+    let mut out = child.stdout.take().ok_or_else(|| BenchError::new("no stdout pipe"))?;
+    let mut err = child.stderr.take().ok_or_else(|| BenchError::new("no stderr pipe"))?;
+    let draining = std::thread::scope(|scope| {
+        let reading_out = scope.spawn(move || {
+            let mut bytes = Vec::new();
+            out.read_to_end(&mut bytes).map(|_| bytes)
+        });
+        let reading_err = scope.spawn(move || {
+            let mut bytes = Vec::new();
+            err.read_to_end(&mut bytes).map(|_| bytes)
+        });
+        let status = wait_within(&mut child, limit);
+        // After the wait either way. On a timeout the kill closes the pipes, which is what lets
+        // these two return at all.
+        let stdout = reading_out.join().unwrap_or_else(|_| Ok(Vec::new()));
+        let stderr = reading_err.join().unwrap_or_else(|_| Ok(Vec::new()));
+        (status, stdout, stderr)
+    });
+    let (status, stdout, stderr) = draining;
+    let stdout = stdout.map_err(|e| BenchError::new(format!("cannot read {what} stdout: {e}")))?;
+    let stderr = stderr.map_err(|e| BenchError::new(format!("cannot read {what} stderr: {e}")))?;
+    let Some(status) =
+        status.map_err(|e| BenchError::new(format!("cannot wait for {what}: {e}")))?
+    else {
+        return Ok(Finished::TimedOut);
+    };
+    if status.success() {
+        return Ok(Finished::Ran { stdout, stderr });
+    }
+    let stderr = String::from_utf8_lossy(&stderr);
     let tail: Vec<&str> = stderr.lines().rev().take(6).collect();
     let mut lines: Vec<&str> = tail.into_iter().rev().collect();
     if lines.is_empty() {
@@ -452,10 +517,92 @@ pub(crate) fn both(command: &mut Command, what: &str) -> Result<(Vec<u8>, Vec<u8
     Err(BenchError::new(format!("{what} failed: {}", lines.join(" "))))
 }
 
+/// Waits for a child, killing it and answering `None` if the limit comes first.
+///
+/// Polled rather than waited on, because waiting for a child with a timeout is not in the standard
+/// library and the alternative is a signal handler or a second process. The interval is a
+/// compromise nobody has to think about: a limit is seconds at the smallest, so twenty milliseconds
+/// of slack is under a percent of it, and a poll every twenty milliseconds costs nothing measurable
+/// beside a query that is running.
+fn wait_within(
+    child: &mut Child,
+    limit: Option<Duration>,
+) -> std::io::Result<Option<std::process::ExitStatus>> {
+    let Some(limit) = limit else {
+        return child.wait().map(Some);
+    };
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Some(status));
+        }
+        if started.elapsed() >= limit {
+            // Killed rather than asked politely. There is no portable way to ask, and a query that
+            // ignored the request would leave the harness waiting again on the thing it gave up on.
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+/// How often a run that has a limit is asked whether it is done.
+const POLL: Duration = Duration::from_millis(20);
+
 #[cfg(test)]
 mod tests {
-    use super::{Dataset, Rows, Sample, Table, prepare, root, size_of_tree};
+    use super::{Dataset, Finished, Rows, Sample, Table, both_within, prepare, root, size_of_tree};
     use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    /// A command that finishes inside its limit is a run, and it is not slowed down by having one.
+    #[test]
+    fn a_command_that_finishes_in_time_comes_back_with_what_it_said() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("echo out; echo err 1>&2");
+        let got = both_within(&mut command, "a shell", Some(Duration::from_secs(30)))
+            .expect("a shell that echoes is not a failure");
+        match got {
+            Finished::Ran { stdout, stderr } => {
+                assert_eq!(String::from_utf8_lossy(&stdout).trim(), "out");
+                assert_eq!(String::from_utf8_lossy(&stderr).trim(), "err");
+            }
+            Finished::TimedOut => panic!("an echo took more than thirty seconds"),
+        }
+    }
+
+    /// The whole point. A command that will not finish stops being waited for, and it stops being
+    /// waited for near the limit rather than a long time after it.
+    #[test]
+    fn a_command_that_will_not_finish_is_stopped_at_its_limit() {
+        let mut command = Command::new("sh");
+        command.arg("-c").arg("sleep 60");
+        let started = Instant::now();
+        let got = both_within(&mut command, "a sleep", Some(Duration::from_millis(300)))
+            .expect("giving up on a sleep is not a failure");
+        let waited = started.elapsed();
+        assert!(matches!(got, Finished::TimedOut), "{got:?}");
+        assert!(waited < Duration::from_secs(10), "waited {waited:?} on a limit of 300ms");
+    }
+
+    /// A child that writes more than a pipe buffer holds blocks in `write` until somebody reads it.
+    /// A parent that waited first and read afterwards would hang here, on exactly the runs this
+    /// exists to catch, so both pipes are drained while the wait is going on.
+    #[test]
+    fn a_command_that_fills_the_pipe_is_read_rather_than_deadlocked_against() {
+        let mut command = Command::new("sh");
+        // A megabyte, which is well past the sixty four kilobytes a pipe holds on both platforms
+        // this runs on.
+        command.arg("-c").arg("yes abcdefghijklmnopqrstuvwxyz | head -c 1048576");
+        let got = both_within(&mut command, "a lot of output", Some(Duration::from_secs(60)))
+            .expect("a megabyte of output is not a failure");
+        match got {
+            Finished::Ran { stdout, .. } => assert_eq!(stdout.len(), 1_048_576),
+            Finished::TimedOut => panic!("a megabyte took a minute"),
+        }
+    }
 
     #[test]
     fn a_dataset_knows_what_its_files_take() {

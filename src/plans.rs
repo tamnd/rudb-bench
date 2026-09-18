@@ -590,7 +590,7 @@ mod tests {
             })
         }
 
-        fn run(&mut self, _sql: &str) -> Result<Ran, BenchError> {
+        fn run(&mut self, _sql: &str, _limit: Option<Duration>) -> Result<Ran, BenchError> {
             Err(BenchError::new("a plan capture must never run a query"))
         }
 

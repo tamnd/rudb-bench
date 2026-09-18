@@ -16,7 +16,7 @@
 use std::time::Duration;
 
 use crate::data::{Dataset, Sample};
-use crate::engine::{BenchError, Engine, Loaded};
+use crate::engine::{BenchError, Engine, Loaded, Outcome};
 use crate::measure::{Distribution, Runs, show};
 use crate::memory::{Cost, Peak};
 use crate::metrics::{Internal, Spend};
@@ -114,9 +114,41 @@ pub struct QueryResult {
     /// fixed handful of numbers a saved record writes on one line, and this is a list whose length
     /// is however many kinds of operator the plan happened to use.
     pub spend: Vec<Spend>,
+    /// Whether this row is a measurement, and when it is not, what happened instead.
+    pub outcome: Outcome,
 }
 
+/// What a run that hit its limit says on the way out of [`Runs::collect`].
+///
+/// It never reaches a report. The loop catches it and turns it into a row, and the only reason it
+/// is a string at all is that `collect` has one channel for stopping early and this shares it with
+/// the failures that really do stop the suite.
+const DID_NOT_FINISH: &str = "the query did not finish inside its limit";
+
 impl QueryResult {
+    /// A row for a query that was still running when the harness stopped waiting.
+    ///
+    /// The samples are the limit itself, which is the one honest thing to put there: the query took
+    /// at least this long. They are marked as timeouts so that nothing downstream reads the limit
+    /// as a measurement, and [`crate::measure::Distribution::publishable`] refuses the row on the
+    /// same terms it already refuses one with fewer than five samples.
+    #[must_use]
+    pub fn that_did_not_finish(query: &Query, limit: Duration) -> Self {
+        Self {
+            name: query.name.to_owned(),
+            shape: query.shape.to_owned(),
+            runs: Runs { cold: limit, hot: Distribution::median(vec![limit]).with_timeouts(1) },
+            reported: None,
+            cold: Cost::unavailable(format!("no result inside {}s", limit.as_secs())),
+            hot: Cost::unavailable(format!("no result inside {}s", limit.as_secs())),
+            answer: String::new(),
+            planning: Vec::new(),
+            spend: Vec::new(),
+            internal: None,
+            outcome: Outcome::TimedOut { limit },
+        }
+    }
+
     /// The largest peak resident set any run of this query reached.
     ///
     /// Over cold and hot together, because rule six is about what the query costs and a peak that
@@ -265,6 +297,16 @@ impl SuiteResult {
     #[must_use]
     pub fn cold_total(&self) -> Duration {
         self.queries.iter().map(|q| q.runs.cold).sum()
+    }
+
+    /// How many of this column's queries ran out of time rather than finishing.
+    ///
+    /// What makes a total in this column a lower bound. A query that hit the limit contributes the
+    /// limit to every sum here, and the limit is by definition less than what the query would have
+    /// taken, so a column with one of these is faster on paper than it was in life.
+    #[must_use]
+    pub fn timeouts(&self) -> usize {
+        self.queries.iter().filter(|q| !q.outcome.measured()).count()
     }
 
     /// Sum of the hot runs by the engine's own clock, when every query reported one.
@@ -611,6 +653,19 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
     }
 
     for query in &result.queries {
+        // Its own sentence, and then nothing else about this query. Everything below asks a
+        // question about a measurement, and the answers a query that never finished gives to them
+        // are all true and all beside the point: it has one hot run, it has no peak, and its spread
+        // is zero because a limit does not vary.
+        if let Outcome::TimedOut { limit } = query.outcome {
+            reasons.push(format!(
+                "{} did not finish inside {}s, so every total in this column is a floor rather \
+                 than a sum",
+                query.name,
+                limit.as_secs()
+            ));
+            continue;
+        }
         if !query.runs.hot.publishable() {
             reasons.push(format!(
                 "{} has {} hot runs and rule two wants at least five",
@@ -667,16 +722,22 @@ fn progress() -> bool {
 
 /// Load the data, then run every query cold once and hot `hot` times.
 ///
+/// `limit` is how long any one query is given before the harness stops waiting for it. `None` waits
+/// as long as it takes, which is the right answer for a suite whose queries are all known to
+/// finish and the wrong one for a suite being run for the first time.
+///
 /// # Errors
 ///
 /// When the engine cannot load the data or a query fails. A suite that reported the queries that
-/// happened to work would be measuring a different suite.
+/// happened to work would be measuring a different suite. A query that ran out of time is not a
+/// failure in that sense: it gets a row saying so, and the suite carries on.
 pub fn run(
     engine: &mut dyn Engine,
     suite: &'static Suite,
     queries: &[Query],
     dataset: &Dataset,
     hot: usize,
+    limit: Option<Duration>,
 ) -> Result<SuiteResult, BenchError> {
     let ability = engine.can_run(suite);
     if let Some(why) = ability.why() {
@@ -733,8 +794,19 @@ pub fn run(
         let mut answer = String::new();
         let mut breakdown = None;
         let mut planning: Vec<(Duration, Duration)> = Vec::with_capacity(hot + 1);
-        let runs = Runs::collect(hot, || {
-            let ran = engine.run(sql)?;
+        // A query that does not finish inside the limit will not finish inside it five more times
+        // either, and a suite where twenty of twenty two time out would otherwise spend the limit
+        // six times over on each of them to learn nothing. The first timeout leaves through the
+        // error channel so that the runs after it are never started, and it is caught here rather
+        // than being allowed to stop the suite. Doing it this way rather than probing first keeps
+        // the cold run cold: a probe would have pulled the file into memory before it was timed.
+        let mut hit: Option<Duration> = None;
+        let collected = Runs::collect(hot, || {
+            let ran = engine.run(sql, limit)?;
+            if let Outcome::TimedOut { limit } = ran.outcome {
+                hit = Some(limit);
+                return Err(BenchError::new(DID_NOT_FINISH));
+            }
             if answer.is_empty() {
                 answer = ran.answer;
             }
@@ -751,7 +823,27 @@ pub fn run(
             costs.push(ran.cost);
             said.push(ran.reported);
             Ok::<(), BenchError>(())
-        })?;
+        });
+        let runs = match collected {
+            Ok(runs) => runs,
+            Err(why) => {
+                // Only the timeout is caught. Anything else is still a reason to stop, because an
+                // engine that cannot start or a query that is not valid SQL is a fact about the run
+                // rather than about the query, and turning it into a cell would hide it.
+                let Some(limit) = hit else { return Err(why) };
+                if progress() {
+                    eprintln!(
+                        "{who}: {} of {}, {}, no result inside {}s",
+                        at + 1,
+                        queries.len(),
+                        query.name,
+                        limit.as_secs()
+                    );
+                }
+                results.push(QueryResult::that_did_not_finish(query, limit));
+                continue;
+            }
+        };
         // The first entry is the cold run, by the order `Runs::collect` calls the closure in.
         let (cold, rest) = costs.split_first().ok_or_else(|| BenchError::new("nothing ran"))?;
         if progress() {
@@ -775,6 +867,7 @@ pub fn run(
             planning,
             spend: breakdown.as_ref().map(|(document, _)| document.by_kind()).unwrap_or_default(),
             internal: breakdown.map(|(document, cpu)| document.internal(cpu)),
+            outcome: Outcome::Completed,
         });
     }
 
@@ -1040,6 +1133,13 @@ pub struct Comparison {
     pub results: Vec<SuiteResult>,
     /// The engines that did not, and why.
     pub skipped: Vec<Abstention>,
+    /// How long each query was given, and nothing when it was given as long as it took.
+    ///
+    /// Kept on the comparison so the report can say it whether or not it fired. A limit that only
+    /// appears in the table when it caught something is a limit a reader has to guess at, and the
+    /// difference between a query that took four seconds under a sixty second limit and the same
+    /// four seconds under a five second one is the whole question of whether the table is tight.
+    pub timeout: Option<Duration>,
 }
 
 impl Comparison {
@@ -1195,6 +1295,7 @@ pub fn compare(
     queries: &[Query],
     dataset: &Dataset,
     hot: usize,
+    limit: Option<Duration>,
 ) -> Comparison {
     let mut results = Vec::new();
     let mut skipped = Vec::new();
@@ -1210,7 +1311,7 @@ pub fn compare(
             });
             continue;
         }
-        match run(engine.as_mut(), suite, queries, dataset, hot) {
+        match run(engine.as_mut(), suite, queries, dataset, hot, limit) {
             Ok(result) => results.push(result),
             Err(e) => skipped.push(Abstention {
                 engine: engine.name().to_owned(),
@@ -1234,6 +1335,7 @@ pub fn compare(
         rows: dataset.rows,
         results,
         skipped,
+        timeout: limit,
     }
 }
 
@@ -1512,6 +1614,7 @@ fn grid(compared: &Comparison) -> String {
         let mut row = vec![query.name.clone(), query.shape.clone()];
         for result in &compared.results {
             row.push(match result.find(&query.name) {
+                Some(q) if !q.outcome.measured() => q.outcome.cell(),
                 Some(q) => show(q.runs.hot.headline()),
                 None if result.missing.contains(&query.name) => "no dialect".to_owned(),
                 None => "did not run".to_owned(),
@@ -1520,7 +1623,7 @@ fn grid(compared: &Comparison) -> String {
         rows.push(row);
     }
 
-    rows.push(summary("total hot", compared, |r| show(r.hot_total())));
+    rows.push(summary("total hot", compared, |r| at_least(r, show(r.hot_total()))));
     // Directly under the total it qualifies, because a spread printed three rows away from the
     // number it belongs to is a spread that gets read as its own fact rather than as a caveat.
     rows.push(summary("worst IQR", compared, |r| {
@@ -1532,7 +1635,7 @@ fn grid(compared: &Comparison) -> String {
     rows.push(summary("shape spread", compared, |r| {
         r.shape_spread().map_or_else(|| "n/a".to_owned(), |s| format!("{s:.2}x"))
     }));
-    rows.push(summary("total cold", compared, |r| show(r.cold_total())));
+    rows.push(summary("total cold", compared, |r| at_least(r, show(r.cold_total()))));
     // The engine's own clock next to this harness's, because the ratio at the bottom is taken on
     // the engine's own and a reader should not have to open the file to find out that the two
     // differ. On a sample small enough to iterate on they differ by more than the engines do:
@@ -1560,7 +1663,14 @@ fn grid(compared: &Comparison) -> String {
         .queries
         .iter()
         .map(|q| q.name.clone())
-        .filter(|name| compared.results.iter().all(|r| r.find(name).is_some()))
+        // Finished in every column, not merely present in it. A query one engine gave up on
+        // contributes that engine's limit rather than its time, and a ratio over that is a ratio
+        // over a number chosen by the flag rather than measured, flattering whichever engine ran
+        // out of time. It comes out of the ratio and stays in the table above, with its own row
+        // saying what happened, which is where a reader should be looking anyway.
+        .filter(|name| {
+            compared.results.iter().all(|r| r.find(name).is_some_and(|q| q.outcome.measured()))
+        })
         .collect();
     let base = reference.best_total_over(&common).unwrap_or(Duration::ZERO).as_secs_f64();
     let label = if common.len() == reference.queries.len() {
@@ -1610,6 +1720,15 @@ fn grid(compared: &Comparison) -> String {
     out
 }
 
+/// A total over a column where something ran out of time, which is a floor rather than a sum.
+///
+/// The limit went into the sum because there was nothing else to put there, and the limit is less
+/// than whatever the query would have taken. So the cell says so with a `>` rather than printing a
+/// number that reads like the rest of the column.
+pub(crate) fn at_least(result: &SuiteResult, total: String) -> String {
+    if result.timeouts() == 0 { total } else { format!(">{total}") }
+}
+
 /// One supporting row of the cross engine table.
 fn summary(name: &str, compared: &Comparison, of: impl Fn(&SuiteResult) -> String) -> Vec<String> {
     let mut row = vec![name.to_owned(), String::new()];
@@ -1638,10 +1757,10 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        Abstention, Comparison, FLAT, QueryResult, SuiteResult, comparison, middle, publishable,
-        spread, table, together, worst,
+        Abstention, Comparison, FLAT, QueryResult, SuiteResult, at_least, comparison, middle,
+        publishable, spread, table, together, worst,
     };
-    use crate::engine::Loaded;
+    use crate::engine::{Loaded, Outcome};
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
     use crate::suite::find;
@@ -1667,6 +1786,7 @@ mod tests {
                 reported: None,
                 name: "q1".to_owned(),
                 shape: "count".to_owned(),
+                outcome: Outcome::Completed,
                 runs: Runs { cold: Duration::from_millis(40), hot: Distribution::median(samples) },
                 cold: cost(peak.clone(), Some(4096)),
                 hot: cost(peak, Some(0)),
@@ -1693,6 +1813,76 @@ mod tests {
         result.queries[0].runs.hot = Distribution::median(vec![Duration::from_millis(millis); 5]);
         result.queries[0].answer = answer.to_owned();
         result
+    }
+
+    /// The second query, which is the one the tests below either measure or run out of time on.
+    const SECOND: crate::suite::Query =
+        crate::suite::Query { name: "q2", shape: "join", sql: "SELECT 1", dialects: &[] };
+
+    /// A column of two queries, both of which finished.
+    fn two(name: &str, millis: u64) -> SuiteResult {
+        let mut result = rival(name, millis, "1");
+        let mut second = result.queries[0].clone();
+        second.name = "q2".to_owned();
+        second.shape = "join".to_owned();
+        result.queries.push(second);
+        result
+    }
+
+    /// A column of two queries, the second of which ran out of its limit.
+    fn timed_out(name: &str, millis: u64, limit: Duration) -> SuiteResult {
+        let mut result = two(name, millis);
+        let answer = result.queries[0].answer.clone();
+        let mut second = QueryResult::that_did_not_finish(&SECOND, limit);
+        second.answer = answer;
+        result.queries[1] = second;
+        result
+    }
+
+    /// A query that ran out of time is a row saying so, not a number that reads as a measurement.
+    #[test]
+    fn a_query_that_ran_out_of_time_says_so_in_its_cell_rather_than_printing_the_limit() {
+        let limit = Duration::from_secs(30);
+        let table = comparison(&compared(
+            vec![two("duckdb", 10), timed_out("rudb", 10, limit)],
+            Vec::new(),
+        ));
+        assert!(table.contains("timeout at 30s"), "{table}");
+        assert!(!table.contains("30.00s"), "the limit is not a time this query took, {table}");
+    }
+
+    /// The limit went into the sum because there was nothing else to put there, and it is less than
+    /// whatever the query would have taken, so the total is a floor.
+    #[test]
+    fn a_total_over_a_column_that_ran_out_of_time_is_marked_as_a_floor() {
+        let limit = Duration::from_secs(30);
+        let one = rival("duckdb", 10, "1");
+        let two = timed_out("rudb", 10, limit);
+        assert_eq!(one.timeouts(), 0);
+        assert_eq!(two.timeouts(), 1);
+        assert_eq!(at_least(&one, "1.00s".to_owned()), "1.00s");
+        assert_eq!(at_least(&two, "1.00s".to_owned()), ">1.00s");
+    }
+
+    /// And it is out of the ratio, because a ratio taken over the limit is a ratio over the flag.
+    #[test]
+    fn the_ratio_is_taken_over_the_queries_that_finished_everywhere() {
+        let limit = Duration::from_secs(30);
+        let table = comparison(&compared(
+            vec![two("duckdb", 10), timed_out("rudb", 10, limit)],
+            Vec::new(),
+        ));
+        assert!(table.contains("on 1 shared"), "{table}");
+    }
+
+    /// And it says so under the table, in its own words rather than in the words of the rule about
+    /// how many hot runs a median wants.
+    #[test]
+    fn a_column_that_ran_out_of_time_cannot_be_published_and_says_which_query_it_was() {
+        let reasons = publishable(&timed_out("rudb", 10, Duration::from_secs(30)));
+        let said = reasons.join("\n");
+        assert!(said.contains("q2 did not finish inside 30s"), "{said}");
+        assert!(!said.contains("q2 has 1 hot runs"), "that is true and beside the point, {said}");
     }
 
     /// A result with one query per hot median, for the tests about the shape of a column.
@@ -1724,6 +1914,7 @@ mod tests {
             rows: None,
             results,
             skipped,
+            timeout: None,
         }
     }
 

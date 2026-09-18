@@ -373,7 +373,7 @@ The empty column list on the `TableFunction` is projection pushdown, and it is t
 
 The absolute path of the checkout is settled out before anything is written down, because rudb inlines a view and a baseline holding one machine's path is a baseline that fails for everybody else. The trailing seam block is dropped too: it is byte identical in every query, so keeping it would put twenty one copies of one fact about the build in a file and make registering a seam look like every query in the suite replanning.
 
-A query that will not bind is a line rather than an absence, and that turned out to be the first thing the gate found. rudb declines to run TPC-H, because every join in it is a nested loop and timing that would be timing a hang, so nobody had ever found out which of the twenty two queries rudb can bind. Planning executes nothing, so the answer is now in the file and is checked on every commit:
+A query that will not bind is a line rather than an absence, and that turned out to be the first thing the gate found. rudb used to decline TPC-H outright, because every join in it is a nested loop and timing that would have been timing a hang, so nobody had ever found out which of the twenty two queries rudb can bind. Planning executes nothing, so the answer is in the file and is checked on every commit whatever the engine does at run time:
 
 ```
 planned   21 of 22
@@ -491,6 +491,8 @@ These apply to the README, release notes, the dashboard, any talk, any post, and
 `--runs 1` exists and does not break that rule. The rule is enforced where the number would be published rather than at the flag: a distribution of fewer than five samples says no to `publishable`, so a run that small cannot go into a record, cannot be stored in the ledger, and carries the reason in its own report. What it can do is finish in a fifth of the time, which is what you want while you are changing the engine and not what you want on the day you write something down.
 
 **Report the whole suite including the losses.** Every query, in a table, including the ones where we are slower. A geometric mean with no per-query table is not a result.
+
+This is why a query has a limit rather than the run having one. `--timeout` gives each query a number of seconds, the suite's own default when nobody says, and a query that runs out of it becomes a row saying so while the other twenty one are still measured. The limit is deliberately loose, minutes rather than seconds, because it is there to turn a hang into a row and not to fail a query that is merely slow. A column that used one is marked: the query prints `timeout at 60s` instead of a time, every total in that column gets a `>` because the limit went into the sum and is less than whatever the query would have taken, the query comes out of the ratio so that a number chosen by a flag never flatters anybody, and the column cannot be published. `--timeout 0` waits as long as it takes, which is what you want when the query you are debugging is the slow one.
 
 **Report cold and hot separately.** Cold is what a user's first query does.
 

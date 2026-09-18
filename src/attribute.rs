@@ -183,6 +183,7 @@ pub fn attribute(
     queries: &[Query],
     dataset: &Dataset,
     hot: usize,
+    limit: Option<Duration>,
 ) -> Result<Attributed, String> {
     let name = engine.name().to_owned();
     let version = engine.version().to_owned();
@@ -190,13 +191,15 @@ pub fn attribute(
         return Err(format!("{name} cannot run {}: {why}", suite.name));
     }
 
-    let with = run(engine.as_mut(), suite, queries, dataset, hot).map_err(|e: BenchError| {
-        format!("{name} did not finish {} with its optimizer on: {e}", suite.name)
-    })?;
+    let with =
+        run(engine.as_mut(), suite, queries, dataset, hot, limit).map_err(|e: BenchError| {
+            format!("{name} did not finish {} with its optimizer on: {e}", suite.name)
+        })?;
     let optimizers = engine.no_optimizer()?;
-    let without = run(engine.as_mut(), suite, queries, dataset, hot).map_err(|e: BenchError| {
-        format!("{name} did not finish {} with its optimizer off: {e}", suite.name)
-    })?;
+    let without =
+        run(engine.as_mut(), suite, queries, dataset, hot, limit).map_err(|e: BenchError| {
+            format!("{name} did not finish {} with its optimizer off: {e}", suite.name)
+        })?;
     engine.unload();
 
     Ok(join(suite, name, version, optimizers, &with, &without))
