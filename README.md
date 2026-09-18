@@ -477,6 +477,14 @@ Twenty one of twenty two, for the price of eight empty Parquet files. A query th
 
 The gate fails on any change at all, including a change somebody meant. A plan that moved on purpose wants `rudb-bench plans --suite <name> --record` in the same pull request as the change that moved it, which is the whole point: the diff gets reviewed next to its cause. A category of plan change that only printed a warning would be the category people stop reading.
 
+`rudb-bench plans --ablate <rule>` asks a different question of the same evidence. It plans the suite twice, once with the rule set on and once with it set off, and prints the plans that differ. Nothing is recorded, because the answer it wants is that there is nothing to say:
+
+```
+every plan in tpch is the same plan with statistics on and with it off
+```
+
+A rule that is meant to cost nothing while it is off cannot move a plan while it is off. If one does, either the rule is doing work it says it is not doing, or the plan is reading something other than the rule, and the second of those is worse. The G0 milestone asks for both of its rules to be an honest zero, so CI runs this for `statistics` and for `graph_sections` next to the gate above, and a difference fails the job with both trees printed the way a baseline diff prints them.
+
 ClickBench has no baseline yet and that is a gap rather than an oversight. The only `hits` schema this repository has written down is the one after the suite's own conversion, and rudb reads the raw file and applies that conversion in a view, so a fixture built from what is written down would be a table that does not exist on disk anywhere. `fixtures/README.md` says what the honest fix is and it is one command on either of the two machines that has the file.
 
 ### The planning budget
