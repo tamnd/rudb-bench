@@ -390,7 +390,7 @@ ClickBench has no baseline yet and that is a gap rather than an oversight. The o
 
 The gate above watches what the optimizer decided. This one watches what deciding it cost.
 
-Every other number in this harness is about the part of a query that moves rows. Planning is the part before any row moves, and until rudb 0.3.35 it was not measured at all: parsing, binding and optimizing happen above the code that writes the metrics document, nothing up there was on a clock, and all three fields were zero in every document the engine had ever written. The total was the physical build plus the run, so planning could grow without a single number going up anywhere.
+Every other number in this harness is about the part of a query that moves rows. Planning is the part before any row moves, and until rudb 0.3.36 it was not measured at all: parsing, binding and optimizing happen above the code that writes the metrics document, nothing up there was on a clock, and all three fields were zero in every document the engine had ever written. The total was the physical build plus the run, so planning could grow without a single number going up anywhere.
 
 That matters because of how an optimizer changes. It is only ever added to. Each pass arrives with a measurement showing it paid for itself on the query somebody wrote it for, and no pass arrives with a measurement of what it costs on the queries it does nothing for. The pass that saves four hundred milliseconds on a scan of ten million rows costs its two hundred microseconds on a point lookup too. Twenty passes later the point lookup plans for longer than it runs, and nobody has found out, because the query still returns the right answer and every profile anybody opens starts at the first operator.
 
@@ -399,14 +399,14 @@ So planning is a column of its own next to the runtime, and `run <suite> --check
 ```
 baselines/planning-smoke.txt
   rudb
-    q1          2.36% of 4.74% allowed   1388us planning, 57576us running
-    q2          0.54% of 2.84% allowed   1247us planning, 229119us running
-    q3          0.34% of 2.42% allowed   1352us planning, 396195us running
-    q4          0.23% of 2.20% allowed   1399us planning, 606076us running
-    q5          0.19% of 2.40% allowed   1598us planning, 842837us running
+    q1          2.66% of 3.50% allowed   1109us planning, 40639us running
+    q2          0.57% of 2.34% allowed   1465us planning, 256651us running
+    q3          0.37% of 2.23% allowed   1177us planning, 320015us running
+    q4          0.26% of 2.15% allowed   1082us planning, 421870us running
+    q5          0.35% of 2.31% allowed   1458us planning, 412884us running
 ```
 
-The microseconds are the more interesting half of that. Planning is about a millisecond and a half whatever the query is, because the work it does is proportional to the size of the statement and these five statements are all about the same size, while what they run over differs by a factor of fifteen. That is the shape of the problem: the cost of planning does not shrink when the query gets small, so the share is largest exactly where the absolute number matters least, and a pass added for the benefit of q5 is paid for by q1.
+The microseconds are the more interesting half of that. Planning is about a millisecond whatever the query is, because the work it does is proportional to the size of the statement and these five statements are all about the same size, while what they run over differs by a factor of fifteen. That is the shape of the problem: the cost of planning does not shrink when the query gets small, so the share is largest exactly where the absolute number matters least, and a pass added for the benefit of q5 is paid for by q1.
 
 The budget is a share and not a duration, and that is the whole design. A committed budget of nine hundred microseconds is a fact about the machine it was taken on, and checking it somewhere else breaks reporting rule seven. A share survives the trip, because planning and execution are two spans of the same run of the same query read off the same clock seconds apart, so the ratio between them is a property of the engine in a way that neither number is on its own. It is not perfectly portable, since planning does not get faster with more cores and execution does, but it errs the safe way: a slower machine runs the query for longer, which makes planning a smaller share, so a budget carried somewhere slower gets looser rather than crying wolf. The microseconds are printed beside the shares because eight percent of a two millisecond query is not the same news as eight percent of a two second one, and they are printed rather than stored for exactly the reason the share is stored rather than them.
 

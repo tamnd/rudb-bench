@@ -40,7 +40,7 @@ pub struct Document {
     pub state: String,
     /// Parse, bind, optimize, build and execute, together.
     ///
-    /// It was only the build and the execute until rudb 0.3.35, because nothing above the executor
+    /// It was only the build and the execute until rudb 0.3.36, because nothing above the executor
     /// was on a clock. A record written by an engine older than that has a total that excludes
     /// planning, and the [`Self::planning`] read off it is zero for the same reason.
     pub total: Duration,

@@ -19,15 +19,21 @@
 # building the operator tree. Taken as the whole statement less the execute span rather than by
 # adding the phases up, so that work moved out of the optimizer into the builder does not meet the
 # budget by changing which side of a line it is on.
+#
+# The share is the middle one of the runs rather than the first. A query the engine answers out of
+# the file's directory runs in about a millisecond some of the time, and the share is then almost
+# all denominator: taking it off one run gave smoke q1 anything between 1.7% and 41.1% while its
+# planning never left the range 795us to 1662us. A gate that fails one run in five is a gate
+# somebody switches off.
 
 [budget]
 suite     smoke
 machine   server3
 engine    rudb
-version   rudb 0.3.34
+version   rudb 0.3.35
 recorded  2026-09-18
-query     q1              274    474
-query     q2               84    284
-query     q3               42    242
-query     q4               20    220
-query     q5               40    240
+query     q1              150    350
+query     q2               34    234
+query     q3               23    223
+query     q4               15    215
+query     q5               31    231
