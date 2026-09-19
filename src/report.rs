@@ -190,7 +190,11 @@ impl Failed {
     /// copy of a query the reader already has in the suite.
     #[must_use]
     pub fn sentence(&self) -> &str {
-        self.why.find(" LINE ").map_or(self.why.as_str(), |at| self.why[..at].trim_end())
+        let cut = self.why.find(" LINE ").map_or(self.why.as_str(), |at| &self.why[..at]);
+        // The full stop comes off too, because the line that prints this adds one. rudb ends a
+        // decimal overflow with one and an out of memory without, and a row that kept both got
+        // `bigger decimal..` in the middle of a published table.
+        cut.trim_end().trim_end_matches('.')
     }
 }
 
@@ -1862,7 +1866,7 @@ mod tests {
         assert_eq!(
             one.sentence(),
             "Out of Range Error: Overflow in multiplication of DECIMAL(18) (10000 * \
-             452593436477868). You might want to add an explicit cast to a bigger decimal."
+             452593436477868). You might want to add an explicit cast to a bigger decimal"
         );
         assert!(one.why.contains("PROMO"), "the record keeps what the engine said");
 
