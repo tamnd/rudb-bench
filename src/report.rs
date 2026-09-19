@@ -726,12 +726,55 @@ fn progress() -> bool {
     std::env::var_os("RUDB_BENCH_PROGRESS").is_some()
 }
 
+/// The sentence an engine's failure is worth keeping, out of everything it printed on the way.
+///
+/// The whole text is not it. rudb runs with `.timer on`, so a query that fails after five
+/// statements arrives as five `Run Time (s): real 0.00013` and then the error, all run together,
+/// and a row that carried that would bury the one fact in it.
+///
+/// So the text is cut at the last thing that announces itself as an error, which is the engine's
+/// own convention and not this harness's guess: DuckDB, rudb and DataFusion all say
+/// `<Kind> Error: <what>`. The kind is kept, because it is most of the content. An out of memory
+/// and a decimal overflow are one word apart and they are not the same news: one is the box and
+/// one is the engine.
+///
+/// When nothing announces itself, the first line is kept as it was. An engine that failed without
+/// the word is still an engine that failed, and inventing a summary for it would be worse than
+/// printing a short line somebody has to go and look up.
+fn complaint(said: &str) -> String {
+    let words: Vec<&str> = said.split_whitespace().collect();
+    let Some(at) = words.iter().rposition(|w| *w == "Error:" || w.ends_with("Error:")) else {
+        return said.lines().next().unwrap_or(said).trim().to_owned();
+    };
+    // Back up over the kind, which is at most the three words before `Error:` and is always
+    // capitalised or joined by `of`, as in `Out of Memory` and `Out of Range` and `INTERNAL`.
+    let mut from = at;
+    while from > 0 && at - from < 3 {
+        let word = words[from - 1];
+        let kind = word == "of"
+            || word.chars().next().is_some_and(char::is_uppercase)
+                && word.chars().all(char::is_alphabetic);
+        if !kind {
+            break;
+        }
+        from -= 1;
+    }
+    // A run that ends on `of` took a connector without the word in front of it, which is not a
+    // kind. `Out of Memory` keeps all three or none of them.
+    if words[from] == "of" {
+        from += 1;
+    }
+    words[from..].join(" ")
+}
+
 /// Load the data, then run every query cold once and hot `hot` times.
 ///
 /// # Errors
 ///
-/// When the engine cannot load the data or a query fails. A suite that reported the queries that
-/// happened to work would be measuring a different suite.
+/// When the engine cannot load the data. A query that fails is not an error here: it becomes a
+/// [`Failed`] row and the rest of the column keeps its numbers, because an engine that answered
+/// twenty one of twenty two is a different fact from one that could not start. The result is still
+/// not publishable, and [`publishable`] is where that is decided.
 pub fn run(
     engine: &mut dyn Engine,
     suite: &'static Suite,
@@ -822,8 +865,7 @@ pub fn run(
         let runs = match runs {
             Ok(runs) => runs,
             Err(why) => {
-                let said = why.to_string();
-                let first = said.lines().next().unwrap_or(&said).trim().to_owned();
+                let first = complaint(&why.to_string());
                 if progress() {
                     eprintln!(
                         "{who}: {} of {}, {}, failed, {first}",
@@ -1747,13 +1789,45 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        Abstention, Comparison, FLAT, QueryResult, SuiteResult, comparison, middle, publishable,
-        spread, table, together, worst,
+        Abstention, Comparison, FLAT, QueryResult, SuiteResult, comparison, complaint, middle,
+        publishable, spread, table, together, worst,
     };
     use crate::engine::Loaded;
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
     use crate::suite::find;
+
+    /// Every string here is one rudb printed at TPC-H SF100 on 19 September 2026, unedited apart
+    /// from the newlines the shell had already run together.
+    #[test]
+    fn a_failure_keeps_the_engines_sentence_and_drops_what_it_printed_on_the_way() {
+        let timers = "rudb failed: Run Time (s): real 0.000962451 Run Time (s): real 0.001524894 \
+                      Run Time (s): real 0.000130306";
+        assert_eq!(
+            complaint(&format!(
+                "{timers} INTERNAL Error: an unscaled decimal of 11016932248183655467 does not \
+                 fit the run its precision chose"
+            )),
+            "INTERNAL Error: an unscaled decimal of 11016932248183655467 does not fit the run its \
+             precision chose"
+        );
+        // The kind is three words here and it is the whole difference between a defect in the
+        // engine and a box that was too small, so a rule that kept only `Error:` would lose it.
+        assert_eq!(
+            complaint(&format!("{timers} Out of Memory Error: failed to allocate 2.1 GiB")),
+            "Out of Memory Error: failed to allocate 2.1 GiB"
+        );
+        assert_eq!(
+            complaint(&format!(
+                "{timers} Out of Range Error: Overflow in multiplication of DECIMAL(18) (10000 * \
+                 452593436477868)"
+            )),
+            "Out of Range Error: Overflow in multiplication of DECIMAL(18) (10000 * \
+             452593436477868)"
+        );
+        // Nothing announcing itself, so the first line survives rather than being summarised.
+        assert_eq!(complaint("duckdb failed\nand said nothing else"), "duckdb failed");
+    }
 
     fn cost(peak: Peak, read: Option<u64>) -> Cost {
         Cost { peak, cpu: Some(Duration::from_millis(30)), read }
