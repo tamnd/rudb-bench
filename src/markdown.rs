@@ -781,7 +781,9 @@ fn caveats(compared: &Comparison) -> String {
         for one in &result.failed {
             out.push_str(&format!(
                 "{} ran {} and it failed, {}.\n\n",
-                result.engine, one.name, one.why
+                result.engine,
+                one.name,
+                one.sentence()
             ));
         }
         out.push_str(&format!(

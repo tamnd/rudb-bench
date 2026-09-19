@@ -171,8 +171,27 @@ pub struct Failed {
     /// keeps one description of a query in one place and keeps the saved file's last field the
     /// only free text in it.
     pub name: String,
-    /// What the engine said, first line and trimmed, as the engine said it.
+    /// What the engine said, as the engine said it.
+    ///
+    /// Everything it said, so that the saved file loses nothing. Some of it is long: rudb answers
+    /// a decimal overflow with the advice, the line number and the whole query echoed back. That
+    /// belongs in the record. It does not belong in a table, which is what [`sentence`] is for.
+    ///
+    /// [`sentence`]: Self::sentence
     pub why: String,
+}
+
+impl Failed {
+    /// The part of [`why`](Self::why) a report prints, which is the part before the echoed SQL.
+    ///
+    /// Engines that echo the offending statement announce it first, with `LINE <n>:`, and that is
+    /// a convention rudb shares with DuckDB and with Postgres before both of them. So a row can be
+    /// cut there and keep every word the engine wrote about what went wrong, while leaving out the
+    /// copy of a query the reader already has in the suite.
+    #[must_use]
+    pub fn sentence(&self) -> &str {
+        self.why.find(" LINE ").map_or(self.why.as_str(), |at| self.why[..at].trim_end())
+    }
 }
 
 /// What a whole suite cost on one engine.
@@ -654,7 +673,7 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
         let said = result
             .failed
             .iter()
-            .map(|f| format!("{} ({})", f.name, f.why))
+            .map(|f| format!("{} ({})", f.name, f.sentence()))
             .collect::<Vec<_>>()
             .join(", ");
         reasons.push(format!(
@@ -1548,7 +1567,7 @@ pub fn comparison(compared: &Comparison) -> String {
         for one in &result.failed {
             line(
                 &mut out,
-                &format!("{} ran {} and it failed, {}.", result.engine, one.name, one.why),
+                &format!("{} ran {} and it failed, {}.", result.engine, one.name, one.sentence()),
             );
         }
         line(
@@ -1827,6 +1846,33 @@ mod tests {
         );
         // Nothing announcing itself, so the first line survives rather than being summarised.
         assert_eq!(complaint("duckdb failed\nand said nothing else"), "duckdb failed");
+    }
+
+    /// rudb echoes the query back after a decimal overflow, which is four hundred characters of
+    /// SQL the reader already has. The record keeps it and the row does not.
+    #[test]
+    fn a_failed_row_prints_the_complaint_without_the_query_echoed_back_at_it() {
+        let one = super::Failed {
+            name: "q14".to_owned(),
+            why: "Out of Range Error: Overflow in multiplication of DECIMAL(18) (10000 * \
+                  452593436477868). You might want to add an explicit cast to a bigger decimal. \
+                  LINE 1: SELECT 100.00 * sum( CASE WHEN p_type LIKE 'PROMO%' THEN ^"
+                .to_owned(),
+        };
+        assert_eq!(
+            one.sentence(),
+            "Out of Range Error: Overflow in multiplication of DECIMAL(18) (10000 * \
+             452593436477868). You might want to add an explicit cast to a bigger decimal."
+        );
+        assert!(one.why.contains("PROMO"), "the record keeps what the engine said");
+
+        // Nothing to cut, so nothing is cut.
+        let oom = super::Failed {
+            name: "q07".to_owned(),
+            why: "Out of Memory Error: could not allocate 19.0 MiB (25.0 GiB/25.0 GiB used)"
+                .to_owned(),
+        };
+        assert_eq!(oom.sentence(), oom.why);
     }
 
     fn cost(peak: Peak, read: Option<u64>) -> Cost {
