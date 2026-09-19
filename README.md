@@ -358,6 +358,25 @@ Getting the number required one harness change, which is that a query that fails
 
 The sixteen it did answer are right: all five engines agreed on every answer the data settles, 22 of 22 queries, to the last significant digit of a double.
 
+### The 6.91x is two factors, and the bigger one is invisible to profiling
+
+[What the TPC-H gap is made of](reports/2026-09-19/what-the-tpch-gap-is-made-of.md) splits that number. CPU seconds over wall seconds is how many cores an engine actually kept busy, so the wall clock ratio is exactly the product of how much more work rudb did and how much less of the machine it did it on. Four queries at SF100, both engines, second run of each:
+
+| query | shape | slower by | rudb cores | duckdb cores | more CPU work | less parallel |
+| --- | --- | --- | --- | --- | --- | --- |
+| q06 | scan, filter, one sum | 1.11x | 14.49 | 20.02 | 0.80x | 1.38x |
+| q17 | correlated scalar subquery | 7.46x | 10.35 | 23.45 | 3.29x | 2.27x |
+| q04 | EXISTS semi join | 12.88x | 5.98 | 19.37 | 3.97x | 3.24x |
+| q16 | count distinct over a join | 14.80x | 1.18 | 6.91 | 2.52x | 5.86x |
+
+The last two columns multiply to the third in every row, to two decimal places, because both halves are measured rather than estimated.
+
+Two things fall out. **The scan is not the problem**: on q06, the one query with no join in it, rudb spent 13.48 CPU seconds against DuckDB's 16.82 and peaked at 139 MB against 759 MB. It is doing twenty percent less work and handing the win back on cores. And **parallelism collapses as the query becomes join shaped**, 14.49 cores to 10.35 to 5.98 to 1.18, so the worst query in the suite is running on one thread. The operator breakdown points elsewhere, at Aggregate as 35.0% of CPU, and it cannot do otherwise: a serial operator costs wall clock without costing CPU, so it is invisible in the first table anybody would check.
+
+Both factors are fixable and both together are worth roughly the 6.91x, which lands rudb level with DuckDB on TPC-H and not ten times ahead of it. Ten times over the shared sixteen is 1.739s against 120.226s today. On ClickBench the answer to that question exists and works, the synopsis answering ten queries out of metadata in 0.172s against 3.307s, a 19x on those ten. There is no equivalent for a join, and whatever closes TPC-H to the goal is a thing of that kind rather than a faster hash table.
+
+The two decimal failures also turned out to be one bug. `sum` over a decimal returns `DECIMAL(18,s)` in rudb and `DECIMAL(38,s)` in DuckDB, which makes q14's `100.00 * sum(...)` overflow the multiply and q01's scale 6 sum overflow an i64 somewhere past SF1. Widening it should take TPC-H from 16 of 22 to 18 of 22 with no other change.
+
 ### Three engines, three opinions about how wide a decimal is
 
 The first two TPC-H runs both reported q01 and q08 as disagreements, thirty two numbers against thirty two and four against four, which is the shape of a report saying every row is there and every number is wrong. Running the two queries by hand against all three engines says otherwise. Every engine agrees on the answer. They disagree about the result type.
