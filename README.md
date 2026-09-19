@@ -313,7 +313,7 @@ The run above is kept and this is a second one beside it rather than a replaceme
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | duckdb v1.5.5 | 27.416s | 17.95 | 16.65 GiB | +9% | 49.976s | 26.24 GiB | 13.87x | 1.00x |
 | duckdb-pinned v2.0.0-dev84237 | 25.676s | 13.61 | 16.82 GiB | +19% | 56.701s | 27.96 GiB | 13.46x | 0.94x |
-| datafusion 55.1.0 | 103.139s | 21.60 | 29.22 GiB | +2% | — | 33.20 GiB | 56.00x | 3.76x |
+| datafusion 55.1.0 | 103.139s | 21.60 | 29.22 GiB | +2% | no load | 33.20 GiB | 56.00x | 3.76x |
 | clickhouse-local 26.9.1.1562 | 123.414s | 16.71 | 16.99 GiB | +5% | 84.779s | 30.23 GiB | 64.06x | 4.50x |
 
 **rudb has no row here, and the harness is what refused to give it one.** The engine did not fail and was not left out; the suite declines to time it, saying that every join in rudb is a nested loop and TPC-H is twenty two of them, so what got measured would be a hang rather than a number. `spec/07-execution.md` section 7.4 specifies a partitioned radix hash join switched at runtime on observed build cardinality, and that is milestone E3 and not yet built. rudb was 0.3.45 for this run and main is 0.3.49, and the guard still fires on both.
@@ -324,7 +324,9 @@ What the rival columns say is the same thing the earlier run said, which is wort
 
 Two caveats travel with this table and both matter more than they would at ClickBench sizes. The hot column is not fully hot: the block layer served 9.83 GiB to `clickhouse-local` and 12.04 GiB to DataFusion during the hot runs, because SF100 does not fit in this machine's 31.34 GiB alongside an engine, so those two numbers include disk in a way DuckDB's mostly do not. And DataFusion peaked at 29.22 GiB of resident memory on a 31.34 GiB box, which is close enough to the edge that its number is partly a number about surviving. The suite's own description says SF1000 is the scale that measures spilling; at SF100 on this machine it is already measuring a little of it.
 
-Polars has no column because it failed, and the failure is the harness's rather than the engine's: Polars wrote a `DeprecationWarning` about casting a String to a Date to stderr, and the engine wrapper treats anything on stderr as a failed run. That is a bug worth fixing, because it costs a whole column for a message that is not an error.
+Polars has no column because the kernel killed it. `dmesg` records the run's `python3` going down at `anon-rss:30808780kB`, which is 29.4 GiB on a box with 31.34 GiB, and two reruns since went the same way at 30.8 and 31.1 GiB. So the missing column is Polars not fitting SF100 in this machine in streaming mode, which is a fact about the pair and not a defect in either. It belongs beside DataFusion peaking at 29.22 GiB and surviving: these two engines are both at the edge here and one of them went over it.
+
+What the report says about that failure is the wrong sentence, and the harness is why. An OOM kill leaves nothing on stderr, so the wrapper printed the last six lines it found, which happened to be a `DeprecationWarning` about casting a String to a Date. That reads as though a warning stopped the run. It did not: the same cast runs to completion by hand. `both` in `src/data.rs` only fails a run on a non-zero exit, and it should say when the exit was a signal rather than quoting whatever was last on stderr, because the current message sends a reader after the wrong thing. This paragraph is that reader, an hour later.
 
 ### Three engines, three opinions about how wide a decimal is
 

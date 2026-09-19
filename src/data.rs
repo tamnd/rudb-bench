@@ -411,10 +411,37 @@ pub(crate) fn output(command: &mut Command, what: &str) -> Result<Vec<u8>, Bench
 /// better of the two places for it because it keeps the timing out of the answer without anybody
 /// having to strip it back out. [`output`] throws that half away, so the timed path calls this one
 /// and the apparatus calls that one.
+/// The signal that killed a process, when one did.
+///
+/// Unix only, because a signal is a Unix thing and every machine in `rudb-bench fleet` is one. On
+/// anything else this is always `None` and the caller falls back to quoting stderr, which is the
+/// behaviour that was there before.
+#[cfg(unix)]
+fn killed_by(status: &std::process::ExitStatus) -> Option<i32> {
+    std::os::unix::process::ExitStatusExt::signal(status)
+}
+
+#[cfg(not(unix))]
+fn killed_by(_status: &std::process::ExitStatus) -> Option<i32> {
+    None
+}
+
 pub(crate) fn both(command: &mut Command, what: &str) -> Result<(Vec<u8>, Vec<u8>), BenchError> {
     let out = command.output().map_err(|e| BenchError::new(format!("cannot run {what}: {e}")))?;
     if out.status.success() {
         return Ok((out.stdout, out.stderr));
+    }
+    // A process killed by a signal is reported as the signal and nothing else. It did not choose to
+    // exit and so it did not get to say why, which means whatever is last on its stderr belongs to
+    // the run before the thing that killed it and is not the reason. Quoting it there sends the
+    // reader after the wrong thing: the first time this happened the tail was a DeprecationWarning
+    // and the cause was the out of memory killer, and the report said the warning.
+    if let Some(signal) = killed_by(&out.status) {
+        let why = match signal {
+            9 => " which on this machine is usually the out of memory killer, so check dmesg",
+            _ => "",
+        };
+        return Err(BenchError::new(format!("{what} was killed by signal {signal},{why}")));
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
     let tail: Vec<&str> = stderr.lines().rev().take(6).collect();
@@ -427,8 +454,33 @@ pub(crate) fn both(command: &mut Command, what: &str) -> Result<(Vec<u8>, Vec<u8
 
 #[cfg(test)]
 mod tests {
-    use super::{Dataset, Rows, Sample, Table, prepare, root, size_of_tree};
+    use super::{Dataset, Rows, Sample, Table, both, prepare, root, size_of_tree};
     use std::path::{Path, PathBuf};
+
+    #[test]
+    #[cfg(unix)]
+    fn a_run_the_kernel_killed_says_so_rather_than_quoting_its_stderr() {
+        // The shape of the Polars row in the SF100 TPC-H run: something writes a warning, the out
+        // of memory killer takes the process, and the last thing on stderr is the warning. Quoting
+        // it blamed a DeprecationWarning for what was a machine with not enough memory in it.
+        let mut command = std::process::Command::new("sh");
+        command.arg("-c").arg("echo 'DeprecationWarning: this is not why' >&2; kill -9 $$");
+        let why = both(&mut command, "polars").expect_err("a killed process is not a success");
+        let said = why.to_string();
+        assert!(said.contains("killed by signal 9"), "{said}");
+        assert!(said.contains("dmesg"), "{said}");
+        assert!(!said.contains("DeprecationWarning"), "the warning is not the reason: {said}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_run_that_exited_badly_still_quotes_what_it_said() {
+        let mut command = std::process::Command::new("sh");
+        command.arg("-c").arg("echo 'no such table: lineitem' >&2; exit 1");
+        let why = both(&mut command, "duckdb").expect_err("a non-zero exit is not a success");
+        let said = why.to_string();
+        assert!(said.contains("no such table: lineitem"), "{said}");
+    }
 
     #[test]
     fn a_dataset_knows_what_its_files_take() {
