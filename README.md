@@ -340,6 +340,24 @@ Polars has no column because the kernel killed it. `dmesg` records the run's `py
 
 What the report says about that failure is the wrong sentence, and the harness is why. An OOM kill leaves nothing on stderr, so the wrapper printed the last six lines it found, which happened to be a `DeprecationWarning` about casting a String to a Date. That reads as though a warning stopped the run. It did not: the same cast runs to completion by hand. `both` in `src/data.rs` only fails a run on a non-zero exit, and it should say when the exit was a signal rather than quoting whatever was last on stderr, because the current message sends a reader after the wrong thing. This paragraph is that reader, an hour later.
 
+### The refusal was wrong, and TPC-H now has a rudb column
+
+The section above says rudb cannot start, and that the reason is that every join in it is a nested loop. That sentence was in `src/engine.rs`, pinned by a test, repeated in three other files, and never measured. It is false. rudb 0.3.57 answers all twenty two at SF1 in under a second each, and joining SF1's 6 million row `lineitem` to its 1.5 million row `orders` returns all 6,001,215 matching rows in 0.204s, which nine trillion pair comparisons do not do. The guard is gone, the test that pinned it now asserts the opposite, and the measurement it was preventing is [`reports/2026-09-19/run-tpch-gamingpc-wsl-with-rudb.md`](reports/2026-09-19/run-tpch-gamingpc-wsl-with-rudb.md), written up in [the first TPC-H with rudb in it](reports/2026-09-19/the-first-tpch-with-rudb-in-it.md).
+
+| engine | of 22 | query time on the shared 16 | vs duckdb | cores |
+| --- | --- | --- | --- | --- |
+| duckdb v1.5.5 | 22 | 17.392s | 1.00x | 16.82 |
+| duckdb-pinned v2.0.0-dev84237 | 22 | 16.248s | 0.93x | 12.93 |
+| datafusion 55.1.0 | 22 | 42.314s | 2.43x | 18.62 |
+| clickhouse-local 26.9.1.1562 | 22 | 66.842s | 3.84x | 17.20 |
+| rudb 0.3.57 | 16 | 120.226s | 6.91x | 8.14 |
+
+Getting the number required one harness change, which is that a query that fails now costs one row instead of the whole column. Before this, one error anywhere in a suite threw away every query that had already run, so an engine with six defects in twenty two had no column at all. Now a failure is a `Failed` row carrying the engine's own sentence, the rest of the suite still runs, and `publishable` refuses the result and says how many failed. The totals above are over the sixteen rudb answered, so every column is the same sixteen and none of them is the whole suite.
+
+**This is not a ten times result and is a long way from one.** rudb is 6.91x DuckDB on the sixteen it finished, 2.84x DataFusion which is the like for like comparison since both read the Parquet in place, and it keeps 8.14 of this machine's threads busy against DuckDB's 16.82, so some of the gap is work per row and some of it is that half the machine is idle. The six it did not finish are two separate defects. q01 and q14 are decimal arithmetic, an accumulator and a multiplication that overflow the precision the plan chose, and they are not about the size of the box. q07, q09, q18 and q21 hit rudb's own 25.0 GiB limit, and those four are also DataFusion's four largest peaks in the suite at 28.26, 21.44, 14.44 and 11.22 GiB, so most of that cost is reading Parquet in place rather than anything unique to rudb. What is rudb's own is that it stopped rather than spilled.
+
+The sixteen it did answer are right: all five engines agreed on every answer the data settles, 22 of 22 queries, to the last significant digit of a double.
+
 ### Three engines, three opinions about how wide a decimal is
 
 The first two TPC-H runs both reported q01 and q08 as disagreements, thirty two numbers against thirty two and four against four, which is the shape of a report saying every row is there and every number is wrong. Running the two queries by hand against all three engines says otherwise. Every engine agrees on the answer. They disagree about the result type.
@@ -470,7 +488,7 @@ this total is the sum of the rows and not a claim about the engine. The rows are
 
 That is the argument for the per query column in one table. Five of the six rows are between 1.00 and 1.39, which is to say the optimizer is worth nothing measurable on a scan or an aggregate, and the sixth is 3292x. A total would have reported the optimizer as worth 1188x on the smoke suite, which is a number about q6 wearing a suite's name, and a suite with one more scan in it would have reported a different one for no reason that has anything to do with the optimizer. The rows do not have that problem: q6 is 3292x and the rest are noise, on this suite and on any other.
 
-The same command on rudb, which is the engine this is for, runs five queries rather than six because rudb declines the join on the smoke suite until it has something better than a nested loop. The five it does run agree both ways, which is the exit code, and the spread is 1.53x to 49.99x:
+The same command on rudb, which is the engine this is for, ran five queries rather than six when this was taken, because the suite withheld q6's join from rudb on the nested loop argument the TPC-H section above records as false. That exclusion is gone and rudb gets all six now. The five in this output agree both ways, which is the exit code, and the spread is 1.53x to 49.99x:
 
 ```
 $ rudb-bench attribute --engine rudb --suite smoke --hot 3
@@ -522,7 +540,7 @@ The empty column list on the `TableFunction` is projection pushdown, and it is t
 
 The absolute path of the checkout is settled out before anything is written down, because rudb inlines a view and a baseline holding one machine's path is a baseline that fails for everybody else. The trailing seam block is dropped too: it is byte identical in every query, so keeping it would put twenty one copies of one fact about the build in a file and make registering a seam look like every query in the suite replanning.
 
-A query that will not bind is a line rather than an absence, and that turned out to be the first thing the gate found. rudb declines to run TPC-H, because every join in it is a nested loop and timing that would be timing a hang, so nobody had ever found out which of the twenty two queries rudb can bind. Planning executes nothing, so the answer is now in the file and is checked on every commit:
+A query that will not bind is a line rather than an absence, and that turned out to be the first thing the gate found. At the time rudb declined to run TPC-H at all, on the nested loop argument the TPC-H section above records as false, so nobody had ever found out which of the twenty two queries rudb can bind. Planning executes nothing, so the answer went into the file and is checked on every commit:
 
 ```
 planned   21 of 22
