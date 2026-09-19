@@ -507,6 +507,23 @@ pub fn keeping() -> bool {
     std::env::var_os("RUDB_BENCH_KEEP").is_some()
 }
 
+/// What to cap DuckDB's memory at, when the machine cannot afford the default.
+///
+/// Unset by default, which is the board's own entry: no `SET memory_limit` at all, so DuckDB takes
+/// its own default of eighty percent of the machine. That default assumes the machine is DuckDB's,
+/// and on a box that is also running something else it is not affordable. Loading the full hundred
+/// million row `hits` on `gamingpc-wsl` reached 23.8 GiB of anonymous memory and the kernel killed
+/// it, which the harness could only report as "it said nothing at all", because SIGKILL says
+/// nothing at all.
+///
+/// Set this and the cap goes in front of every statement, load and query alike, and DuckDB spills
+/// rather than dying. That is a deviation from the published entry and a report that used it has
+/// to say so, which is why it is a variable somebody sets on purpose rather than a default.
+#[must_use]
+pub fn duckdb_memory() -> Option<String> {
+    std::env::var("RUDB_BENCH_DUCKDB_MEMORY").ok().filter(|v| !v.is_empty())
+}
+
 /// A subprocess under the timer, which is what all five of these are.
 ///
 /// The engines differ in their arguments and in their dialect and in nothing else, so this holds
@@ -765,6 +782,11 @@ impl Duckdb {
         // thing here that does not include starting this process. It prints a line per statement on
         // stdout and `Reported::RunTime` takes those lines back out of the answer.
         command.arg("-c").arg(".timer on");
+        // In front of everything, so the timer line it prints is never the last one and the run
+        // time still reads off the query. See [`duckdb_memory`] for why this is not the default.
+        if let Some(limit) = duckdb_memory() {
+            command.arg("-c").arg(format!("SET memory_limit = '{limit}'"));
+        }
         for statement in statements {
             command.arg("-c").arg(statement);
         }
