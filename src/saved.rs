@@ -28,7 +28,7 @@ use crate::engine::Loaded;
 use crate::measure::{Convention, Distribution, Runs};
 use crate::memory::{Cost, Peak};
 use crate::metrics::{Accounting, Internal, Spend};
-use crate::report::{Abstention, Comparison, QueryResult, SuiteResult};
+use crate::report::{Abstention, Comparison, Failed, QueryResult, SuiteResult};
 use crate::suite::find;
 
 /// Where the saved runs for one suite on one machine live.
@@ -76,6 +76,11 @@ const PREAMBLE: &str = "\
 # reference implementations, and the cpu that went on building the tree before any pipeline
 # existed. The first two are the cross check, and a query where they disagree is refused by
 # `publishable` rather than dropped from the file.
+#
+# `missing` is the queries the engine has no faithful expression of, declared in the query table
+# before anything ran. `failed` is the queries it was handed, ran, and could not answer, one line
+# each: the name, the shape with its spaces hyphenated, and what the engine said. The two are
+# separate because the first is closed by writing SQL and the second by fixing an engine.
 #
 # `spend` is the same breakdown folded by kind of operator, one line per kind: the kind, the cpu,
 # the rows handed in, the rows handed on, how many operators that was, and how many of them were
@@ -465,6 +470,12 @@ fn write_one(result: &SuiteResult, machine: &str, source_bytes: u64) -> String {
     if !result.missing.is_empty() {
         let _ = writeln!(out, "missing   {}", result.missing.join(" "));
     }
+    // One line each rather than one joined line, because the reason is free text with spaces in it
+    // and the name is not, so both a reader and the parser find the boundary by taking one word
+    // from the left and everything after it.
+    for one in &result.failed {
+        let _ = writeln!(out, "failed    {} {}", one.name, escape(&one.why));
+    }
 
     let l = &result.loaded;
     let _ = writeln!(out, "load      {}", micros(l.took));
@@ -565,6 +576,12 @@ fn read_one(engine: &str, block: &str) -> Result<(SuiteResult, u64), String> {
             missing: value(block, "missing")
                 .map(|m| m.split_whitespace().map(str::to_owned).collect())
                 .unwrap_or_default(),
+            failed: values(block, "failed")
+                .filter_map(|line| {
+                    let (name, why) = line.split_once(' ')?;
+                    Some(Failed { name: name.to_owned(), why: unescape(why) })
+                })
+                .collect(),
             sample,
             rows: value(block, "rows").and_then(|r| r.parse().ok()),
             keeps_state: need("state")? == "kept",
@@ -639,7 +656,7 @@ mod tests {
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
     use crate::metrics::{Accounting, Internal, Spend};
-    use crate::report::{QueryResult, SuiteResult};
+    use crate::report::{Failed, QueryResult, SuiteResult};
     use crate::suite::find;
 
     fn ms(values: &[u64]) -> Vec<Duration> {
@@ -723,6 +740,10 @@ mod tests {
             },
             queries: vec![query("q1"), query("q2")],
             missing: vec!["q19".to_owned()],
+            failed: vec![Failed {
+                name: "q14".to_owned(),
+                why: "Out of Range Error: Overflow in multiplication of DECIMAL(18)".to_owned(),
+            }],
             sample: None,
             rows: Some(99_998),
             keeps_state: false,

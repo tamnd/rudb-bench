@@ -1743,20 +1743,20 @@ impl Engine for Rudb {
         &self.version
     }
 
-    fn can_run(&self, suite: &Suite) -> Ability {
+    fn can_run(&self, _suite: &Suite) -> Ability {
         if self.binary.is_none() {
             return Ability::no("no rudb on PATH, set RUDB_BENCH_RUDB");
         }
-        // Every join in rudb is a nested loop, so a suite that is twenty two joins would be timed on
-        // a hang rather than on a query. The smoke suite has one join and declares it absent for
-        // rudb by name in `suite.rs`, which keeps the gap in one place a reader can find. A whole
-        // suite of them is a refusal instead, because a table of twenty two absences is not a row.
-        if suite.name == "tpch" {
-            return Ability::no(
-                "every join in rudb is a nested loop and TPC-H is twenty two of them, so this \
-                 would be a timing of a hang. spec/07-execution.md section 7.4, milestone E3",
-            );
-        }
+        // This used to refuse TPC-H outright, on the grounds that every join in rudb was a nested
+        // loop and twenty two of them would be a timing of a hang. That stopped being true. At
+        // 0.3.57 rudb answers all twenty two at SF1 in under a second each, and joining the 6M row
+        // lineitem to the 1.5M row orders produces all 6,001,215 rows in 0.204s, which a nested
+        // loop over nine trillion pairs does not do. The refusal was measured and removed rather
+        // than assumed and kept, and `reports/2026-09-19` holds what it was replaced with.
+        //
+        // What replaced it is not a promise that every query works. Some of them fail at SF100.
+        // A query that fails is a failure in the column, per `SuiteResult::failed`, rather than a
+        // reason to have no column.
         Ability::Yes
     }
 
@@ -2050,13 +2050,19 @@ mod tests {
     }
 
     #[test]
-    fn rudb_refuses_tpch_with_a_reason_rather_than_timing_a_hang() {
+    fn rudb_takes_tpch_now_that_its_joins_are_not_nested_loops() {
+        // The inverse of the test that used to be here, which pinned a refusal. The refusal was
+        // lifted because it was measured false and not because TPC-H became convenient, so this
+        // pins the only thing that should decide the matter: whether there is a rudb to ask.
         let tpch = find("tpch").unwrap();
-        let rudb = built(tpch);
-        assert!(!rudb.can_run(tpch).yes());
-        let why = rudb.can_run(tpch).why().expect("a refusal says why").to_owned();
-        assert!(why.contains("nested loop"), "{why}");
-        assert!(why.contains("E3"), "a refusal names the milestone that lifts it, {why}");
+        assert!(built(tpch).can_run(tpch).yes(), "a built rudb runs TPC-H like any other suite");
+        let mut absent = built(tpch);
+        absent.binary = None;
+        let why = absent.can_run(tpch).why().expect("a refusal says why").to_owned();
+        assert!(
+            why.contains("RUDB_BENCH_RUDB"),
+            "the only refusal left is a missing binary, {why}"
+        );
     }
 
     #[test]

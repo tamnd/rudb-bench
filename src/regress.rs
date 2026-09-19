@@ -732,6 +732,7 @@ mod tests {
             rows: None,
             keeps_state: false,
             missing: Vec::new(),
+            failed: Vec::new(),
             load: None,
             cold_forced: false,
         }

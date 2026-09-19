@@ -1136,11 +1136,12 @@ fn plans(args: &[String]) -> ExitCode {
         // A fresh engine per suite, because the view declarations a capture leaves behind are the
         // previous suite's tables and a plan over those is a plan of a different query.
         let mut engine = Rudb::discover(&scratch, suite);
-        // Asked about the smoke suite and not about this one, which is deliberate. rudb declines
-        // TPC-H because every join in it is a nested loop, and that is a statement about execution:
-        // planning executes nothing, and that refusal is exactly why nobody has ever found out
-        // which of the twenty two queries rudb can bind. Smoke is the suite whose only reason to be
-        // declined is that rudb is not built, which is the one refusal that does apply here.
+        // Asked about the smoke suite and not about this one, which is deliberate and now only
+        // just matters. rudb used to decline TPC-H outright and this was how planning got asked
+        // anyway; the refusal has since been measured false and removed, so every suite answers
+        // the same way. Asking about smoke is kept because it is the suite whose only reason to be
+        // declined is that rudb is not built, and that is the one refusal that belongs here: this
+        // command plans and never executes, so nothing about execution should be able to stop it.
         if let Ability::No(why) = engine.can_run(built()) {
             eprintln!("rudb-bench: {why}");
             let _ = std::fs::remove_dir_all(&scratch);

@@ -45,11 +45,17 @@
 //! # What a query that will not bind does
 //!
 //! It gets a `refused` line naming it and the error, and the baseline records that. This was not
-//! the point of the module and it is the first thing it found. rudb has never run TPC-H, because
-//! every join in it is a nested loop and [`crate::engine::Engine::can_run`] declines the suite, so
-//! nobody had found out which of the twenty two queries the binder even accepts. Planning needs no
-//! data and no join, so this answers it on every commit for the price of eight empty Parquet files:
-//! twenty one of the twenty two plan, and q11 does not.
+//! the point of the module and it is the first thing it found. rudb had never run TPC-H, because
+//! [`crate::engine::Engine::can_run`] declined the suite on the grounds that every join in it was
+//! a nested loop, so nobody had found out which of the twenty two queries the binder even accepts.
+//! Planning needs no data and no join, so this answered it on every commit for the price of eight
+//! empty Parquet files.
+//!
+//! The refusal is gone, because it was measured and was false: rudb answers all twenty two at SF1
+//! in under a second each. So this module is no longer the only thing that knows anything about
+//! TPC-H, and what it is for has narrowed back to what it says above. It still runs on a commit
+//! where the suite itself would take an hour, and it still catches a query that stops binding
+//! before anybody loads a table.
 //!
 //! That makes a refusal a first class row rather than a skipped query. A query that stops binding
 //! is a regression and a query that starts binding is progress, and both of them are a diff in this
@@ -601,21 +607,28 @@ mod tests {
         }
     }
 
-    /// The smoke suite declares q6 absent for rudb by name, so a capture over it is the case where
-    /// a suite has a query this engine was never given. It must not become a refusal: a refusal is
-    /// the engine's answer and this is the harness's.
+    /// ClickBench declares four queries absent for Polars by name, so a capture over it is the
+    /// case where a suite has queries this engine was never given. They must not become refusals:
+    /// a refusal is the engine's answer and this is the harness's.
+    ///
+    /// This used the smoke suite and rudb until rudb's join stopped being a nested loop and smoke
+    /// q6 came back, at which point the suite had no absence left to test with.
     #[test]
     fn a_query_the_suite_does_not_give_this_engine_is_not_recorded_as_one_it_refused() {
-        let suite = find("smoke").expect("the smoke suite is compiled in");
-        let queries = crate::suite::SMOKE;
-        let mut fake = Fake { who: "rudb", answers: Vec::new(), asked: std::cell::Cell::new(0) };
-        let tables = [table("smoke", "/tmp/smoke.parquet")];
+        let suite = find("clickbench").expect("the clickbench suite is compiled in");
+        let queries = crate::suite::CLICKBENCH;
+        let mut fake = Fake { who: "polars", answers: Vec::new(), asked: std::cell::Cell::new(0) };
+        let tables = [table("hits", "/tmp/hits.parquet")];
         let out = capture(&mut fake, suite, queries, &tables, "2026-09-18").expect("a capture");
-        let given = queries.iter().filter(|q| q.sql_for("rudb").is_some()).count();
+        let given = queries.iter().filter(|q| q.sql_for("polars").is_some()).count();
         assert_eq!(out.plans.len(), given);
         assert!(out.refused.is_empty());
-        assert!(out.plans.len() < queries.len(), "q6 is the one the suite declines to give rudb");
-        assert!(out.find("q6").is_none());
+        assert!(out.plans.len() < queries.len(), "the suite declines to give Polars four of these");
+        let absent: Vec<_> =
+            queries.iter().filter(|q| q.sql_for("polars").is_none()).map(|q| q.name).collect();
+        for name in absent {
+            assert!(out.find(name).is_none(), "{name} was never asked, so it has no plan");
+        }
     }
 
     #[test]

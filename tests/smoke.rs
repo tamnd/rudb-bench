@@ -111,7 +111,7 @@ fn a_number_measured_here_can_never_be_published() {
 }
 
 #[test]
-fn a_query_that_does_not_run_stops_the_suite_rather_than_scoring_zero() {
+fn a_query_that_does_not_run_is_a_failed_row_rather_than_a_fast_one() {
     let at = scratch("bad");
     let Ok(mut duckdb) = Duckdb::discover(&at, find("smoke").unwrap()) else {
         eprintln!("skipping, no DuckDB on this machine");
@@ -121,8 +121,22 @@ fn a_query_that_does_not_run_stops_the_suite_rather_than_scoring_zero() {
     let suite = find("smoke").unwrap();
     let broken: &[Query] =
         &[Query { name: "q1", sql: "SELECT nope FROM t", shape: "not a column", dialects: &[] }];
-    let got = run(&mut duckdb, suite, broken, &dataset, 5);
-    assert!(got.is_err(), "a failing query is a broken run and not a fast one");
+    let got = run(&mut duckdb, suite, broken, &dataset, 5).expect("the rest of a column survives");
+
+    // This used to be an error, so that a query that failed could not be read as a query that was
+    // quick. It still cannot be read that way: the query is not in `queries` and so has no time at
+    // all, it is named in `failed` with what the engine said, and `publishable` refuses the column
+    // for it. What changed is that the other queries in a real suite now keep their numbers.
+    assert!(got.queries.is_empty(), "a query that failed has no time");
+    assert_eq!(got.failed.len(), 1, "{:?}", got.failed);
+    assert_eq!(got.failed[0].name, "q1");
+    assert!(!got.failed[0].why.is_empty(), "a failure carries what the engine said");
+
+    let reasons = publishable(&got);
+    assert!(
+        reasons.iter().any(|r| r.contains("ran and did not answer") && r.contains("q1")),
+        "{reasons:?}"
+    );
 
     let _ = std::fs::remove_dir_all(&at);
 }

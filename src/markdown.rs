@@ -774,6 +774,26 @@ fn caveats(compared: &Comparison) -> String {
         ));
     }
 
+    // The other kind of short column. A missing query was never run and a failed one was, so they
+    // are two paragraphs rather than one list, and this one carries the engine's own words because
+    // the fix for it is in the engine.
+    for result in compared.results.iter().filter(|r| !r.failed.is_empty()) {
+        for one in &result.failed {
+            out.push_str(&format!(
+                "{} ran {} and it failed, {}.\n\n",
+                result.engine, one.name, one.why
+            ));
+        }
+        out.push_str(&format!(
+            "So the {} column is {} of {} queries, and the {} that failed are a defect in the \
+             engine rather than a gap in this harness.\n\n",
+            result.engine,
+            result.queries.len(),
+            result.queries.len() + result.missing.len() + result.failed.len(),
+            result.failed.len()
+        ));
+    }
+
     let disagreements = compared.disagreements();
     let undetermined = compared.undetermined();
     let diverged = compared.diverged();
@@ -985,6 +1005,7 @@ mod tests {
             },
             queries: vec![query("q1", hot), query("q2", hot)],
             missing: Vec::new(),
+            failed: Vec::new(),
             sample: None,
             rows: Some(10_000_000),
             keeps_state: false,

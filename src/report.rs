@@ -156,6 +156,25 @@ impl QueryResult {
     }
 }
 
+/// A query that was run and did not answer, kept so that the rest of the column survives it.
+///
+/// The engine's own words are carried rather than summarised, because the difference between an
+/// out of memory and a decimal overflow is the whole content of the row. Two of the six TPC-H
+/// queries rudb failed at SF100 were arithmetic defects and four were the box being too small, and
+/// a reader who saw only "six failed" would have no way to tell which half to act on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failed {
+    /// The query, by the name the suite gives it.
+    ///
+    /// Only the name, because everything else about the query is in the suite already. The
+    /// narrative looks the shape up the same way it looks up why a missing query is missing, which
+    /// keeps one description of a query in one place and keeps the saved file's last field the
+    /// only free text in it.
+    pub name: String,
+    /// What the engine said, first line and trimmed, as the engine said it.
+    pub why: String,
+}
+
 /// What a whole suite cost on one engine.
 ///
 /// `PartialEq` without `Eq` because the load average is a float. That is the system's own format,
@@ -184,6 +203,23 @@ pub struct SuiteResult {
     /// A column with anything in here is not the whole suite, which rule three asks for, so it
     /// cannot be published and [`publishable`] says so.
     pub missing: Vec<String>,
+
+    /// The queries this engine was handed, tried, and could not answer, with what it said.
+    ///
+    /// The other half of [`missing`](Self::missing) and deliberately a separate field, because the
+    /// two are different facts about a column and reading them as one would lose the interesting
+    /// one. A missing query was declared absent in the query table and reviewed in a diff before
+    /// anybody ran anything. A failed query was declared runnable, was run, and the engine returned
+    /// an error, which is a defect in the engine rather than a gap in the harness.
+    ///
+    /// This exists so that one failing query costs one row instead of the whole column. Before it,
+    /// a query error propagated out of the run loop and the engine had no result at all, so an
+    /// engine that answered twenty one of twenty two TPC-H queries and fell over on the twenty
+    /// second was indistinguishable from one that could not start.
+    ///
+    /// A column with anything in here is not the whole suite either, so [`publishable`] refuses it
+    /// for the same reason it refuses a missing one, and says which queries and what they said.
+    pub failed: Vec<Failed>,
 
     /// How the data was cut down before this ran, when it was.
     ///
@@ -611,6 +647,22 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
             result.missing.join(", ")
         ));
     }
+    // Separate from the reason above, because the fix is somewhere else. A missing query is closed
+    // by writing a dialect for it, a failed one is closed by fixing the engine, and a run that
+    // reported both under one sentence would send somebody to the wrong repository.
+    if !result.failed.is_empty() {
+        let said = result
+            .failed
+            .iter()
+            .map(|f| format!("{} ({})", f.name, f.why))
+            .collect::<Vec<_>>()
+            .join(", ");
+        reasons.push(format!(
+            "{} of the suite ran and did not answer, so this is not the whole suite rule three \
+             asks for: {said}",
+            result.failed.len()
+        ));
+    }
 
     if let Some(spread) = result.shape_spread().filter(|s| *s < FLAT) {
         reasons.push(format!(
@@ -717,6 +769,7 @@ pub fn run(
     // because which text a query has is a question about the engine.
     let who = engine.name().to_owned();
     let mut missing = Vec::new();
+    let mut failed: Vec<Failed> = Vec::new();
 
     let mut results = Vec::with_capacity(queries.len());
     for (at, query) in queries.iter().enumerate() {
@@ -760,7 +813,29 @@ pub fn run(
             costs.push(ran.cost);
             said.push(ran.reported);
             Ok::<(), BenchError>(())
-        })?;
+        });
+        // A query that errors takes its own row out of the column and leaves the rest standing.
+        // It used to take the column: the `?` that was here propagated out of this function, so an
+        // engine that failed the last of twenty two queries reported nothing at all about the
+        // twenty one it answered. Which query failed and what it said is more useful than that,
+        // and `publishable` refuses the column either way, so nothing unpublishable escapes.
+        let runs = match runs {
+            Ok(runs) => runs,
+            Err(why) => {
+                let said = why.to_string();
+                let first = said.lines().next().unwrap_or(&said).trim().to_owned();
+                if progress() {
+                    eprintln!(
+                        "{who}: {} of {}, {}, failed, {first}",
+                        at + 1,
+                        queries.len(),
+                        query.name
+                    );
+                }
+                failed.push(Failed { name: query.name.to_owned(), why: first });
+                continue;
+            }
+        };
         // The first entry is the cold run, by the order `Runs::collect` calls the closure in.
         let (cold, rest) = costs.split_first().ok_or_else(|| BenchError::new("nothing ran"))?;
         if progress() {
@@ -797,6 +872,7 @@ pub fn run(
         rows: dataset.rows,
         keeps_state: engine.keeps_state(),
         missing,
+        failed,
         load: before.zip(crate::machine::load_now()),
         cold_forced: forcing_cold,
     })
@@ -1422,6 +1498,30 @@ pub fn comparison(compared: &Comparison) -> String {
         );
     }
 
+    // After the absences and before the answers, for the same reason: a short column should say
+    // why before it says anything else. The engine's own words rather than a count, because a
+    // reader deciding whether the number above is worth anything needs to know whether the six
+    // that failed ran out of memory on this box or got the arithmetic wrong.
+    for result in compared.results.iter().filter(|r| !r.failed.is_empty()) {
+        for one in &result.failed {
+            line(
+                &mut out,
+                &format!("{} ran {} and it failed, {}.", result.engine, one.name, one.why),
+            );
+        }
+        line(
+            &mut out,
+            &format!(
+                "So the {} column is {} of {} queries, and the {} that failed are a defect in the \
+                 engine rather than a gap in this harness.",
+                result.engine,
+                result.queries.len(),
+                result.queries.len() + result.missing.len() + result.failed.len(),
+                result.failed.len()
+            ),
+        );
+    }
+
     let disagreements = compared.disagreements();
     let undetermined = compared.undetermined();
     let diverged = compared.diverged();
@@ -1688,6 +1788,7 @@ mod tests {
             rows: None,
             keeps_state: false,
             missing: Vec::new(),
+            failed: Vec::new(),
             load: None,
             cold_forced: false,
         }

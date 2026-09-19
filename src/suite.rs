@@ -265,13 +265,12 @@ pub const SMOKE: &[Query] = &[
         sql: "SELECT a.tag, count(*) FROM smoke a JOIN smoke b ON a.k = b.k \
               WHERE a.id < 100000 AND b.id < 100000 GROUP BY a.tag",
         shape: "join and group by",
-        dialects: &[Dialect {
-            engines: &["rudb"],
-            sql: None,
-            why: "every join in rudb is a nested loop, so this is a hundred thousand rows against a \
-                  hundred thousand rows and the number would be about the loop rather than about \
-                  the join. spec/07-execution.md section 7.4, milestone E3",
-        }],
+        // rudb was absent here, on the grounds that every join in it was a nested loop and this
+        // one is a hundred thousand rows against a hundred thousand rows. That was measured and is
+        // no longer true: at 0.3.57 the same shape over TPC-H joins 6M rows to 1.5M and returns
+        // all 6,001,215 matches in 0.204s, which a nested loop does not do. So the smoke suite
+        // asks every engine the same six questions again.
+        dialects: &[],
     },
 ];
 
