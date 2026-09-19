@@ -665,6 +665,15 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
     if !result.suite.comparable {
         reasons.push(format!("the {} suite is not comparable to any board", result.suite.name));
     }
+    // A capped DuckDB is not the DuckDB the board published, and the cap is invisible in every
+    // other column, so it has to be said here or a reader has no way to find out it was on.
+    if let Some(limit) = crate::engine::duckdb_memory() {
+        reasons.push(format!(
+            "DuckDB was capped at {limit} of memory by RUDB_BENCH_DUCKDB_MEMORY rather than left \
+             at its own default, so both DuckDB rows are a capped DuckDB and not the one the \
+             board publishes"
+        ));
+    }
     // First among the reasons that are about this run rather than about the fleet, because it is
     // the one a reader is most likely to have forgotten. A smaller run prints the same table with
     // the same columns and every number in it is smaller, which is exactly what a real improvement
