@@ -14,44 +14,52 @@ rudb now exposes all 43 ClickBench queries through the regular harness. Q19 and 
 
 ## Where rudb is, today
 
-rudb 0.3.45, six engines, five sizes, on `gamingpc-wsl`, which is 32 hardware threads. Five hot runs of each query after a cold one, all 43 queries, one report per size. Query time is what each engine itself reports, which is the number the public ClickBench board publishes. The ratio is against DuckDB v1.5.5 over the 39 queries every engine in the run answered.
+rudb 0.3.45, six engines, six sizes, on `gamingpc-wsl`, which is 32 hardware threads. Five hot runs of each query after a cold one, all 43 queries, one report per size. Query time is what each engine itself reports, which is the number the public ClickBench board publishes. The ratio is against DuckDB v1.5.5 over the 39 queries every engine in the run answered.
 
-| engine | 1k rows | 10k rows | 100k rows | 1m rows | 10m rows |
-| --- | --- | --- | --- | --- | --- |
-| duckdb v1.5.5 d8cdaa33fd | 98ms | 120ms | 362ms | 577ms | 3.902s |
-| duckdb-pinned v2.0.0-dev84237 cc7e7bac7f | 130ms | 148ms | 345ms | 565ms | 3.364s |
-| clickhouse-local 26.9.1.1562 | 364ms | 398ms | 782ms | 3.005s | 8.394s |
-| datafusion 55.1.0 | 203ms | 300ms | 422ms | 1.199s | 13.110s |
-| polars 1.44.2 | 569.005ms | 585.086ms | 690.885ms | 1.222s | 5.030s |
-| rudb 0.3.45 | 33.153ms | 77.588ms | 233.610ms | 927.438ms | 10.263s |
-| rudb against duckdb | 0.34x | 0.66x | 0.78x | 1.78x | 3.39x |
+| engine | 1k rows | 10k rows | 100k rows | 1m rows | 10m rows | 100m rows |
+| --- | --- | --- | --- | --- | --- | --- |
+| duckdb v1.5.5 d8cdaa33fd | 98ms | 120ms | 362ms | 577ms | 3.902s | 24.116s |
+| duckdb-pinned v2.0.0-dev84237 cc7e7bac7f | 130ms | 148ms | 345ms | 565ms | 3.364s | 15.416s |
+| clickhouse-local 26.9.1.1562 | 364ms | 398ms | 782ms | 3.005s | 8.394s | 16.396s |
+| datafusion 55.1.0 | 203ms | 300ms | 422ms | 1.199s | 13.110s | 23.356s |
+| polars 1.44.2 | 569.005ms | 585.086ms | 690.885ms | 1.222s | 5.030s | 21.432s |
+| rudb 0.3.45 | 33.153ms | 77.588ms | 233.610ms | 927.438ms | 10.263s | 31.361s |
+| rudb against duckdb | 0.34x | 0.66x | 0.78x | 1.78x | 3.39x | 1.78x |
 
-rudb is ahead of every engine in the table at a thousand, ten thousand and a hundred thousand rows, 1.78x behind DuckDB at a million and 3.39x behind at ten million. The previous entries in this file, further down, had rudb 16.59x behind DuckDB at a million rows at 0.2.31, and 11.28x at a million and 19.51x at ten million at 0.3.5. It is now 1.78x and 3.39x, on the same machine, at the same sizes, doing more work than it was then: 0.3.5 ran 41 of 43 queries and excluded Q19 and Q33, and 0.3.45 runs all 43.
+The last column is the only one that is not a sample. It is the real `hits`, all 99,997,497 rows and 13.76 GiB of it, which is the file the public board runs, and it is the first size in this ladder that carries no development loop caveat.
 
-The direction is the opposite of the one the 0.3.5 entry was written to admit, but the shape of the remaining gap has not changed and it is the same shape. Ten thousand times the rows costs DuckDB 40 times the time and costs rudb 310 times, and rudb's ratio against DuckDB gets worse at every step up the ladder. This is a per-row cost rather than a startup cost, and the win at the small sizes is mostly rudb starting in almost no memory rather than rudb computing anything faster.
+rudb is ahead of every engine in the table at a thousand, ten thousand and a hundred thousand rows, 1.78x behind DuckDB at a million, 3.39x behind at ten million, and 1.78x behind on the full file. A ratio that gets worse at every step and then gets better again at the last one is not a shape any per-row cost has, and chasing that turned out to be the most useful thing in the run. It is in [the ten million column was mostly row groups](#the-ten-million-column-was-mostly-row-groups) below, and the short version is that the 10m column is measuring the harness's own sampling rather than rudb at ten million rows.
+
+Read against the file the board actually publishes, then, rudb 0.3.45 is 1.78x DuckDB v1.5.5, 2.03x the pinned DuckDB, 1.91x `clickhouse-local`, and within half of DataFusion and Polars, while holding the smallest memory of the six and the lowest harness overhead of the six. The previous entries in this file, further down, had rudb 16.59x behind DuckDB at a million rows at 0.2.31, and 11.28x at a million and 19.51x at ten million at 0.3.5, doing less work than it does now: 0.3.5 ran 41 of 43 queries and excluded Q19 and Q33, and 0.3.45 runs all 43.
+
+None of which is 10x ahead, which is the goal, and 1.78x behind is the honest distance to it. But the gap at the full file is per-query work in a handful of identifiable shapes rather than a floor under everything, which is the more tractable of the two problems to have.
 
 The cores column is the one that changed most, and it changes what the remaining gap can be blamed on, differently at each end.
 
-| cores used, hot | 1k rows | 10k rows | 100k rows | 1m rows | 10m rows |
-| --- | --- | --- | --- | --- | --- |
-| duckdb | 0.33 | 0.41 | 0.69 | 2.61 | 8.42 |
-| rudb | 0.00 | 0.00 | 0.64 | 2.65 | 4.06 |
+| cores used, hot | 1k rows | 10k rows | 100k rows | 1m rows | 10m rows | 100m rows |
+| --- | --- | --- | --- | --- | --- | --- |
+| duckdb | 0.33 | 0.41 | 0.69 | 2.61 | 8.42 | 11.82 |
+| rudb | 0.00 | 0.00 | 0.64 | 2.65 | 4.06 | 11.45 |
 
-At 0.3.5 rudb never got above 1.00 core on a 32 thread box while DuckDB kept 2.25 busy at a million rows and 9.01 at ten million. At 0.3.45 rudb keeps 2.65 busy at a million, marginally more than DuckDB's 2.61, and is still 1.78x behind, so the gap at that size is per-core work rather than a thread count. At ten million the two come apart again: DuckDB scales to 8.42 cores and rudb only to 4.06, so half the ten million gap is parallelism that stopped widening and the other half is the same per-core work. The two zeros at 1k and 10k are not rudb using no CPU; they are the process finishing inside the 10ms granularity of the CPU accounting, so there is nothing to divide.
+At 0.3.5 rudb never got above 1.00 core on a 32 thread box while DuckDB kept 2.25 busy at a million rows and 9.01 at ten million. At 0.3.45 rudb keeps 2.65 busy at a million, marginally more than DuckDB's 2.61, and is still 1.78x behind, so the gap at that size is per-core work rather than a thread count. At ten million the two come apart, DuckDB reaching 8.42 cores against rudb's 4.06, and on the full file they close up again at 11.82 and 11.45. That the two ends of the ladder agree and only the middle disagrees is the second thing pointing at the 10m column rather than at rudb, and the read that survives it is that rudb scales its threads about as far as DuckDB does on this machine and loses on what each thread is doing. The two zeros at 1k and 10k are not rudb using no CPU; they are the process finishing inside the 10ms granularity of the CPU accounting, so there is nothing to divide.
+
+Nobody in the run is close to the 32 threads the box has. DataFusion gets furthest at 22.50 and is still 1.34x DuckDB, so on this suite at this size the thread count is not what separates the engines.
 
 Memory still goes rudb's way at every size, which matters because a time bought with twice the memory is not the same result.
 
-| peak RSS | 1k rows | 10k rows | 100k rows | 1m rows | 10m rows |
-| --- | --- | --- | --- | --- | --- |
-| duckdb | 38.00 MiB | 40.25 MiB | 65.32 MiB | 307.69 MiB | 1.72 GiB |
-| datafusion | 156.72 MiB | 201.09 MiB | 401.69 MiB | 1.16 GiB | 4.55 GiB |
-| rudb | 10.24 MiB | 13.24 MiB | 46.48 MiB | 162.24 MiB | 1.16 GiB |
+| peak RSS | 1k rows | 10k rows | 100k rows | 1m rows | 10m rows | 100m rows |
+| --- | --- | --- | --- | --- | --- | --- |
+| duckdb | 38.00 MiB | 40.25 MiB | 65.32 MiB | 307.69 MiB | 1.72 GiB | 10.81 GiB |
+| datafusion | 156.72 MiB | 201.09 MiB | 401.69 MiB | 1.16 GiB | 4.55 GiB | 10.90 GiB |
+| rudb | 10.24 MiB | 13.24 MiB | 46.48 MiB | 162.24 MiB | 1.16 GiB | 5.69 GiB |
 
-rudb is the smallest engine in the run at every size. At ten million rows it is two thirds of DuckDB and about a quarter of DataFusion, and it has the lowest harness overhead of the six at both 1m and 10m, +75% and +28%.
+rudb is the smallest engine in the run at every size. On the full file it is 5.69 GiB against DuckDB's 10.81 and DataFusion's 10.90, and against Polars at 16.68 GiB, which is a little over half the memory of the box for a suite rudb ran in under six. It also has the lowest harness overhead of the six at 1m, 10m and 100m, at +75%, +28% and +4%, and +4% is the number that says the 31.361s is the engine and not the measurement: 1.297s of the 32.658s wall clock was everything this harness does around 43 subprocesses.
 
-### The ten million column is one number forty three times
+Memory is worth as much as the time here. An engine that answers in 24s and needs 10.81 GiB and an engine that answers in 31s and needs 5.69 GiB are not ranked by the time column alone, and on a machine sized like the board's c6a.4xlarge, which has 32 GiB, Polars' 16.68 GiB is half the machine.
 
-The most useful thing in the 10m report is not the total. It is that the harness computes, for each engine, how much its slowest query beats its fastest, and the answer for rudb is 3.01x. For DuckDB it is 52.61x.
+### The ten million column was mostly row groups
+
+The most useful thing in the 10m report was not the total. It was that the harness computes, for each engine, how much its slowest query beats its fastest, and the answer for rudb was 3.01x where DuckDB's was 52.61x.
 
 | engine | slowest query over fastest, 10m |
 | --- | --- |
@@ -62,21 +70,61 @@ The most useful thing in the 10m report is not the total. It is that the harness
 | rudb | 3.01x |
 | clickhouse-local | 2.34x |
 
-A column that flat is measuring whatever every query in it has in common rather than measuring the queries. Reading down rudb's per-query times at ten million rows, there is a floor at about 135ms that nothing gets under: `SELECT COUNT(*)` takes 147.818ms, the min and max of a date takes 169.946ms, and the seven date-range queries q37 to q43 take between 135.014ms and 165.891ms each. DuckDB answers those same queries in 1ms, 2ms, and 5ms to 20ms, because it prunes and in two cases never reads a row.
+A column that flat is measuring whatever every query in it has in common rather than measuring the queries. Reading down rudb's per-query times at ten million rows there was a floor at about 135ms that nothing got under: `SELECT COUNT(*)` took 147.818ms, the min and max of a date took 169.946ms, and the seven date-range queries q37 to q43 took between 135.014ms and 165.891ms each. This file previously read that as a full decode of the file paid once per query, about 5.8s of rudb's 10.263s.
 
-rudb's harness overhead at 10m is +28%, so that floor is inside the engine's own clock rather than in process startup. It is a full decode of the file, paid once per query, whatever the query asked for. Forty three queries times that floor is about 5.8s of rudb's 10.263s. The other engine with a flat column, `clickhouse-local` at 2.34x, is flat for the opposite reason: its floor is around 250ms of process start, which is why its overhead is +109%.
+That reading was wrong about the cause, and the 100m run is what caught it. On the full file, ten times the rows, the same rudb binary answers `SELECT COUNT(*)` in **38.350ms**, the min and max of a date in 75.224ms, and q37 to q43 in between 51.453ms and 331.810ms. Ten times the data, and the floor went down rather than up. No per-row cost does that.
 
-So the ten million number decomposes into three things rather than one. About 5.8s is a scan that does not yet know what the query wants, roughly 1.4s of it on nine queries that Parquet's own footer statistics could answer or prune without touching the data. Rather less than half is parallelism that reached 4.06 cores where DuckDB reached 8.42. The rest is per-core work. Only the last of those is the hard one.
+The difference is not the rows, it is how the rows are packed. The harness writes its sampled Parquet with `ROW_GROUP_SIZE 8192` (`src/data.rs:287`), and the real `hits` is not packed anything like that.
+
+| file | rows | row groups | rows per group |
+| --- | --- | --- | --- |
+| `hits-10m-snappy-rg8k.parquet`, what the 10m column read | 9,999,750 | 1204 | 8305 |
+| `hits.parquet`, what the 100m column read | 99,997,497 | 226 | 442,467 |
+
+The sampled 10m file has **5.3x more row groups than the file ten times its size**. Divide the counts through and rudb's `COUNT(*)` costs 0.123ms per row group at 10m and 0.170ms per row group at 100m, against a row count that differs by a factor of ten. rudb's floor tracks row groups and does not track rows. The 135ms was about twelve hundred row group headers at roughly a tenth of a millisecond each, and the 3.01x flatness was every query paying that same opening bill before it started.
+
+Three things follow, and they are worth keeping apart.
+
+The first is about rudb: a tenth of a millisecond per row group is too much, and DuckDB reads the same 1204 row groups for a `COUNT(*)` in 1ms total. That is a real cost in rudb's Parquet path and it is not the Parquet format's fault. It is much less visible on the full file because a realistic file has few, large row groups, but a 13.76 GiB Parquet written by something else with 8k row groups is not a hypothetical.
+
+The second is about the harness, and it is a measurement bug rather than an engine one. A sampled file at `ROW_GROUP_SIZE 8192` does not resemble the file it was sampled from, and the whole 1k to 10m ladder is therefore biased against whichever engine is most sensitive to row group count, which on this evidence is rudb. Every sampled column in the table above is pessimistic for rudb by an amount only a rerun can say. The runs stay as they are, because runs here are kept and not replaced, and the fix is a later run against files packed like the original rather than an edit to these.
+
+The third is what survives the correction. rudb still does not use the Parquet footer statistics: `COUNT(*)` should be a footer read and it is not, at either size, and the date range queries should prune whole row groups on a min and max they already have. That was true when it was written and it is still true. What changed is its share, which at 100m is small.
+
+### Where the full file actually goes
+
+At 100m rudb's flatness is 49.80x, so the full file column is measuring the queries rather than a floor, and it can be read query by query. rudb beats DuckDB v1.5.5 on two of them and loses badly on four.
+
+| query | shape | rudb 0.3.45 | duckdb v1.5.5 | |
+| --- | --- | --- | --- | --- |
+| q29 | group by a regular expression | 2.077s | 7.520s | 3.62x faster |
+| q18 | group by two, no ordering | 426.113ms | 667.000ms | 1.57x faster |
+| q20 | point lookup | 168.213ms | 31.000ms | 5.4x slower |
+| q40 | date range, a case and a wide group by | 331.810ms | 58.000ms | 5.7x slower |
+| q27 | top k by two columns | 484.086ms | 55.000ms | 8.8x slower |
+| q25 | top k by a date | 483.724ms | 54.000ms | 9.0x slower |
+
+The four losses are one shape, not four. Each is a query that touches few rows or wants only the top ten of them, and each is a query DuckDB answers in under 60ms because it never reads most of the file. rudb reads it. q20 is a single point lookup, q25 and q27 are `ORDER BY ... LIMIT 10`, and q40 is a date range: all four are prunes and early exits rather than faster arithmetic, and all four are the same missing thing as the footer statistics above.
+
+rudb's four most expensive queries in absolute terms are a different problem and a more ordinary one: q19 at 2.919s, q34 at 2.462s, q35 at 2.456s and q23 at 2.271s, against DuckDB's 1.428s, 1.965s, 1.968s and 1.008s. Those are large group-bys over long strings and substring scans, rudb is between 1.25x and 2.25x on them, and closing that is per-core work with nothing clever hiding in it. Together they are 10.1s of rudb's 31.361s against 6.4s of DuckDB's 24.116s, so more than half of the 7.2s gap on the whole suite is those four queries.
+
+So the 31.361s on the full file is roughly: about 1.1s of prune that is not happening on four queries, something under a second of footer reads that are not happening on nine more, and the rest spread evenly across large aggregations where rudb is between 1.2x and 2x DuckDB. The first two are bounded and identified. The third is the milestone work.
 
 Five things travel with all of that or it is worth nothing.
 
-These are strided samples of the real `hits`, one row in every 99998, 10000, 1000, 100 and 10, so nothing here is comparable to the public board or to anybody else's number. rudb, DataFusion and Polars read the source Parquet where it lies and pay to decode it inside every query, which is in the column being compared; DuckDB and ClickHouse paid once at load time and are being timed on a format of their own, and at ten million rows that load was 11.060s for DuckDB and 3.557s for `clickhouse-local` against rudb's nothing. Polars cannot run q28, q29, q36 or q43 in its SQLContext, so it is 39 of 43 and every ratio in the table is taken over the shared set. `clickhouse-server` is absent from all five runs: its loader fails with `NO_DATA_TO_INSERT` on this build and the run was taken without it rather than with a row nobody could trust. And the page cache was warm and not dropped, so the cold column is a first pass rather than a first pass off the device.
+The first five columns are strided samples of the real `hits`, one row in every 99998, 10000, 1000, 100 and 10, so nothing in them is comparable to the public board or to anybody else's number, and as the row group section above says they are packed unlike the file they came from. Only the 100m column is the file itself. rudb, DataFusion and Polars read the source Parquet where it lies and pay to decode it inside every query, which is in the column being compared; DuckDB and ClickHouse paid once at load time and are being timed on a format of their own, and on the full file that load was 42.612s for DuckDB, 38.626s for the pinned one and 26.467s for `clickhouse-local` against rudb's nothing, for a database 24.98 GiB, 19.05 GiB and 10.42 GiB on disk against the 13.76 GiB of Parquet the other three read in place. Polars cannot run q28, q29, q36 or q43 in its SQLContext, so it is 39 of 43 and every ratio in the table is taken over the shared set. `clickhouse-server` is absent from all six runs: its loader fails with `NO_DATA_TO_INSERT` on this build and the runs were taken without it rather than with a row nobody could trust. And the page cache was warm and not dropped, so the cold column is a first pass rather than a first pass off the device.
+
+The load column is worth a second look before the query times are read as the whole story. DuckDB spends 42.612s and 24.98 GiB to make the file fast, which is more than the entire 31.361s rudb takes to answer all 43 queries off the Parquet without spending it. Which of those matters depends entirely on how many times the questions get asked, and the ClickBench board's answer is that they get asked a lot, so the load is amortised and the query column is the one to compare. It is still the case that rudb has no storage format of its own yet, and the day it does is the day this table changes shape.
 
 One number in the reports wants reading carefully rather than at face value. rudb's worst interquartile range at a million rows is 99.2% of the median on q39, which rule two would normally treat as a measurement that did not settle. It did not fail to settle: q37 and q39 are bimodal between about 20.28ms and about 40.4ms, which is one tick and two ticks of a 20ms clock. That is timer granularity on a query too short to resolve, not variance in the engine, and the fix is a longer query rather than more runs. At ten million rows, where the queries are long enough to resolve, rudb's worst is 15.1% on q26 and the 99.2% swing belongs to DuckDB on q3.
 
-None of this is the goal. The goal is the full file on a c6a.4xlarge, where ten times DuckDB is 2.63s, and the most recent run of rudb against the real hundred million rows under the official driver is 27.07s hot against DuckDB's 14.03s, which is 1.93x behind with a cold pass 23.6x longer than the hot one. That run is in [the full file under the official driver](reports/2026-09-18/official-driver-full-file.md) and it, rather than this ladder, is what the target is measured against.
+On the full file the same artefact has changed hands entirely, and it is now DuckDB's. Every engine in the 100m run trips rule two somewhere, and rudb trips it least: its worst is 10.9% on q20 against DuckDB's 49.8% on q39, the pinned DuckDB's 50.0% on q1, DataFusion's 49.7% on q7 and Polars' 40.8% on q15. Those are the 20ms clock again, not four engines behaving badly. DuckDB's flagged q4 swings between 60.466ms and 80.521ms and its q39 between 40.365ms and 60ms, which is one tick in both cases, and they read as 33.2% and 49.8% only because the queries underneath them are short enough for one tick to be a third of the answer. It is the engines that finish these queries fastest that the timer punishes hardest, which is the opposite of what an IQR column is usually read to mean.
 
-The five runs in full, written by the harness with nothing typed into them by hand, are [1k](reports/2026-09-18/run-clickbench-gamingpc-wsl-1k.md), [10k](reports/2026-09-18/run-clickbench-gamingpc-wsl-10k.md), [100k](reports/2026-09-18/run-clickbench-gamingpc-wsl-100k.md), [1m](reports/2026-09-18/run-clickbench-gamingpc-wsl-1m.md) and [10m](reports/2026-09-18/run-clickbench-gamingpc-wsl-10m.md). At a million rows all six engines agreed on every answer the data settles, which is 31 of 43 queries, to the last significant digit of a double. At ten million the data settles fewer of them, 27, because more of the `LIMIT 10` cuts land in ties, and the six agreed on all of those; the one settled disagreement at both sizes is q4, where the pinned DuckDB's `AVG(UserID)` is short by a multiple of 2^64 and rudb's is not.
+None of this is the goal. The goal is the full file on a c6a.4xlarge, where ten times DuckDB is 2.63s, and no machine this project owns is one, which is the rule seven blocker on every number here. The nearest independent check is the official driver, which put rudb at 27.07s hot against DuckDB's 14.03s on the real hundred million rows, 1.93x behind, in [the full file under the official driver](reports/2026-09-18/official-driver-full-file.md). This harness now says 1.78x on the same file and the same machine through an entirely separate path, and two measurements that disagree by 8% while agreeing on the shape is about as much corroboration as two drivers ever give each other.
+
+The six runs in full, written by the harness with nothing typed into them by hand, are [1k](reports/2026-09-18/run-clickbench-gamingpc-wsl-1k.md), [10k](reports/2026-09-18/run-clickbench-gamingpc-wsl-10k.md), [100k](reports/2026-09-18/run-clickbench-gamingpc-wsl-100k.md), [1m](reports/2026-09-18/run-clickbench-gamingpc-wsl-1m.md), [10m](reports/2026-09-18/run-clickbench-gamingpc-wsl-10m.md) and [100m](reports/2026-09-19/run-clickbench-gamingpc-wsl-100m.md). At a million rows all six engines agreed on every answer the data settles, which is 31 of 43 queries, to the last significant digit of a double. At ten million the data settles fewer of them, 27, because more of the `LIMIT 10` cuts land in ties, and the six agreed on all of those. The one settled disagreement at every size is q4, where the pinned DuckDB's `AVG(UserID)` is short by a multiple of 2^64 and rudb's is not, and on the full hundred million bigints that is the same bug at ten times the scale rather than a new one.
+
+There is a seventh file, [100m on a tmpfs scratch](reports/2026-09-18/run-clickbench-gamingpc-wsl-100m-tmpfs-scratch.md), and it is kept because runs are kept even when the run is the mistake. Three of its six engines are missing: DuckDB and the pinned DuckDB died without saying anything and `clickhouse-local` said `NOT_ENOUGH_SPACE`. The harness puts its scratch directory under `std::env::temp_dir()`, `/tmp` on this box is a 16 GB tmpfs, and the three engines that load into a format of their own were therefore writing a 25 GiB database into RAM on a 31 GiB machine. The fix was `RUDB_BENCH_SCRATCH=$HOME/rudb-data/scratch` and the engines were then left entirely uncapped, which is what the 100m column above is. It is worth keeping because the failure mode is silent, it only appears at the size where it matters, and an engine dying with no message is very easy to write up as an engine that cannot do the work.
 
 ### What the earlier ladders said
 
