@@ -22,7 +22,7 @@
 [plans]
 suite     tpch
 engine    rudb
-version   rudb 0.3.49
+version   rudb 0.3.53
 recorded  2026-09-19
 planned   22 of 22
 
@@ -148,37 +148,37 @@ query     q05
     Project #13 [#12.0::VARCHAR AS n_name, #12.1::DECIMAL(18,4) AS revenue]  [~1 rows estimated from default] [pipeline 1] [reference]
       Aggregate #12 groups=[#9.1::VARCHAR] aggregates=[sum("*"(CAST(#5.2::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#5.3::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4))::DECIMAL(18,4)]  [~1 rows estimated from default] [pipeline 2] [reference]
         Join INNER on=[(#9.2::INTEGER = #11.0::INTEGER)::BOOLEAN]  [~1 rows estimated from default] [pipeline 4] [reference]
-          Join INNER on=[(#7.1::INTEGER = #9.0::INTEGER)::BOOLEAN]  [~1 rows estimated from default] [pipeline 6] [reference]
-            Join INNER on=[(#5.1::BIGINT = #7.0::BIGINT)::BOOLEAN, (#1.1::INTEGER = #7.1::INTEGER)::BOOLEAN]  [~1 rows estimated from default] [pipeline 8] [reference]
-              Join INNER on=[(#5.0::BIGINT = #3.0::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 10] [reference]
-                Join INNER on=[(#1.0::BIGINT = #3.1::BIGINT)::BOOLEAN] build=left  [~1 rows estimated from default] [pipeline 12] [reference]
+          Project #11 [#10.0::INTEGER AS r_regionkey]  [~1 rows estimated from default] [pipeline 4] [reference]
+            Filter (#10.1::VARCHAR = 'ASIA'::VARCHAR)::BOOLEAN  [~1 rows estimated from default] [pipeline 4] [reference]
+              TableFunction read_parquet args=['<fixture>/region.parquet'::VARCHAR] #10 [r_regionkey::INTEGER, r_name::VARCHAR]  [0 rows exact from row count] [pipeline 4] [reference]
+          Join INNER on=[(#5.0::BIGINT = #3.0::BIGINT)::BOOLEAN, (#1.0::BIGINT = #3.1::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 6] [reference]
+            Project #3 [#2.0::BIGINT AS o_orderkey, #2.1::BIGINT AS o_custkey]  [~1 rows estimated from default] [pipeline 6] [reference]
+              Filter ((#2.2::DATE >= 8766::DATE)::BOOLEAN AND (#2.2::DATE < 9131::DATE)::BOOLEAN)::BOOLEAN  [~1 rows estimated from default] [pipeline 6] [reference]
+                TableFunction read_parquet args=['<fixture>/orders.parquet'::VARCHAR] #2 [o_orderkey::BIGINT, o_custkey::BIGINT, o_orderdate::DATE]  [0 rows exact from row count] [pipeline 6] [reference]
+            Join INNER on=[(#7.1::INTEGER = #9.0::INTEGER)::BOOLEAN]  [~0 rows estimated from default] [pipeline 8] [reference]
+              Project #9 [#8.0::INTEGER AS n_nationkey, #8.1::VARCHAR AS n_name, #8.2::INTEGER AS n_regionkey]  [0 rows exact from row count] [pipeline 8] [reference]
+                TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #8 [n_nationkey::INTEGER, n_name::VARCHAR, n_regionkey::INTEGER]  [0 rows exact from row count] [pipeline 8] [reference]
+              Join INNER on=[(#5.1::BIGINT = #7.0::BIGINT)::BOOLEAN]  [~0 rows estimated from default] [pipeline 10] [reference]
+                Project #5 [#4.0::BIGINT AS l_orderkey, #4.1::BIGINT AS l_suppkey, #4.2::DECIMAL(15,2) AS l_extendedprice, #4.3::DECIMAL(15,2) AS l_discount]  [0 rows exact from row count] [pipeline 10] [reference]
+                  TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #4 [l_orderkey::BIGINT, l_suppkey::BIGINT, l_extendedprice::DECIMAL(15,2), l_discount::DECIMAL(15,2)]  [0 rows exact from row count] [pipeline 10] [reference]
+                Join INNER on=[(#1.1::INTEGER = #7.1::INTEGER)::BOOLEAN]  [~0 rows estimated from default] [pipeline 12] [reference]
                   Project #1 [#0.0::BIGINT AS c_custkey, #0.1::INTEGER AS c_nationkey]  [0 rows exact from row count] [pipeline 12] [reference]
                     TableFunction read_parquet args=['<fixture>/customer.parquet'::VARCHAR] #0 [c_custkey::BIGINT, c_nationkey::INTEGER]  [0 rows exact from row count] [pipeline 12] [reference]
-                  Project #3 [#2.0::BIGINT AS o_orderkey, #2.1::BIGINT AS o_custkey]  [~1 rows estimated from default] [pipeline 11] [reference]
-                    Filter ((#2.2::DATE >= 8766::DATE)::BOOLEAN AND (#2.2::DATE < 9131::DATE)::BOOLEAN)::BOOLEAN  [~1 rows estimated from default] [pipeline 11] [reference]
-                      TableFunction read_parquet args=['<fixture>/orders.parquet'::VARCHAR] #2 [o_orderkey::BIGINT, o_custkey::BIGINT, o_orderdate::DATE]  [0 rows exact from row count] [pipeline 11] [reference]
-                Project #5 [#4.0::BIGINT AS l_orderkey, #4.1::BIGINT AS l_suppkey, #4.2::DECIMAL(15,2) AS l_extendedprice, #4.3::DECIMAL(15,2) AS l_discount]  [0 rows exact from row count] [pipeline 9] [reference]
-                  TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #4 [l_orderkey::BIGINT, l_suppkey::BIGINT, l_extendedprice::DECIMAL(15,2), l_discount::DECIMAL(15,2)]  [0 rows exact from row count] [pipeline 9] [reference]
-              Project #7 [#6.0::BIGINT AS s_suppkey, #6.1::INTEGER AS s_nationkey]  [0 rows exact from row count] [pipeline 7] [reference]
-                TableFunction read_parquet args=['<fixture>/supplier.parquet'::VARCHAR] #6 [s_suppkey::BIGINT, s_nationkey::INTEGER]  [0 rows exact from row count] [pipeline 7] [reference]
-            Project #9 [#8.0::INTEGER AS n_nationkey, #8.1::VARCHAR AS n_name, #8.2::INTEGER AS n_regionkey]  [0 rows exact from row count] [pipeline 5] [reference]
-              TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #8 [n_nationkey::INTEGER, n_name::VARCHAR, n_regionkey::INTEGER]  [0 rows exact from row count] [pipeline 5] [reference]
-          Project #11 [#10.0::INTEGER AS r_regionkey]  [~1 rows estimated from default] [pipeline 3] [reference]
-            Filter (#10.1::VARCHAR = 'ASIA'::VARCHAR)::BOOLEAN  [~1 rows estimated from default] [pipeline 3] [reference]
-              TableFunction read_parquet args=['<fixture>/region.parquet'::VARCHAR] #10 [r_regionkey::INTEGER, r_name::VARCHAR]  [0 rows exact from row count] [pipeline 3] [reference]
+                  Project #7 [#6.0::BIGINT AS s_suppkey, #6.1::INTEGER AS s_nationkey]  [0 rows exact from row count] [pipeline 11] [reference]
+                    TableFunction read_parquet args=['<fixture>/supplier.parquet'::VARCHAR] #6 [s_suppkey::BIGINT, s_nationkey::INTEGER]  [0 rows exact from row count] [pipeline 11] [reference]
   .
   Pipelines
     pipeline 0 waits for 1, and the answer comes out of it
     pipeline 1 waits for 2
     pipeline 2 waits for 4
-    pipeline 3 waits for nothing
-    pipeline 4 waits for 3 and 6
-    pipeline 5 waits for nothing
-    pipeline 6 waits for 5 and 8
-    pipeline 7 waits for nothing
-    pipeline 8 waits for 7 and 10
-    pipeline 9 waits for nothing
-    pipeline 10 waits for 9 and 12
+    pipeline 3 waits for 6
+    pipeline 4 waits for 3
+    pipeline 5 waits for 8
+    pipeline 6 waits for 5
+    pipeline 7 waits for 10
+    pipeline 8 waits for 7
+    pipeline 9 waits for 12
+    pipeline 10 waits for 9
     pipeline 11 waits for nothing
     pipeline 12 waits for 11
 
@@ -199,37 +199,37 @@ query     q07
       Aggregate #13 groups=[#12.0::VARCHAR, #12.1::VARCHAR, #12.2::BIGINT] aggregates=[sum(#12.3::DECIMAL(18,4))::DECIMAL(18,4)]  [~1 rows estimated from default] [pipeline 2] [reference]
         Project #12 [#9.1::VARCHAR AS supp_nation, #11.1::VARCHAR AS cust_nation, date_part('YEAR'::VARCHAR, #3.4::DATE)::BIGINT AS l_year, "*"(CAST(#3.2::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#3.3::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4) AS volume]  [~1 rows estimated from default] [pipeline 2] [reference]
           Filter (((#9.1::VARCHAR = 'FRANCE'::VARCHAR)::BOOLEAN AND (#11.1::VARCHAR = 'GERMANY'::VARCHAR)::BOOLEAN)::BOOLEAN OR ((#9.1::VARCHAR = 'GERMANY'::VARCHAR)::BOOLEAN AND (#11.1::VARCHAR = 'FRANCE'::VARCHAR)::BOOLEAN)::BOOLEAN)::BOOLEAN  [~1 rows estimated from default] [pipeline 2] [reference]
-            Join INNER on=[(#7.1::INTEGER = #11.0::INTEGER)::BOOLEAN]  [~1 rows estimated from default] [pipeline 4] [reference]
-              Join INNER on=[(#1.1::INTEGER = #9.0::INTEGER)::BOOLEAN]  [~1 rows estimated from default] [pipeline 6] [reference]
-                Join INNER on=[(#7.0::BIGINT = #5.1::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 8] [reference]
-                  Join INNER on=[(#5.0::BIGINT = #3.0::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 10] [reference]
-                    Join INNER on=[(#1.0::BIGINT = #3.1::BIGINT)::BOOLEAN] build=left  [~1 rows estimated from default] [pipeline 12] [reference]
-                      Project #1 [#0.0::BIGINT AS s_suppkey, #0.1::INTEGER AS s_nationkey]  [0 rows exact from row count] [pipeline 12] [reference]
-                        TableFunction read_parquet args=['<fixture>/supplier.parquet'::VARCHAR] #0 [s_suppkey::BIGINT, s_nationkey::INTEGER]  [0 rows exact from row count] [pipeline 12] [reference]
-                      Project #3 [#2.0::BIGINT AS l_orderkey, #2.1::BIGINT AS l_suppkey, #2.2::DECIMAL(15,2) AS l_extendedprice, #2.3::DECIMAL(15,2) AS l_discount, #2.4::DATE AS l_shipdate]  [~1 rows estimated from default] [pipeline 11] [reference]
-                        Filter ((#2.4::DATE >= 9131::DATE)::BOOLEAN AND (#2.4::DATE <= 9861::DATE)::BOOLEAN)::BOOLEAN  [~1 rows estimated from default] [pipeline 11] [reference]
-                          TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #2 [l_orderkey::BIGINT, l_suppkey::BIGINT, l_extendedprice::DECIMAL(15,2), l_discount::DECIMAL(15,2), l_shipdate::DATE]  [0 rows exact from row count] [pipeline 11] [reference]
-                    Project #5 [#4.0::BIGINT AS o_orderkey, #4.1::BIGINT AS o_custkey]  [0 rows exact from row count] [pipeline 9] [reference]
-                      TableFunction read_parquet args=['<fixture>/orders.parquet'::VARCHAR] #4 [o_orderkey::BIGINT, o_custkey::BIGINT]  [0 rows exact from row count] [pipeline 9] [reference]
-                  Project #7 [#6.0::BIGINT AS c_custkey, #6.1::INTEGER AS c_nationkey]  [0 rows exact from row count] [pipeline 7] [reference]
-                    TableFunction read_parquet args=['<fixture>/customer.parquet'::VARCHAR] #6 [c_custkey::BIGINT, c_nationkey::INTEGER]  [0 rows exact from row count] [pipeline 7] [reference]
-                Project #9 [#8.0::INTEGER AS n_nationkey, #8.1::VARCHAR AS n_name]  [0 rows exact from row count] [pipeline 5] [reference]
-                  TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #8 [n_nationkey::INTEGER, n_name::VARCHAR]  [0 rows exact from row count] [pipeline 5] [reference]
-              Project #11 [#10.0::INTEGER AS n_nationkey, #10.1::VARCHAR AS n_name]  [0 rows exact from row count] [pipeline 3] [reference]
-                TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #10 [n_nationkey::INTEGER, n_name::VARCHAR]  [0 rows exact from row count] [pipeline 3] [reference]
+            Join INNER on=[(#5.0::BIGINT = #3.0::BIGINT)::BOOLEAN] build=left  [~1 rows estimated from default] [pipeline 4] [reference]
+              Join INNER on=[(#7.1::INTEGER = #11.0::INTEGER)::BOOLEAN]  [~0 rows estimated from default] [pipeline 10] [reference]
+                Project #11 [#10.0::INTEGER AS n_nationkey, #10.1::VARCHAR AS n_name]  [0 rows exact from row count] [pipeline 10] [reference]
+                  TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #10 [n_nationkey::INTEGER, n_name::VARCHAR]  [0 rows exact from row count] [pipeline 10] [reference]
+                Join INNER on=[(#7.0::BIGINT = #5.1::BIGINT)::BOOLEAN]  [~0 rows estimated from default] [pipeline 12] [reference]
+                  Project #5 [#4.0::BIGINT AS o_orderkey, #4.1::BIGINT AS o_custkey]  [0 rows exact from row count] [pipeline 12] [reference]
+                    TableFunction read_parquet args=['<fixture>/orders.parquet'::VARCHAR] #4 [o_orderkey::BIGINT, o_custkey::BIGINT]  [0 rows exact from row count] [pipeline 12] [reference]
+                  Project #7 [#6.0::BIGINT AS c_custkey, #6.1::INTEGER AS c_nationkey]  [0 rows exact from row count] [pipeline 11] [reference]
+                    TableFunction read_parquet args=['<fixture>/customer.parquet'::VARCHAR] #6 [c_custkey::BIGINT, c_nationkey::INTEGER]  [0 rows exact from row count] [pipeline 11] [reference]
+              Join INNER on=[(#1.0::BIGINT = #3.1::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 6] [reference]
+                Project #3 [#2.0::BIGINT AS l_orderkey, #2.1::BIGINT AS l_suppkey, #2.2::DECIMAL(15,2) AS l_extendedprice, #2.3::DECIMAL(15,2) AS l_discount, #2.4::DATE AS l_shipdate]  [~1 rows estimated from default] [pipeline 6] [reference]
+                  Filter ((#2.4::DATE >= 9131::DATE)::BOOLEAN AND (#2.4::DATE <= 9861::DATE)::BOOLEAN)::BOOLEAN  [~1 rows estimated from default] [pipeline 6] [reference]
+                    TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #2 [l_orderkey::BIGINT, l_suppkey::BIGINT, l_extendedprice::DECIMAL(15,2), l_discount::DECIMAL(15,2), l_shipdate::DATE]  [0 rows exact from row count] [pipeline 6] [reference]
+                Join INNER on=[(#1.1::INTEGER = #9.0::INTEGER)::BOOLEAN]  [~0 rows estimated from default] [pipeline 8] [reference]
+                  Project #1 [#0.0::BIGINT AS s_suppkey, #0.1::INTEGER AS s_nationkey]  [0 rows exact from row count] [pipeline 8] [reference]
+                    TableFunction read_parquet args=['<fixture>/supplier.parquet'::VARCHAR] #0 [s_suppkey::BIGINT, s_nationkey::INTEGER]  [0 rows exact from row count] [pipeline 8] [reference]
+                  Project #9 [#8.0::INTEGER AS n_nationkey, #8.1::VARCHAR AS n_name]  [0 rows exact from row count] [pipeline 7] [reference]
+                    TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #8 [n_nationkey::INTEGER, n_name::VARCHAR]  [0 rows exact from row count] [pipeline 7] [reference]
   .
   Pipelines
     pipeline 0 waits for 1, and the answer comes out of it
     pipeline 1 waits for 2
     pipeline 2 waits for 4
-    pipeline 3 waits for nothing
-    pipeline 4 waits for 3 and 6
-    pipeline 5 waits for nothing
-    pipeline 6 waits for 5 and 8
+    pipeline 3 waits for 6
+    pipeline 4 waits for 3 and 10
+    pipeline 5 waits for 8
+    pipeline 6 waits for 5
     pipeline 7 waits for nothing
-    pipeline 8 waits for 7 and 10
-    pipeline 9 waits for nothing
-    pipeline 10 waits for 9 and 12
+    pipeline 8 waits for 7
+    pipeline 9 waits for 12
+    pipeline 10 waits for 9
     pipeline 11 waits for nothing
     pipeline 12 waits for 11
 
@@ -326,28 +326,28 @@ query     q10
   TopN 20 offset 0 [#9.2::DECIMAL(18,4) DESC NULLS LAST]  [~1 rows estimated from default] [pipeline 1] [reference]
     Project #9 [#8.0::BIGINT AS c_custkey, #8.1::VARCHAR AS c_name, #8.7::DECIMAL(18,4) AS revenue, #8.2::DECIMAL(15,2) AS c_acctbal, #8.4::VARCHAR AS n_name, #8.5::VARCHAR AS c_address, #8.3::VARCHAR AS c_phone, #8.6::VARCHAR AS c_comment]  [~1 rows estimated from default] [pipeline 1] [reference]
       Aggregate #8 groups=[#1.0::BIGINT, #1.1::VARCHAR, #1.5::DECIMAL(15,2), #1.4::VARCHAR, #7.1::VARCHAR, #1.2::VARCHAR, #1.6::VARCHAR] aggregates=[sum("*"(CAST(#5.1::DECIMAL(15,2))::DECIMAL(18,2), CAST("-"(1.00::DECIMAL(16,2), CAST(#5.2::DECIMAL(15,2))::DECIMAL(16,2))::DECIMAL(16,2))::DECIMAL(18,2))::DECIMAL(18,4))::DECIMAL(18,4)]  [~1 rows estimated from default] [pipeline 2] [reference]
-        Join INNER on=[(#1.3::INTEGER = #7.0::INTEGER)::BOOLEAN]  [~1 rows estimated from default] [pipeline 4] [reference]
-          Join INNER on=[(#5.0::BIGINT = #3.0::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 6] [reference]
-            Join INNER on=[(#1.0::BIGINT = #3.1::BIGINT)::BOOLEAN] build=left  [~1 rows estimated from default] [pipeline 8] [reference]
+        Join INNER on=[(#5.0::BIGINT = #3.0::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 4] [reference]
+          Project #5 [#4.0::BIGINT AS l_orderkey, #4.1::DECIMAL(15,2) AS l_extendedprice, #4.2::DECIMAL(15,2) AS l_discount]  [~1 rows estimated from default] [pipeline 4] [reference]
+            Filter (#4.3::VARCHAR = 'R'::VARCHAR)::BOOLEAN  [~1 rows estimated from default] [pipeline 4] [reference]
+              TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #4 [l_orderkey::BIGINT, l_extendedprice::DECIMAL(15,2), l_discount::DECIMAL(15,2), l_returnflag::VARCHAR]  [0 rows exact from row count] [pipeline 4] [reference]
+          Join INNER on=[(#1.0::BIGINT = #3.1::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 6] [reference]
+            Project #3 [#2.0::BIGINT AS o_orderkey, #2.1::BIGINT AS o_custkey]  [~1 rows estimated from default] [pipeline 6] [reference]
+              Filter ((#2.2::DATE >= 8674::DATE)::BOOLEAN AND (#2.2::DATE < 8766::DATE)::BOOLEAN)::BOOLEAN  [~1 rows estimated from default] [pipeline 6] [reference]
+                TableFunction read_parquet args=['<fixture>/orders.parquet'::VARCHAR] #2 [o_orderkey::BIGINT, o_custkey::BIGINT, o_orderdate::DATE]  [0 rows exact from row count] [pipeline 6] [reference]
+            Join INNER on=[(#1.3::INTEGER = #7.0::INTEGER)::BOOLEAN]  [~0 rows estimated from default] [pipeline 8] [reference]
               Project #1 [#0.0::BIGINT AS c_custkey, #0.1::VARCHAR AS c_name, #0.2::VARCHAR AS c_address, #0.3::INTEGER AS c_nationkey, #0.4::VARCHAR AS c_phone, #0.5::DECIMAL(15,2) AS c_acctbal, #0.6::VARCHAR AS c_comment]  [0 rows exact from row count] [pipeline 8] [reference]
                 TableFunction read_parquet args=['<fixture>/customer.parquet'::VARCHAR] #0 [c_custkey::BIGINT, c_name::VARCHAR, c_address::VARCHAR, c_nationkey::INTEGER, c_phone::VARCHAR, c_acctbal::DECIMAL(15,2), c_comment::VARCHAR]  [0 rows exact from row count] [pipeline 8] [reference]
-              Project #3 [#2.0::BIGINT AS o_orderkey, #2.1::BIGINT AS o_custkey]  [~1 rows estimated from default] [pipeline 7] [reference]
-                Filter ((#2.2::DATE >= 8674::DATE)::BOOLEAN AND (#2.2::DATE < 8766::DATE)::BOOLEAN)::BOOLEAN  [~1 rows estimated from default] [pipeline 7] [reference]
-                  TableFunction read_parquet args=['<fixture>/orders.parquet'::VARCHAR] #2 [o_orderkey::BIGINT, o_custkey::BIGINT, o_orderdate::DATE]  [0 rows exact from row count] [pipeline 7] [reference]
-            Project #5 [#4.0::BIGINT AS l_orderkey, #4.1::DECIMAL(15,2) AS l_extendedprice, #4.2::DECIMAL(15,2) AS l_discount]  [~1 rows estimated from default] [pipeline 5] [reference]
-              Filter (#4.3::VARCHAR = 'R'::VARCHAR)::BOOLEAN  [~1 rows estimated from default] [pipeline 5] [reference]
-                TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #4 [l_orderkey::BIGINT, l_extendedprice::DECIMAL(15,2), l_discount::DECIMAL(15,2), l_returnflag::VARCHAR]  [0 rows exact from row count] [pipeline 5] [reference]
-          Project #7 [#6.0::INTEGER AS n_nationkey, #6.1::VARCHAR AS n_name]  [0 rows exact from row count] [pipeline 3] [reference]
-            TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #6 [n_nationkey::INTEGER, n_name::VARCHAR]  [0 rows exact from row count] [pipeline 3] [reference]
+              Project #7 [#6.0::INTEGER AS n_nationkey, #6.1::VARCHAR AS n_name]  [0 rows exact from row count] [pipeline 7] [reference]
+                TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #6 [n_nationkey::INTEGER, n_name::VARCHAR]  [0 rows exact from row count] [pipeline 7] [reference]
   .
   Pipelines
     pipeline 0 waits for 1, and the answer comes out of it
     pipeline 1 waits for 2
     pipeline 2 waits for 4
-    pipeline 3 waits for nothing
-    pipeline 4 waits for 3 and 6
-    pipeline 5 waits for nothing
-    pipeline 6 waits for 5 and 8
+    pipeline 3 waits for 6
+    pipeline 4 waits for 3
+    pipeline 5 waits for 8
+    pipeline 6 waits for 5
     pipeline 7 waits for nothing
     pipeline 8 waits for 7
 
@@ -418,7 +418,7 @@ query     q13
       Aggregate #6 groups=[#5.0::BIGINT] aggregates=[count_star()::BIGINT]  [~1 rows estimated from default] [pipeline 2] [reference]
         Project #5 [#4.1::BIGINT AS "count(o_orderkey)"]  [~1 rows estimated from default] [pipeline 2] [reference]
           Aggregate #4 groups=[#1.0::BIGINT] aggregates=[count(#3.0::BIGINT)::BIGINT]  [~1 rows estimated from default] [pipeline 3] [reference]
-            Join LEFT on=[(#1.0::BIGINT = #3.1::BIGINT)::BOOLEAN] build=left  [~1 rows estimated from default] [pipeline 5] [reference]
+            Join LEFT on=[(#1.0::BIGINT = #3.1::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 5] [reference]
               Project #1 [#0.0::BIGINT AS c_custkey]  [0 rows exact from row count] [pipeline 5] [reference]
                 TableFunction read_parquet args=['<fixture>/customer.parquet'::VARCHAR] #0 [c_custkey::BIGINT]  [0 rows exact from row count] [pipeline 5] [reference]
               Project #3 [#2.0::BIGINT AS o_orderkey, #2.1::BIGINT AS o_custkey]  [~1 rows estimated from default] [pipeline 4] [reference]
@@ -628,64 +628,42 @@ query     q21
   TopN 100 offset 0 [#17.1::BIGINT DESC NULLS LAST, #17.0::VARCHAR ASC NULLS LAST]  [~1 rows estimated from default] [pipeline 1] [reference]
     Project #17 [#16.0::VARCHAR AS s_name, #16.1::BIGINT AS numwait]  [~1 rows estimated from default] [pipeline 1] [reference]
       Aggregate #16 groups=[#1.1::VARCHAR] aggregates=[count_star()::BIGINT]  [~1 rows estimated from default] [pipeline 2] [reference]
-        Filter not((#15.0::BOOLEAN IS DISTINCT FROM NULL::BOOLEAN)::BOOLEAN)::BOOLEAN  [~1 rows estimated from default] [pipeline 2] [reference]
-          Join SINGLE on=[(#3.0::BIGINT IS NOT DISTINCT FROM #15.1::BIGINT)::BOOLEAN, (#3.1::BIGINT IS NOT DISTINCT FROM #15.2::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 4] [reference]
-            Filter (#11.0::BOOLEAN IS DISTINCT FROM NULL::BOOLEAN)::BOOLEAN  [~1 rows estimated from default] [pipeline 4] [reference]
-              Join SINGLE on=[(#3.0::BIGINT IS NOT DISTINCT FROM #11.1::BIGINT)::BOOLEAN, (#3.1::BIGINT IS NOT DISTINCT FROM #11.2::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 10] [reference]
-                Join INNER on=[(#1.2::INTEGER = #7.0::INTEGER)::BOOLEAN]  [~1 rows estimated from default] [pipeline 16] [reference]
-                  Join INNER on=[(#5.0::BIGINT = #3.0::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 18] [reference]
-                    Join INNER on=[(#1.0::BIGINT = #3.1::BIGINT)::BOOLEAN] build=left  [~1 rows estimated from default] [pipeline 20] [reference]
-                      Project #1 [#0.0::BIGINT AS s_suppkey, #0.1::VARCHAR AS s_name, #0.2::INTEGER AS s_nationkey]  [0 rows exact from row count] [pipeline 20] [reference]
-                        TableFunction read_parquet args=['<fixture>/supplier.parquet'::VARCHAR] #0 [s_suppkey::BIGINT, s_name::VARCHAR, s_nationkey::INTEGER]  [0 rows exact from row count] [pipeline 20] [reference]
-                      Project #3 [#2.0::BIGINT AS l_orderkey, #2.1::BIGINT AS l_suppkey]  [~1 rows estimated from default] [pipeline 19] [reference]
-                        Filter (#2.3::DATE > #2.2::DATE)::BOOLEAN  [~1 rows estimated from default] [pipeline 19] [reference]
-                          TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #2 [l_orderkey::BIGINT, l_suppkey::BIGINT, l_commitdate::DATE, l_receiptdate::DATE]  [0 rows exact from row count] [pipeline 19] [reference]
-                    Project #5 [#4.0::BIGINT AS o_orderkey]  [~1 rows estimated from default] [pipeline 17] [reference]
-                      Filter (#4.1::VARCHAR = 'F'::VARCHAR)::BOOLEAN  [~1 rows estimated from default] [pipeline 17] [reference]
-                        TableFunction read_parquet args=['<fixture>/orders.parquet'::VARCHAR] #4 [o_orderkey::BIGINT, o_orderstatus::VARCHAR]  [0 rows exact from row count] [pipeline 17] [reference]
-                  Project #7 [#6.0::INTEGER AS n_nationkey]  [~1 rows estimated from default] [pipeline 15] [reference]
-                    Filter (#6.1::VARCHAR = 'SAUDI ARABIA'::VARCHAR)::BOOLEAN  [~1 rows estimated from default] [pipeline 15] [reference]
-                      TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #6 [n_nationkey::INTEGER, n_name::VARCHAR]  [0 rows exact from row count] [pipeline 15] [reference]
-                Project #11 [TRUE::BOOLEAN AS exists, #19.0::BIGINT AS __correlated_1, #19.1::BIGINT AS __correlated_2]  [~1 rows estimated from default] [pipeline 9] [reference]
-                  Aggregate #19 groups=[#18.0::BIGINT, #18.1::BIGINT] aggregates=[]  [~1 rows estimated from default] [pipeline 11] [reference]
-                    Join INNER on=[(#9.0::BIGINT = #18.0::BIGINT)::BOOLEAN, (#9.1::BIGINT <> #18.1::BIGINT)::BOOLEAN] build=left  [~1 rows estimated from default] [pipeline 13] [reference]
-                      Aggregate #18 groups=[#3.0::BIGINT, #3.1::BIGINT] aggregates=[]  [~1 rows estimated from default] [pipeline 14] [reference]
-                        Project #3 [#2.0::BIGINT AS l_orderkey, #2.1::BIGINT AS l_suppkey]  [0 rows exact from row count] [pipeline 14] [reference]
-                          TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #2 [l_orderkey::BIGINT, l_suppkey::BIGINT, l_commitdate::DATE, l_receiptdate::DATE]  [0 rows exact from row count] [pipeline 19] [reference]
-                      Project #9 [#8.0::BIGINT AS l_orderkey, #8.1::BIGINT AS l_suppkey]  [0 rows exact from row count] [pipeline 12] [reference]
-                        TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #8 [l_orderkey::BIGINT, l_suppkey::BIGINT]  [0 rows exact from row count] [pipeline 12] [reference]
-            Project #15 [TRUE::BOOLEAN AS exists, #21.0::BIGINT AS __correlated_1, #21.1::BIGINT AS __correlated_2]  [~1 rows estimated from default] [pipeline 3] [reference]
-              Aggregate #21 groups=[#20.0::BIGINT, #20.1::BIGINT] aggregates=[]  [~1 rows estimated from default] [pipeline 5] [reference]
-                Join INNER on=[(#13.0::BIGINT = #20.0::BIGINT)::BOOLEAN, (#13.1::BIGINT <> #20.1::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 7] [reference]
-                  Aggregate #20 groups=[#3.0::BIGINT, #3.1::BIGINT] aggregates=[]  [~1 rows estimated from default] [pipeline 8] [reference]
-                    Project #3 [#2.0::BIGINT AS l_orderkey, #2.1::BIGINT AS l_suppkey]  [0 rows exact from row count] [pipeline 14] [reference]
-                      TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #2 [l_orderkey::BIGINT, l_suppkey::BIGINT, l_commitdate::DATE, l_receiptdate::DATE]  [0 rows exact from row count] [pipeline 19] [reference]
-                  Project #13 [#12.0::BIGINT AS l_orderkey, #12.1::BIGINT AS l_suppkey]  [~1 rows estimated from default] [pipeline 6] [reference]
-                    Filter (#12.3::DATE > #12.2::DATE)::BOOLEAN  [~1 rows estimated from default] [pipeline 6] [reference]
-                      TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #12 [l_orderkey::BIGINT, l_suppkey::BIGINT, l_commitdate::DATE, l_receiptdate::DATE]  [0 rows exact from row count] [pipeline 6] [reference]
+        Join ANTI on=[(#13.0::BIGINT = #3.0::BIGINT)::BOOLEAN, (#13.1::BIGINT <> #3.1::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 4] [reference]
+          Join SEMI on=[(#9.0::BIGINT = #3.0::BIGINT)::BOOLEAN, (#9.1::BIGINT <> #3.1::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 6] [reference]
+            Join INNER on=[(#1.2::INTEGER = #7.0::INTEGER)::BOOLEAN]  [~1 rows estimated from default] [pipeline 8] [reference]
+              Join INNER on=[(#5.0::BIGINT = #3.0::BIGINT)::BOOLEAN]  [~1 rows estimated from default] [pipeline 10] [reference]
+                Join INNER on=[(#1.0::BIGINT = #3.1::BIGINT)::BOOLEAN] build=left  [~1 rows estimated from default] [pipeline 12] [reference]
+                  Project #1 [#0.0::BIGINT AS s_suppkey, #0.1::VARCHAR AS s_name, #0.2::INTEGER AS s_nationkey]  [0 rows exact from row count] [pipeline 12] [reference]
+                    TableFunction read_parquet args=['<fixture>/supplier.parquet'::VARCHAR] #0 [s_suppkey::BIGINT, s_name::VARCHAR, s_nationkey::INTEGER]  [0 rows exact from row count] [pipeline 12] [reference]
+                  Project #3 [#2.0::BIGINT AS l_orderkey, #2.1::BIGINT AS l_suppkey]  [~1 rows estimated from default] [pipeline 11] [reference]
+                    Filter (#2.3::DATE > #2.2::DATE)::BOOLEAN  [~1 rows estimated from default] [pipeline 11] [reference]
+                      TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #2 [l_orderkey::BIGINT, l_suppkey::BIGINT, l_commitdate::DATE, l_receiptdate::DATE]  [0 rows exact from row count] [pipeline 11] [reference]
+                Project #5 [#4.0::BIGINT AS o_orderkey]  [~1 rows estimated from default] [pipeline 9] [reference]
+                  Filter (#4.1::VARCHAR = 'F'::VARCHAR)::BOOLEAN  [~1 rows estimated from default] [pipeline 9] [reference]
+                    TableFunction read_parquet args=['<fixture>/orders.parquet'::VARCHAR] #4 [o_orderkey::BIGINT, o_orderstatus::VARCHAR]  [0 rows exact from row count] [pipeline 9] [reference]
+              Project #7 [#6.0::INTEGER AS n_nationkey]  [~1 rows estimated from default] [pipeline 7] [reference]
+                Filter (#6.1::VARCHAR = 'SAUDI ARABIA'::VARCHAR)::BOOLEAN  [~1 rows estimated from default] [pipeline 7] [reference]
+                  TableFunction read_parquet args=['<fixture>/nation.parquet'::VARCHAR] #6 [n_nationkey::INTEGER, n_name::VARCHAR]  [0 rows exact from row count] [pipeline 7] [reference]
+            Project #9 [#8.0::BIGINT AS l_orderkey, #8.1::BIGINT AS l_suppkey]  [0 rows exact from row count] [pipeline 5] [reference]
+              TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #8 [l_orderkey::BIGINT, l_suppkey::BIGINT]  [0 rows exact from row count] [pipeline 5] [reference]
+          Project #13 [#12.0::BIGINT AS l_orderkey, #12.1::BIGINT AS l_suppkey]  [~1 rows estimated from default] [pipeline 3] [reference]
+            Filter (#12.3::DATE > #12.2::DATE)::BOOLEAN  [~1 rows estimated from default] [pipeline 3] [reference]
+              TableFunction read_parquet args=['<fixture>/lineitem.parquet'::VARCHAR] #12 [l_orderkey::BIGINT, l_suppkey::BIGINT, l_commitdate::DATE, l_receiptdate::DATE]  [0 rows exact from row count] [pipeline 3] [reference]
   .
   Pipelines
     pipeline 0 waits for 1, and the answer comes out of it
     pipeline 1 waits for 2
     pipeline 2 waits for 4
-    pipeline 3 waits for 5
-    pipeline 4 waits for 3 and 10
-    pipeline 5 waits for 7
-    pipeline 6 waits for nothing
-    pipeline 7 waits for 6 and 8
-    pipeline 8 waits for nothing
-    pipeline 9 waits for 11
-    pipeline 10 waits for 9 and 16
-    pipeline 11 waits for 13
-    pipeline 12 waits for nothing
-    pipeline 13 waits for 12 and 14
-    pipeline 14 waits for nothing
-    pipeline 15 waits for nothing
-    pipeline 16 waits for 15 and 18
-    pipeline 17 waits for nothing
-    pipeline 18 waits for 17 and 20
-    pipeline 19 waits for nothing
-    pipeline 20 waits for 19
+    pipeline 3 waits for nothing
+    pipeline 4 waits for 3 and 6
+    pipeline 5 waits for nothing
+    pipeline 6 waits for 5 and 8
+    pipeline 7 waits for nothing
+    pipeline 8 waits for 7 and 10
+    pipeline 9 waits for nothing
+    pipeline 10 waits for 9 and 12
+    pipeline 11 waits for nothing
+    pipeline 12 waits for 11
 
 query     q22
   Sort [#12.0::VARCHAR ASC NULLS LAST]  [~1 rows estimated from default] [pipeline 1] [reference]
