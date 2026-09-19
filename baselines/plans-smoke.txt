@@ -22,7 +22,7 @@
 [plans]
 suite     smoke
 engine    rudb
-version   rudb 0.3.53
+version   rudb 0.3.54
 recorded  2026-09-19
 planned   5 of 5
 
@@ -39,8 +39,8 @@ query     q1
 query     q2
   Project #3 [#2.0::DOUBLE AS "sum(v)"]  [1 rows exact from row count] [pipeline 0] [reference]
     Aggregate #2 groups=[] aggregates=[sum(#1.0::DOUBLE)::DOUBLE]  [1 rows exact from row count] [pipeline 1] [reference]
-      Project #1 [#0.1::DOUBLE AS v]  [~1 rows estimated from default] [pipeline 1] [reference]
-        Filter (#0.0::BIGINT < 100::BIGINT)::BOOLEAN  [~1 rows estimated from default] [pipeline 1] [reference]
+      Project #1 [#0.1::DOUBLE AS v]  [0 rows exact from zone map] [pipeline 1] [reference]
+        Filter (#0.0::BIGINT < 100::BIGINT)::BOOLEAN  [0 rows exact from zone map] [pipeline 1] [reference]
           TableFunction read_parquet args=['<fixture>/smoke.parquet'::VARCHAR] #0 [k::BIGINT, v::DOUBLE]  [0 rows exact from row count] [pipeline 1] [reference]
   .
   Pipelines
@@ -73,8 +73,8 @@ query     q5
   Project #3 [#2.0::BIGINT AS "count(DISTINCT tag)"]  [1 rows exact from row count] [pipeline 0] [reference]
     Aggregate #2 groups=[] aggregates=[count(#4.0::VARCHAR)::BIGINT]  [1 rows exact from row count] [pipeline 1] [reference]
       Aggregate #4 groups=[#1.0::VARCHAR] aggregates=[]  [~1 rows estimated from default] [pipeline 2] [reference]
-        Project #1 [#0.1::VARCHAR AS tag]  [~1 rows estimated from default] [pipeline 2] [reference]
-          Filter (#0.0::DOUBLE > 5.0::DOUBLE)::BOOLEAN  [~1 rows estimated from default] [pipeline 2] [reference]
+        Project #1 [#0.1::VARCHAR AS tag]  [0 rows exact from zone map] [pipeline 2] [reference]
+          Filter (#0.0::DOUBLE > 5.0::DOUBLE)::BOOLEAN  [0 rows exact from zone map] [pipeline 2] [reference]
             TableFunction read_parquet args=['<fixture>/smoke.parquet'::VARCHAR] #0 [v::DOUBLE, tag::VARCHAR]  [0 rows exact from row count] [pipeline 2] [reference]
   .
   Pipelines
