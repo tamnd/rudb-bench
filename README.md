@@ -305,6 +305,27 @@ The `clickhouse-server` row is missing and the reason is recorded rather than gl
 
 The target does not move. Ten times DuckDB over this suite on this machine is 3.09s hot over twenty two queries, against a current fastest of 30.936s. That is the second number of its kind, after ClickBench's, and it points at the joins rather than at the scan.
 
+### TPC-H at SF100 again, and the row rudb cannot fill yet
+
+The run above is kept and this is a second one beside it rather than a replacement, because the corpus is not the same corpus: this one is 33.20 GiB of Snappy Parquet against that one's 22.50 GiB, generated fresh by `dbgen` at SF100 into the eight tables the suite wants. Row counts are exact, `lineitem` at 600,037,902. It adds the pinned DuckDB as a fourth column and it is the first TPC-H run in this file that asked rudb.
+
+| engine | query time | cores | peak RSS | overhead | load | on disk | slowest over fastest | vs duckdb |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| duckdb v1.5.5 | 27.416s | 17.95 | 16.65 GiB | +9% | 49.976s | 26.24 GiB | 13.87x | 1.00x |
+| duckdb-pinned v2.0.0-dev84237 | 25.676s | 13.61 | 16.82 GiB | +19% | 56.701s | 27.96 GiB | 13.46x | 0.94x |
+| datafusion 55.1.0 | 103.139s | 21.60 | 29.22 GiB | +2% | — | 33.20 GiB | 56.00x | 3.76x |
+| clickhouse-local 26.9.1.1562 | 123.414s | 16.71 | 16.99 GiB | +5% | 84.779s | 30.23 GiB | 64.06x | 4.50x |
+
+**rudb has no row here, and the harness is what refused to give it one.** The engine did not fail and was not left out; the suite declines to time it, saying that every join in rudb is a nested loop and TPC-H is twenty two of them, so what got measured would be a hang rather than a number. `spec/07-execution.md` section 7.4 specifies a partitioned radix hash join switched at runtime on observed build cardinality, and that is milestone E3 and not yet built. rudb was 0.3.45 for this run and main is 0.3.49, and the guard still fires on both.
+
+That is the single most important fact in this file about the ten times goal. ClickBench is forty three scans of one table and rudb is 1.78x off DuckDB on the real one. TPC-H is twenty two join plans over eight tables and rudb cannot start. The two suites are not two difficulties of the same task, and a ClickBench number says nothing about this column. Ten times the faster DuckDB here is **2.57s over twenty two queries**, and the distance to it is currently not measurable rather than large.
+
+What the rival columns say is the same thing the earlier run said, which is worth something because the corpus changed underneath it and the shape did not. The two DuckDBs are within six percent of each other and both have a plan for the whole suite, at 13.87x and 13.46x slowest over fastest. The other two fall off a cliff on a handful of queries and it is the same handful: `clickhouse-local` takes 27.637s on q02 against DuckDB's 279ms and 34.418s on q09 against 2.970s, and DataFusion takes 21.463s on q18 against 2.074s and 20.423s on q21 against 2.447s. Those are the correlated subquery, the six way join and the large aggregation, not the scan. All four engines agreed on every answer the data settles, which here is 22 of 22 queries, to the last significant digit of a double, and the only rule two flag in the whole run is DuckDB swinging 11.0% on q09.
+
+Two caveats travel with this table and both matter more than they would at ClickBench sizes. The hot column is not fully hot: the block layer served 9.83 GiB to `clickhouse-local` and 12.04 GiB to DataFusion during the hot runs, because SF100 does not fit in this machine's 31.34 GiB alongside an engine, so those two numbers include disk in a way DuckDB's mostly do not. And DataFusion peaked at 29.22 GiB of resident memory on a 31.34 GiB box, which is close enough to the edge that its number is partly a number about surviving. The suite's own description says SF1000 is the scale that measures spilling; at SF100 on this machine it is already measuring a little of it.
+
+Polars has no column because it failed, and the failure is the harness's rather than the engine's: Polars wrote a `DeprecationWarning` about casting a String to a Date to stderr, and the engine wrapper treats anything on stderr as a failed run. That is a bug worth fixing, because it costs a whole column for a message that is not an error.
+
 ### Three engines, three opinions about how wide a decimal is
 
 The first two TPC-H runs both reported q01 and q08 as disagreements, thirty two numbers against thirty two and four against four, which is the shape of a report saying every row is there and every number is wrong. Running the two queries by hand against all three engines says otherwise. Every engine agrees on the answer. They disagree about the result type.
