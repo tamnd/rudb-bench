@@ -33,6 +33,7 @@ The claim this project exists to test is ten times faster than the fastest rival
 | 10k (10,000 rows) | duckdb | 101.000ms | 67.748ms | 0.67x | 43.82 MiB (duckdb) | 18.45 MiB | 0.42x |
 | 100k (99,998 rows) | duckdb | 242.000ms | 154.715ms | 0.64x | 70.07 MiB (duckdb) | 92.64 MiB | 1.32x |
 | 1m (999,975 rows) | duckdb | 416.000ms | 594.355ms | 1.43x | 303.39 MiB (duckdb) | 344.17 MiB | 1.13x |
+| 10m (9,999,750 rows) | duckdb-pinned | 2.553s | 4.983s | 1.95x | 1.40 GiB (clickhouse-local) | 1.34 GiB | 0.96x |
 
 Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: this machine is not a reporting machine, so nothing here is comparable to a published ClickBench or TPC-H number.
 
@@ -59,6 +60,7 @@ Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: th
 | 10k (10,000 rows) | 101.000ms<br>1.00x | 139.000ms<br>1.38x | 322.000ms<br>3.19x | 248.000ms<br>2.46x | 561.828ms<br>5.56x | 67.748ms<br>0.67x |
 | 100k (99,998 rows) | 242.000ms<br>1.00x | 265.000ms<br>1.10x | 633.000ms<br>2.62x | 338.000ms<br>1.40x | 726.690ms<br>3.00x | 154.715ms<br>0.64x |
 | 1m (999,975 rows) | 416.000ms<br>1.00x | 454.000ms<br>1.09x | 2.585s<br>6.21x | 1.042s<br>2.50x | 1.274s<br>3.06x | 594.355ms<br>1.43x |
+| 10m (9,999,750 rows) | 2.659s<br>1.00x | 2.553s<br>0.96x | 7.318s<br>2.75x | 12.229s<br>4.60x | 4.902s<br>1.84x | 4.983s<br>1.87x |
 
 Ratios are over the queries every engine measured, which is 39 on every rung of 43. An engine that cannot express a query, or that ran out of time on one, would otherwise be compared on a different set of queries from the rest.
 
@@ -116,32 +118,45 @@ Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: th
   polars            ███████████████████▊ 1.274s
   rudb              █████████▎ 594.355ms
 
+10m (9,999,750 rows) — hot query time, shorter is better
+  duckdb            ████████▊ 2.659s
+  duckdb-pinned     ████████▍ 2.553s
+  clickhouse-local  ███████████████████████▉ 7.318s
+  datafusion        ████████████████████████████████████████ 12.229s
+  polars            ████████████████ 4.902s
+  rudb              ████████████████▎ 4.983s
+
 vs duckdb, hot query time, under 1.00x is faster than duckdb
   duckdb-pinned
     1k    ██████▌ 1.49x
     10k   ██████ 1.38x
     100k  ████▉ 1.10x
     1m    ████▊ 1.09x
+    10m   ████▎ 0.96x
   clickhouse-local
     1k    ████████████████▎ 3.69x
     10k   ██████████████ 3.19x
     100k  ███████████▌ 2.62x
     1m    ███████████████████████████▍ 6.21x
+    10m   ████████████▏ 2.75x
   datafusion
     1k    █████████▍ 2.14x
     10k   ██████████▊ 2.46x
     100k  ██████▏ 1.40x
     1m    ███████████ 2.50x
+    10m   ████████████████████▎ 4.60x
   polars
     1k    ████████████████████████████████ 7.28x
     10k   ████████████████████████▌ 5.56x
     100k  █████████████▎ 3.00x
     1m    █████████████▌ 3.06x
+    10m   ████████▏ 1.84x
   rudb
     1k    █▌ 0.33x
     10k   ███ 0.67x
     100k  ██▊ 0.64x
     1m    ██████▎ 1.43x
+    10m   ████████▎ 1.87x
 ```
 
 Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: this machine is not a reporting machine, so nothing here is comparable to a published ClickBench or TPC-H number.
@@ -213,6 +228,7 @@ The other half of the claim. A time that came out of twice the memory is not the
 | 10k (10,000 rows) | 43.82 MiB | 52.99 MiB | 251.21 MiB | 199.03 MiB | 88.75 MiB | 18.45 MiB |
 | 100k (99,998 rows) | 70.07 MiB | 81.55 MiB | 291.98 MiB | 407.48 MiB | 130.59 MiB | 92.64 MiB |
 | 1m (999,975 rows) | 303.39 MiB | 305.39 MiB | 468.82 MiB | 1.13 GiB | 437.08 MiB | 344.17 MiB |
+| 10m (9,999,750 rows) | 1.73 GiB | 1.61 GiB | 1.40 GiB | 4.49 GiB | 2.95 GiB | 1.34 GiB |
 
 Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: this machine is not a reporting machine, so nothing here is comparable to a published ClickBench or TPC-H number.
 
@@ -235,12 +251,12 @@ Reporting rule one, mechanically: the exact version of everything, on every rung
 <!-- rudb-bench:begin versions -->
 | engine | version | machine | rungs |
 | --- | --- | --- | --- |
-| clickhouse-local | 26.9.1.1562 | gamingpc-wsl | 7 |
-| datafusion | datafusion-cli 55.1.0 | gamingpc-wsl | 7 |
-| duckdb | v1.5.5 (Variegata) d8cdaa33fd | gamingpc-wsl | 7 |
-| duckdb-pinned | v2.0.0-dev84237 (Development Version) cc7e7bac7f | gamingpc-wsl | 7 |
-| polars | 1.44.2 in sink mode | gamingpc-wsl | 7 |
-| rudb | rudb 0.3.67 | gamingpc-wsl | 7 |
+| clickhouse-local | 26.9.1.1562 | gamingpc-wsl | 8 |
+| datafusion | datafusion-cli 55.1.0 | gamingpc-wsl | 8 |
+| duckdb | v1.5.5 (Variegata) d8cdaa33fd | gamingpc-wsl | 8 |
+| duckdb-pinned | v2.0.0-dev84237 (Development Version) cc7e7bac7f | gamingpc-wsl | 8 |
+| polars | 1.44.2 in sink mode | gamingpc-wsl | 8 |
+| rudb | rudb 0.3.67 | gamingpc-wsl | 8 |
 
 <!-- rudb-bench:end versions -->
 

@@ -64,6 +64,21 @@
             {"engine": "polars", "version": "1.44.2 in sink mode", "hot_ms": 1273.650, "own_ms": 1273.650, "reported": true, "wall_ms": 4983.730, "cold_ms": 5115.141, "cpu_ms": 10000.000, "peak": 458313728, "load_ms": 0.000, "disk": 225243755, "converted": false, "answered": 39, "queries": 43, "ratio": 3.0617},
             {"engine": "rudb", "version": "rudb 0.3.67", "hot_ms": 594.355, "own_ms": 679.169, "reported": true, "wall_ms": 1425.485, "cold_ms": 1549.607, "cpu_ms": 4490.000, "peak": 360890368, "load_ms": 0.000, "disk": 225243755, "converted": false, "answered": 43, "queries": 43, "ratio": 1.4287}
           ]
+        },
+        {
+          "size": "10m",
+          "rows": 9999750,
+          "shared": 39,
+          "recorded": "2026-09-21",
+          "commit": "771b137",
+          "columns": [
+            {"engine": "duckdb", "version": "v1.5.5 (Variegata) d8cdaa33fd", "hot_ms": 2659.000, "own_ms": 3831.000, "reported": true, "wall_ms": 4931.914, "cold_ms": 5123.614, "cpu_ms": 41020.000, "peak": 1855651840, "load_ms": 10550.017, "disk": 2922655744, "converted": true, "answered": 43, "queries": 43, "ratio": 1.0000},
+            {"engine": "duckdb-pinned", "version": "v2.0.0-dev84237 (Development Version) cc7e7bac7f", "hot_ms": 2553.000, "own_ms": 3078.000, "reported": true, "wall_ms": 4679.811, "cold_ms": 4719.422, "cpu_ms": 38490.000, "peak": 1723473920, "load_ms": 20249.442, "disk": 2465476608, "converted": true, "answered": 43, "queries": 43, "ratio": 0.9601},
+            {"engine": "clickhouse-local", "version": "26.9.1.1562", "hot_ms": 7318.000, "own_ms": 8009.000, "reported": true, "wall_ms": 16569.603, "cold_ms": 16474.648, "cpu_ms": 59410.000, "peak": 1502760960, "load_ms": 3126.594, "disk": 2144071567, "converted": true, "answered": 43, "queries": 43, "ratio": 2.7522},
+            {"engine": "datafusion", "version": "datafusion-cli 55.1.0", "hot_ms": 12229.000, "own_ms": 13518.000, "reported": true, "wall_ms": 17545.151, "cold_ms": 17356.535, "cpu_ms": 239250.000, "peak": 4820185088, "load_ms": 0.000, "disk": 2007885003, "converted": false, "answered": 43, "queries": 43, "ratio": 4.5991},
+            {"engine": "polars", "version": "1.44.2 in sink mode", "hot_ms": 4902.033, "own_ms": 4902.033, "reported": true, "wall_ms": 9217.245, "cold_ms": 9381.577, "cpu_ms": 55930.000, "peak": 3165999104, "load_ms": 0.000, "disk": 2007885003, "converted": false, "answered": 39, "queries": 43, "ratio": 1.8436},
+            {"engine": "rudb", "version": "rudb 0.3.67", "hot_ms": 4983.204, "own_ms": 5618.772, "reported": true, "wall_ms": 8283.431, "cold_ms": 8507.918, "cpu_ms": 40730.000, "peak": 1441677312, "load_ms": 0.000, "disk": 2007885003, "converted": false, "answered": 43, "queries": 43, "ratio": 1.8741}
+          ]
         }
       ]
     },

@@ -415,3 +415,101 @@ converted false
 answered  43
 queries   43
 
+[rung]
+suite     clickbench
+machine   gamingpc-wsl
+size      10m
+rows      9999750
+shared    39
+commit    771b137
+recorded  2026-09-21
+[engine]
+name      duckdb
+version   v1.5.5 (Variegata) d8cdaa33fd
+hot       2659000
+own       3831000
+reported  true
+wall      4931914
+cold      5123614
+cpu       41020000
+peak      1855651840
+load      10550017
+disk      2922655744
+converted true
+answered  43
+queries   43
+[engine]
+name      duckdb-pinned
+version   v2.0.0-dev84237 (Development Version) cc7e7bac7f
+hot       2553000
+own       3078000
+reported  true
+wall      4679811
+cold      4719422
+cpu       38490000
+peak      1723473920
+load      20249442
+disk      2465476608
+converted true
+answered  43
+queries   43
+[engine]
+name      clickhouse-local
+version   26.9.1.1562
+hot       7318000
+own       8009000
+reported  true
+wall      16569603
+cold      16474648
+cpu       59410000
+peak      1502760960
+load      3126594
+disk      2144071567
+converted true
+answered  43
+queries   43
+[engine]
+name      datafusion
+version   datafusion-cli 55.1.0
+hot       12229000
+own       13518000
+reported  true
+wall      17545151
+cold      17356535
+cpu       239250000
+peak      4820185088
+load      0
+disk      2007885003
+converted false
+answered  43
+queries   43
+[engine]
+name      polars
+version   1.44.2 in sink mode
+hot       4902033
+own       4902033
+reported  true
+wall      9217245
+cold      9381577
+cpu       55930000
+peak      3165999104
+load      0
+disk      2007885003
+converted false
+answered  39
+queries   43
+[engine]
+name      rudb
+version   rudb 0.3.67
+hot       4983204
+own       5618772
+reported  true
+wall      8283431
+cold      8507918
+cpu       40730000
+peak      1441677312
+load      0
+disk      2007885003
+converted false
+answered  43
+queries   43
