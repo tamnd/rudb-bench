@@ -24,6 +24,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use rudb_bench::attribute::Ablation;
+use rudb_bench::board;
 use rudb_bench::data::Rows;
 use rudb_bench::engine::{
     Ability, BenchError, ClickhouseLocal, ClickhouseServer, Datafusion, Duckdb, Engine, Polars,
@@ -32,8 +33,10 @@ use rudb_bench::engine::{
 use rudb_bench::kernels;
 use rudb_bench::ledger;
 use rudb_bench::machine;
+use rudb_bench::pins;
 use rudb_bench::planning;
 use rudb_bench::regress::{self, FACTOR, Watch};
+use rudb_bench::render as renderer;
 use rudb_bench::report::{Abstention, comparison, table};
 use rudb_bench::suite::{SUITES, Scale, Suite, queries};
 use rudb_bench::{CLICKBENCH_C6A_4XLARGE, FLEET, REPORTING_MACHINE, Role, target_seconds};
@@ -64,6 +67,8 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("ledger") => ledger(),
+        Some("render") => render(&args[1..]),
+        Some("pins") => pin_list(&args[1..]),
         Some("kernels") => kernels(&args[1..]),
         Some("sweep") => sweep(&args[1..]),
         Some("attribute") => attribute(&args[1..]),
@@ -292,6 +297,14 @@ struct Plan {
     /// read next week, which is the difference between a measurement and a number somebody
     /// remembers.
     report: bool,
+    /// Whether to put this run on the board as one rung of a ladder.
+    ///
+    /// Allowed alongside `--rows` and `--scale`, unlike `--record` and `--store`, because a rung of
+    /// a ladder is a size and the board is a record of what each size did. The other two are the
+    /// committed history of the whole suite, and a bar taken over a hundredth of the data is a bar
+    /// every later full run clears without trying. The board says its size on every row it writes,
+    /// so a rung cannot be read as a full run by somebody who did not look.
+    board: bool,
     /// Whether to add what this run measured to the saved file for this machine.
     ///
     /// The flag that makes one engine at a time a workable way to benchmark. A full ClickBench is
@@ -338,6 +351,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     let mut scale = None;
     let mut report = false;
     let mut save = false;
+    let mut board = false;
     let mut timeout = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
@@ -406,6 +420,10 @@ fn plan(args: &[String]) -> Result<Plan, String> {
             }
             "--save" => {
                 save = true;
+                continue;
+            }
+            "--board" => {
+                board = true;
                 continue;
             }
             "--engines" => {
@@ -481,6 +499,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
         scale,
         report,
         save,
+        board,
         timeout,
     })
 }
@@ -528,7 +547,9 @@ fn report_saved(suite: &str) -> ExitCode {
     // No machine facts. Those are read off the machine as it is now and the saved runs were taken
     // over days, so printing today's governor next to Tuesday's numbers would be a claim about
     // Tuesday that nobody made. The per run reports keep theirs.
-    match rudb_bench::markdown::write(&compared, &[], &here) {
+    // No size in the name. A restored comparison is built out of whatever was saved for this
+    // machine, and the saved file holds one size per engine rather than a ladder.
+    match rudb_bench::markdown::write(&compared, &[], &here, None) {
         Ok(at) => {
             println!("\nwrote {}", at.display());
             ExitCode::SUCCESS
@@ -541,6 +562,20 @@ fn report_saved(suite: &str) -> ExitCode {
 }
 
 /// Run a suite against every engine that can run it, and print the table.
+/// What this run's size is called in the name of the report it writes.
+///
+/// A rung of a ladder rather than a measurement of the whole suite, in both of the two ways a run
+/// can be one: `--rows 1m` is a sample of a fixed corpus and `--scale 0.1` is a generated corpus of
+/// its own. Either one gets the size into the file name so that the next rung does not write over
+/// this one. A run over the whole of a suite at its default size has no size to add, and its report
+/// keeps the name it always had.
+fn size_label(plan: &Plan) -> Option<String> {
+    if let Some(rows) = plan.rows.as_ref() {
+        return Some(rows.label.clone());
+    }
+    plan.scale.map(|scale| format!("sf{}", scale.label))
+}
+
 fn run(plan: &Plan) -> ExitCode {
     let name = plan.suite.as_str();
     let Some(suite) = rudb_bench::suite::find(name) else {
@@ -612,12 +647,33 @@ fn run(plan: &Plan) -> ExitCode {
     if plan.report {
         let facts = machine::probe(&scratch);
         let here = machine::name_here();
-        match rudb_bench::markdown::write(&compared, &facts, &here) {
+        match rudb_bench::markdown::write(&compared, &facts, &here, size_label(plan).as_deref()) {
             Ok(at) => println!("\nwrote {}", at.display()),
             // A report that could not be written is worth saying and is not worth failing a run
             // over. The numbers are already on the terminal and the alternative is an hour of
             // ClickBench thrown away because a directory was read only.
             Err(e) => eprintln!("\nrudb-bench: could not write the report: {e}"),
+        }
+    }
+
+    // After the report and before the scratch goes, for the same reason the report is where it is:
+    // the rung is a summary of the run that was just written, and a board written from a run whose
+    // report could not be written would point at a file that is not there.
+    if plan.board {
+        if let Some(size) = size_label(plan) {
+            let here = machine::name_here();
+            let rung =
+                board::Rung::of(&compared, &here, &size, &ledger::commit_here(), &regress::today());
+            let at = board::path(&rung.suite, &here);
+            match board::write(&at, &rung) {
+                Ok(()) => println!("put {} {} on {}", rung.suite, size, at.display()),
+                Err(e) => eprintln!("rudb-bench: could not write the board: {e}"),
+            }
+        } else {
+            eprintln!(
+                "rudb-bench: --board wants a rung, so run it with --rows or --scale. A board is a \
+                 ladder of sizes and a run of the whole suite at its own size is not one of them"
+            );
         }
     }
 
@@ -762,6 +818,229 @@ fn ledger() -> ExitCode {
         }
     }
     print!("{}", ledger::report(&ledger::rows(&stored)));
+    ExitCode::SUCCESS
+}
+
+/// Put what is on the board into the README and into the JSON the site reads.
+///
+/// Two outputs from one board, written by one command, because the alternative is a README and a
+/// chart page that agree until the afternoon somebody updates one of them. `--check` writes nothing
+/// and fails when either output is out of date, which is what the pull request job runs: a reviewer
+/// who committed a new run and forgot to render sees the names of the blocks that moved.
+fn render(args: &[String]) -> ExitCode {
+    let mut check = false;
+    let mut readme = std::path::PathBuf::from("README.md");
+    let mut data = std::path::PathBuf::from("docs/data/board.json");
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--check" => check = true,
+            "--readme" => match rest.next() {
+                Some(given) => readme = std::path::PathBuf::from(given),
+                None => {
+                    eprintln!("rudb-bench: --readme wants a path after it");
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--data" => match rest.next() {
+                Some(given) => data = std::path::PathBuf::from(given),
+                None => {
+                    eprintln!("rudb-bench: --data wants a path after it");
+                    return ExitCode::FAILURE;
+                }
+            },
+            other => {
+                eprintln!("rudb-bench: unknown argument {other}, try `rudb-bench --help`");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    let rungs = match board::read_all() {
+        Ok(rungs) => rungs,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if rungs.is_empty() {
+        eprintln!(
+            "rudb-bench: nothing is on the board, so there is nothing to render. A rung is put \
+             there by `rudb-bench run <suite> --rows <n> --board` on a machine this project owns"
+        );
+        return ExitCode::FAILURE;
+    }
+    let pinned = match pins::read(&pins::path()) {
+        Ok(pins) => pins,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let blocks = renderer::blocks(&rungs, &pinned);
+    let text = match std::fs::read_to_string(&readme) {
+        Ok(text) => text,
+        Err(e) => {
+            eprintln!("rudb-bench: could not read {}: {e}", readme.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let json = renderer::json(&rungs);
+    if check {
+        let stale = match renderer::stale(&text, &blocks) {
+            Ok(stale) => stale,
+            Err(e) => {
+                eprintln!("rudb-bench: {}: {e}", readme.display());
+                return ExitCode::FAILURE;
+            }
+        };
+        let moved = std::fs::read_to_string(&data).map_or(true, |had| had != json);
+        if stale.is_empty() && !moved {
+            println!("{} and {} are what the board says", readme.display(), data.display());
+            return ExitCode::SUCCESS;
+        }
+        for name in &stale {
+            eprintln!(
+                "rudb-bench: the {name} block in {} is not what the board says",
+                readme.display()
+            );
+        }
+        if moved {
+            eprintln!("rudb-bench: {} is not what the board says", data.display());
+        }
+        eprintln!("rudb-bench: run `rudb-bench render` and commit what it changes");
+        return ExitCode::FAILURE;
+    }
+    let spliced = match renderer::splice(&text, &blocks) {
+        Ok(spliced) => spliced,
+        Err(e) => {
+            eprintln!("rudb-bench: {}: {e}", readme.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let wrote_readme = spliced != text;
+    if wrote_readme {
+        if let Err(e) = std::fs::write(&readme, &spliced) {
+            eprintln!("rudb-bench: could not write {}: {e}", readme.display());
+            return ExitCode::FAILURE;
+        }
+    }
+    if let Some(parent) = data.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!("rudb-bench: could not make {}: {e}", parent.display());
+            return ExitCode::FAILURE;
+        }
+    }
+    if let Err(e) = std::fs::write(&data, &json) {
+        eprintln!("rudb-bench: could not write {}: {e}", data.display());
+        return ExitCode::FAILURE;
+    }
+    let ladders = board::ladders(&rungs).len();
+    println!(
+        "{} rung{} on the board, over {ladders} ladder{}",
+        rungs.len(),
+        if rungs.len() == 1 { "" } else { "s" },
+        if ladders == 1 { "" } else { "s" },
+    );
+    println!(
+        "{} {}",
+        readme.display(),
+        if wrote_readme { "updated" } else { "was already what the board says" }
+    );
+    println!("{} written", data.display());
+    ExitCode::SUCCESS
+}
+
+/// Print what to run, or move one pin to a version somebody has released.
+///
+/// The scheduled version check edits through `--set` rather than through a regular expression in a
+/// workflow file, so that a bump either lands on the right line or fails with a sentence. It is
+/// also the command to type when a rival ships something and nobody wants to read the file format
+/// first.
+fn pin_list(args: &[String]) -> ExitCode {
+    let at = pins::path();
+    let mut pinned = match pins::read(&at) {
+        Ok(pinned) => pinned,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if pinned.is_empty() {
+        eprintln!("rudb-bench: nothing is pinned in {}", at.display());
+        return ExitCode::FAILURE;
+    }
+    let mut moved = false;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--set" => {
+                let Some(given) = rest.next() else {
+                    eprintln!("rudb-bench: --set wants <engine>=<version> after it");
+                    return ExitCode::FAILURE;
+                };
+                let Some((name, version)) = given.split_once('=') else {
+                    eprintln!("rudb-bench: --set {given} is not <engine>=<version>");
+                    return ExitCode::FAILURE;
+                };
+                match pins::set(&mut pinned, name, version) {
+                    Ok(true) => {
+                        println!("{name} is now pinned to {version}");
+                        moved = true;
+                    }
+                    Ok(false) => println!("{name} was already pinned to {version}"),
+                    Err(e) => {
+                        eprintln!("rudb-bench: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            other => {
+                eprintln!("rudb-bench: unknown argument {other}, try `rudb-bench --help`");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    if moved {
+        if let Err(e) = pins::write(&at, &pinned) {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+        println!("wrote {}", at.display());
+        println!(
+            "Nothing is re-measured by this. Run the ladder on a machine in `rudb-bench fleet` \
+             and commit the board it writes."
+        );
+        return ExitCode::SUCCESS;
+    }
+    for pin in &pinned {
+        println!("{:<14} {}", pin.name, pin.version);
+        if let Some(source) = &pin.source {
+            println!("{:<14} {} ({})", "", source.link(), pin.channel.word());
+        }
+        println!("{:<14} {}", "", pin.why);
+        println!();
+    }
+    // What was actually measured, which is the half of this a person cannot check by reading the
+    // file. A pin that moved without a re-run is a README that attributes this month's numbers to
+    // next month's DuckDB.
+    match board::read_all() {
+        Ok(rungs) => {
+            let behind = pins::measured(&pinned, &rungs);
+            if behind.is_empty() {
+                println!("Every rung on the board was measured against these versions.");
+            } else {
+                for (name, found) in &behind {
+                    println!("{name} is pinned above, but the board measured {}", found.join(", "));
+                }
+                println!();
+                println!(
+                    "Re-run the ladder before reading the README's numbers as numbers against"
+                );
+                println!("the pinned versions.");
+            }
+        }
+        Err(e) => eprintln!("rudb-bench: the board could not be read: {e}"),
+    }
     ExitCode::SUCCESS
 }
 
@@ -1619,6 +1898,7 @@ fn help() {
     println!("                    itself planning than baselines/planning-<suite>.txt allows,");
     println!("                    which is a share rather than a time and so travels)");
     println!("    --store <layer> add this run to the ledger as the row that closes a layer");
+    println!("    --board        put this run on the board as one rung of a ladder of sizes");
     println!("    --engines a,b   run only these, the rest abstain saying they were left out");
     println!("    --runs n        hot runs per query, default five and fifteen. Under five is a");
     println!("                    development number and cannot be published or stored");
@@ -1640,8 +1920,16 @@ fn help() {
     println!(
         "    --report        also write the whole run to reports/<date>/run-<suite>-<machine>.md,"
     );
-    println!("                    which keeps every metric the terminal table has to drop");
+    println!("                    which keeps every metric the terminal table has to drop. A run");
+    println!("                    with --rows or --scale puts the size in the name too, so that");
+    println!("                    one rung of a ladder does not write over the one before it");
     println!("  ledger        print what each layer bought, from the committed runs");
+    println!("  pins          print what to run, and whether the board was measured with it");
+    println!("    --set <engine>=<version>  move one pin, for the scheduled version check");
+    println!("  render        put what is on the board into README.md and docs/data/board.json");
+    println!("    --check         write nothing and fail if either is out of date");
+    println!("    --readme <at>   the file with the generated blocks in it, default README.md");
+    println!("    --data <at>     where the JSON the charts read goes");
     println!("  seams         print rudb's seams and what is registered at each of them");
     println!("  sweep         run a suite once per implementation of one seam, rudb only");
     println!("    --seam <seam>   the seam to move, from `rudb-bench seams`");
@@ -1890,7 +2178,7 @@ mod tests {
     #[test]
     fn a_scale_nobody_generated_is_refused_with_the_ones_there_are() {
         let e = plan(&args("tpch --scale 50")).unwrap_err();
-        assert!(e.contains("0.01, 1, 10, 100, 1000"), "{e}");
+        assert!(e.contains("0.01, 0.1, 1, 10, 100, 1000"), "{e}");
         // ClickBench is one file of one size, so a scale factor is a question it does not answer.
         let e = plan(&args("clickbench --scale 10")).unwrap_err();
         assert!(e.contains("one corpus of one size"), "{e}");

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rudb-bench — ClickBench and TPC-H, size by size</title>
+<meta name="description" content="Hot query time, peak memory and load cost for rudb, DuckDB, ClickHouse, DataFusion and Polars, measured at every size of ClickBench and every scale factor of TPC-H.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>rudb-bench</h1>
+  <p class="lede">
+    rudb against DuckDB, ClickHouse, DataFusion and Polars, on the same machine, on the same
+    afternoon, at every size of the suite rather than at one of them. Every number on this page was
+    written by <code>rudb-bench run --board</code> and nothing on it was typed by hand.
+  </p>
+  <p class="warning" id="provenance">Loading the board…</p>
+</header>
+
+<main>
+  <nav class="controls" aria-label="What to chart">
+    <label>Suite
+      <select id="suite"></select>
+    </label>
+    <label>Measure
+      <select id="measure">
+        <option value="hot_ms" selected>Hot query time</option>
+        <option value="cold_ms">Cold query time</option>
+        <option value="wall_ms">Wall time around the run</option>
+        <option value="peak">Peak resident set</option>
+        <option value="cpu_ms">CPU over the hot runs</option>
+        <option value="load_ms">Load time</option>
+        <option value="disk">On disk after the load</option>
+      </select>
+    </label>
+    <label class="check">
+      <input type="checkbox" id="log" checked> Log scale
+    </label>
+  </nav>
+
+  <section>
+    <h2>Every size, every engine</h2>
+    <p id="measure-note" class="note"></p>
+    <div id="legend" class="legend"></div>
+    <div class="chart" id="bars"></div>
+  </section>
+
+  <section>
+    <h2>Against DuckDB, as the data grows</h2>
+    <p class="note">
+      Hot query time as a multiple of DuckDB's at the same size, over the queries every engine
+      measured. Under 1.00x is faster than DuckDB. A line that slopes down is an engine whose
+      fixed costs were what the small sizes were measuring.
+    </p>
+    <div class="chart" id="trend"></div>
+  </section>
+
+  <section>
+    <h2>The numbers</h2>
+    <div class="scroll"><table id="numbers"></table></div>
+  </section>
+
+  <section>
+    <h2>What ran</h2>
+    <p class="note">
+      Reporting rule one: the exact version of everything, on every rung. An engine that appears
+      twice at two versions is an engine whose rungs are not one ladder.
+    </p>
+    <div class="scroll"><table id="versions"></table></div>
+  </section>
+
+  <section class="method">
+    <h2>How to read this</h2>
+    <p>
+      <strong>Nothing here is a published ClickBench or TPC-H result.</strong> Reporting rule seven
+      says a number from one machine is never compared against a number from another, and no machine
+      this project owns is the <code>c6a.4xlarge</code> the public ClickBench board reports on. What
+      this page is for is the shape: the same suite, the same engines and the same five sizes,
+      measured within an afternoon of each other, which is the only way to tell a fixed cost from a
+      per row one.
+    </p>
+    <p>
+      <strong>Hot query time</strong> is what the engine itself says the queries took, added over
+      the hot runs, which is the same number the public board publishes. Every run is a fresh
+      process, so hot means the page cache is warm and the buffer pool is not, and no query's number
+      depends on the one before it. The median of at least five runs is what is reported, per
+      reporting rule two.
+    </p>
+    <p>
+      <strong>Ratios are taken over the queries every engine measured.</strong> An engine that
+      cannot express a query, or that ran out of time on one, would otherwise be compared on a
+      different set of queries from everybody else. The count is in the table above, per rung.
+    </p>
+    <p>
+      <strong>Load and on disk mean two different things per engine.</strong> DuckDB and ClickHouse
+      convert the Parquet into a format of their own and pay for the decode once, at load time, in a
+      column you can see. DataFusion, Polars and rudb read the Parquet where it lies, which is an
+      empty load column and a decode inside every query time beside it. A cell that is the source
+      Parquet rather than the engine's own files is marked in the table.
+    </p>
+    <p>
+      The suites, the machines, the reporting rules and the three committed artifacts are described
+      in <a href="https://github.com/tamnd/rudb-bench#readme">the rudb-bench README</a>. Every rung
+      here has a full per query report beside it in
+      <a href="https://github.com/tamnd/rudb-bench/tree/main/reports"><code>reports/</code></a>.
+    </p>
+  </section>
+</main>
+
+<footer>
+  <p>
+    <a href="https://github.com/tamnd/rudb">rudb</a> ·
+    <a href="https://github.com/tamnd/rudb-bench">rudb-bench</a> ·
+    <span id="generated"></span>
+  </p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

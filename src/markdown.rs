@@ -27,17 +27,27 @@ use crate::report::{Comparison, SuiteResult, at_least, publishable};
 
 /// Where the report for one suite goes.
 ///
-/// Named after the suite and the machine, both, because rule seven says never compare across
+/// Named after the suite, the machine and the size, all three. Rule seven says never compare across
 /// machines and two files that differ only in which box they were taken on would be compared by
-/// the first person who opened them side by side. The `run-` prefix keeps the generated reports
-/// apart from the written ones, which live in the same directory and are a different kind of
-/// document. The UTC date keeps each run with the other reports produced that day.
+/// the first person who opened them side by side. The size is in the name for a plainer reason:
+/// a ladder is one command per rung and every rung is the same suite on the same machine, so
+/// without it the second rung writes over the first and a four point ladder leaves one file behind.
+/// That used to be worked around by setting `RUDB_BENCH_MACHINE` to `gamingpc-wsl-1m`, which bought
+/// distinct file names by putting a size into the machine field, and a machine field that is partly
+/// a size is one rule seven cannot be checked against.
+///
+/// The `run-` prefix keeps the generated reports apart from the written ones, which live in the same
+/// directory and are a different kind of document. The UTC date keeps each run with the other
+/// reports produced that day.
 ///
 /// `RUDB_BENCH_REPORTS` moves the directory, the way `RUDB_BENCH_BASELINE` moves the records, for
 /// a run somewhere other than a checkout.
 #[must_use]
-pub fn path(suite: &str, machine: &str) -> PathBuf {
-    let name = format!("run-{suite}-{machine}.md");
+pub fn path(suite: &str, machine: &str, size: Option<&str>) -> PathBuf {
+    let name = match size {
+        Some(size) => format!("run-{suite}-{machine}-{size}.md"),
+        None => format!("run-{suite}-{machine}.md"),
+    };
     let root = std::env::var_os("RUDB_BENCH_REPORTS")
         .map_or_else(|| PathBuf::from("reports"), PathBuf::from);
     root.join(crate::regress::today()).join(name)
@@ -52,8 +62,9 @@ pub fn write(
     compared: &Comparison,
     facts: &[Fact],
     machine: &str,
+    size: Option<&str>,
 ) -> Result<PathBuf, std::io::Error> {
-    let at = path(compared.suite.name, machine);
+    let at = path(compared.suite.name, machine, size);
     if let Some(parent) = at.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -1311,7 +1322,7 @@ mod tests {
     fn the_file_is_named_after_the_suite_and_the_machine() {
         // Rule seven is never compare across machines, and two files that differ only in which box
         // they came from are two files somebody puts side by side.
-        let at = path("clickbench", "server3");
+        let at = path("clickbench", "server3", None);
         assert!(
             at.ends_with(
                 std::path::PathBuf::from(crate::regress::today()).join("run-clickbench-server3.md")
@@ -1319,6 +1330,28 @@ mod tests {
             "{}",
             at.display()
         );
+    }
+
+    /// A ladder is one command per rung, and every rung is the same suite on the same machine. The
+    /// size in the name is the whole of what keeps the second rung from writing over the first.
+    #[test]
+    fn every_rung_of_a_ladder_gets_its_own_file() {
+        let day = crate::regress::today();
+        let rungs = [
+            (path("clickbench", "gamingpc-wsl", Some("1m")), "run-clickbench-gamingpc-wsl-1m.md"),
+            (path("clickbench", "gamingpc-wsl", Some("10m")), "run-clickbench-gamingpc-wsl-10m.md"),
+            (path("tpch", "gamingpc-wsl", Some("sf0.1")), "run-tpch-gamingpc-wsl-sf0.1.md"),
+            (path("tpch", "gamingpc-wsl", Some("sf1")), "run-tpch-gamingpc-wsl-sf1.md"),
+        ];
+        for (at, name) in &rungs {
+            assert!(
+                at.ends_with(std::path::PathBuf::from(&day).join(name)),
+                "{} is not {name}",
+                at.display()
+            );
+        }
+        let names: std::collections::BTreeSet<_> = rungs.iter().map(|(at, _)| at).collect();
+        assert_eq!(names.len(), rungs.len(), "two rungs share a file name");
     }
 
     #[test]

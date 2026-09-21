@@ -2,63 +2,296 @@
 
 The benchmark harness for [rudb](https://github.com/tamnd/rudb).
 
-ClickBench, TPC-H, TPC-DS, JOB, CEB and H2O against DuckDB, ClickHouse, Umbra and DataFusion, and the reporting rules that decide what a number is allowed to claim.
+ClickBench, TPC-H, TPC-DS, JOB and H2O against DuckDB, ClickHouse, DataFusion and Polars, and the reporting rules that decide what a number is allowed to claim. Umbra is in [`spec/03-baselines.md`](https://github.com/tamnd/rudb/blob/main/spec/03-baselines.md) as a published number to aim at rather than as an engine here, because it is not a binary anybody can download and re-run.
 
 It is a separate repository so that a result can be reproduced by someone who does not trust us, without building the engine from a specific commit of the engine's own repository. The whole project's claim is a performance claim, which means its credibility rests on the honesty of these measurements more than on any technical decision inside the engine. A benchmark number without its methodology is marketing.
 
-The design is [`spec/15-rudb-bench.md`](https://github.com/tamnd/rudb/blob/main/spec/15-rudb-bench.md) in the rudb repository.
+The design is [`spec/15-rudb-bench.md`](https://github.com/tamnd/rudb/blob/main/spec/15-rudb-bench.md) in the rudb repository. The same numbers as charts you can hover are at **[tamnd.github.io/rudb-bench](https://tamnd.github.io/rudb-bench/)**.
 
-The [13 September measurement audit](reports/2026-09-13/clickbench-audit.md) runs DuckDB 1.5.5 and rudb 0.2.37 through all 43 ClickBench queries at 1k, 10k, 100k and 1m rows, with five hot repetitions, per-child CPU and RSS checks, and retained raw results. It includes q19 and q33 on the samples. The earlier measurements below retain their original versions and methodology.
+## The board
 
-rudb now exposes all 43 ClickBench queries through the regular harness. Q19 and Q33 were the last two exclusions. Both complete and match DuckDB at 1k, 10k, 100k, and 1m rows in the four way native and Parquet audit. ClickBench has 43 queries, so the complete result is 43 of 43.
+Everything from here to [Status](#status) is generated. `rudb-bench run --board` writes a rung into `board/<suite>-<machine>.txt` on a machine in the fleet, a person commits it, and `rudb-bench render` splices these tables and charts into this file and into `docs/data/board.json`. Nothing between the markers is typed by hand, every pull request is checked for whether it is still what the board says, and main regenerates it and republishes the site. A section that is empty means the board is empty, which is a fact rather than a formatting bug.
 
-## Where rudb is, today
+Three things travel with all of it or it is worth nothing.
 
-The table below records rudb 0.3.5, when rudb ran 41 of 43 queries and still excluded Q19 and Q33. It is retained because benchmark history should not be rewritten after the engine improves. These measurements compare DuckDB and rudb on `gamingpc-wsl`, which is 32 hardware threads, at one million and ten million rows, with five hot runs of each query after a cold one. Query time is what each engine reports. The ratio covers the 41 queries both engines ran at that revision.
+**Nothing here is a ClickBench or TPC-H board result.** Reporting rule seven says a number from one machine is never compared against a number from another, and no machine this project owns is the `c6a.4xlarge` the public board publishes on. What the ladder is for is the shape: the same suite, the same engines and the same sizes, measured within an afternoon of each other, which is the only way to tell a fixed cost from a per-row one.
 
-| | 1m rows | 10m rows |
-| --- | --- | --- |
-| duckdb v2.0.0-dev84237 cc7e7bac7f | 556ms | 3.015s |
-| rudb 0.3.5 | 5.854s | 51.929s |
-| rudb against duckdb | 11.28x | 19.51x |
+**The clock is the engine's own.** Each column is what that engine says its queries took, which is the quantity the public board publishes, summed over the queries every engine in that row measured. The harness's wall clock around the whole subprocess is a separate column in the reports and on the site, because at a thousand rows most of a wall clock is `execve` and a table of wall clocks partly ranks process startup. [Two clocks, and which one to read](#two-clocks-and-which-one-to-read) is the long version.
 
-The direction of that line is the whole story and it is not a flattering one. Ten times the rows cost DuckDB five and a half times the time and cost rudb nine, so the gap grows with the data. A gap that grows with the rows is a per-row cost rather than a startup cost, and per-row cost is what the F milestones are for.
+**The ClickBench rungs are strided samples** of the real `hits` below ten million rows, which is [a development loop rather than a board](#a-smaller-clickbench-for-the-loop-rather-than-for-the-board). Engines that read the Parquet where it lies pay a decode inside every query that the engines with a format of their own paid once at load time.
 
-The column that says most of why is the one nobody puts in a headline, which is how many cores each engine actually used.
+### Against the goal
 
-| cores used, hot | 1m rows | 10m rows |
-| --- | --- | --- |
-| duckdb | 2.25 | 9.01 |
-| rudb | 0.94 | 0.99 |
+The claim this project exists to test is ten times faster than the fastest rival at a tenth of the resources, which is `0.10x` in the table below. It is generated and it is first, so that the day it is not met is as legible as the day it is.
 
-rudb never gets above one. It is a single threaded engine on a box with 32 threads, and at ten million rows DuckDB is keeping nine of them busy while rudb keeps one. That is nine of the nineteen. The rest, a factor of about two, is the loop, and the loop is the part that has to come down first because it is also what every added thread would be running.
+<!-- rudb-bench:begin goal -->
+**clickbench**, on gamingpc-wsl. Lower is better; the goal is 0.10x.
 
-The memory half of the claim goes the other way, which is the one piece of good news in here. It is worth putting next to the time, because a time that came out of twice the memory is not the same result.
+| size | best rival | its query time | rudb | time | its peak RSS | rudb | memory |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 1k (1,000 rows) | duckdb | 78.000ms | 26.035ms | 0.33x | 40.39 MiB (duckdb) | 11.23 MiB | 0.28x |
+| 10k (10,000 rows) | duckdb | 101.000ms | 67.748ms | 0.67x | 43.82 MiB (duckdb) | 18.45 MiB | 0.42x |
+| 100k (99,998 rows) | duckdb | 242.000ms | 154.715ms | 0.64x | 70.07 MiB (duckdb) | 92.64 MiB | 1.32x |
+| 1m (999,975 rows) | duckdb | 416.000ms | 594.355ms | 1.43x | 303.39 MiB (duckdb) | 344.17 MiB | 1.13x |
 
-| peak RSS | 1m rows | 10m rows |
-| --- | --- | --- |
-| duckdb | 307.60 MiB | 1.63 GiB |
-| rudb | 172.14 MiB | 1.27 GiB |
+Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: this machine is not a reporting machine, so nothing here is comparable to a published ClickBench or TPC-H number.
 
-Every operator of every query writes what it cost, so the harness can say where the time goes rather than only how much of it there is. At ten million rows, over the whole suite: FileScan 28.198s and 54.8 percent of it, Aggregate 13.427s and 26.1 percent, Filter 5.069s and 9.9 percent, TopN 4.525s and 8.8 percent, Project 228ms and 0.4 percent. Every one of those operators ran the reference implementation of its seam, which is the slow path kept for differential testing, so more than half of this is a Parquet decode that has not been specialised yet.
+**tpch**, on gamingpc-wsl. Lower is better; the goal is 0.10x.
 
-Four things travel with all of that or it is worth nothing. These are strided samples of the real `hits`, not the file, so nothing here is comparable to the board or to anybody else's number. rudb reads the Parquet where it lies and pays to decode it inside every query, where DuckDB paid once at load time and is being timed on a format of its own. The rudb column is 41 queries against DuckDB's 43 and the ratio is taken over the shared ones. And both runs were taken with the page cache warm and not dropped, so the cold column is a first pass rather than a first pass off the device.
+| size | best rival | its query time | rudb | time | its peak RSS | rudb | memory |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| sf0.01 (86,642 rows) | duckdb | 95.000ms | 63.032ms | 0.66x | 50.14 MiB (duckdb) | 16.73 MiB | 0.33x |
+| sf0.1 (866,151 rows) | duckdb | 164.000ms | 221.158ms | 1.35x | 126.07 MiB (duckdb) | 68.20 MiB | 0.54x |
+| sf1 (8,661,245 rows) | duckdb | 691.000ms | 970.480ms | 1.40x | 259.80 MiB (duckdb-pinned) | 421.99 MiB | 1.62x |
 
-The two runs in full, written by the harness with nothing typed into them by hand, are [1m](reports/2026-09-14/run-clickbench-gamingpc-wsl-1m-0.3.5.md) and [10m](reports/2026-09-14/run-clickbench-gamingpc-wsl-10m-0.3.5.md). Next up the ladder is the file itself.
+Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: this machine is not a reporting machine, so nothing here is comparable to a published ClickBench or TPC-H number.
 
-The earlier sweep on the same machine, seven engines at 1k, 10k, 100k and 1m, is kept below because runs are added and never replaced.
+<!-- rudb-bench:end goal -->
 
-| engine | 1k rows | 10k rows | 100k rows | 1m rows |
-| --- | --- | --- | --- | --- |
-| duckdb v1.5.5 | 101ms | 125ms | 314ms | 594ms |
-| duckdb-pinned v2.0.0-dev84237 cc7e7bac7f | 136ms | 165ms | 342ms | 593ms |
-| clickhouse-server 26.9.1.1162 | 135ms | 151ms | 246ms | 449ms |
-| clickhouse-local 26.9.1.1162 | 149ms | 179ms | 432ms | 2.866s |
-| datafusion 55.1.0 | 218ms | 359ms | 589ms | 970ms |
-| polars 1.44.2 | 537ms | 596ms | 785ms | 1.216s |
-| rudb 0.2.31 | 22ms | 123ms | 1.117s | 9.854s |
+### Every size, every engine
 
-Against DuckDB that was 0.22x, 0.98x, 3.56x and 16.59x. rudb won at a thousand rows because at a thousand rows almost nothing is being measured except what it costs to start, and rudb starts in nearly no memory at all. Those are one hot run each rather than the five rule two asks for, and `clickhouse-server` stayed up across the whole suite with its own caches warm where every other row is a fresh process, so that row is a different quantity from the rest. The four are [1k](reports/2026-09-12/run-clickbench-gamingpc-wsl-1k-quiet.md), [10k](reports/2026-09-12/run-clickbench-gamingpc-wsl-10k-quiet.md), [100k](reports/2026-09-12/run-clickbench-gamingpc-wsl-100k-quiet.md) and [1m](reports/2026-09-12/run-clickbench-gamingpc-wsl-1m-quiet.md). The same ladder on `vmi3391933`, which is eight threads, is in [reports/](reports/), and the two are not comparable to each other because rule seven says they are not.
+<!-- rudb-bench:begin ladders -->
+**clickbench**, on gamingpc-wsl. Hot query time, median of the runs, and the ratio against duckdb underneath it.
+
+| size | duckdb | duckdb-pinned | clickhouse-local | datafusion | polars | rudb |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1k (1,000 rows) | 78.000ms<br>1.00x | 116.000ms<br>1.49x | 288.000ms<br>3.69x | 167.000ms<br>2.14x | 567.734ms<br>7.28x | 26.035ms<br>0.33x |
+| 10k (10,000 rows) | 101.000ms<br>1.00x | 139.000ms<br>1.38x | 322.000ms<br>3.19x | 248.000ms<br>2.46x | 561.828ms<br>5.56x | 67.748ms<br>0.67x |
+| 100k (99,998 rows) | 242.000ms<br>1.00x | 265.000ms<br>1.10x | 633.000ms<br>2.62x | 338.000ms<br>1.40x | 726.690ms<br>3.00x | 154.715ms<br>0.64x |
+| 1m (999,975 rows) | 416.000ms<br>1.00x | 454.000ms<br>1.09x | 2.585s<br>6.21x | 1.042s<br>2.50x | 1.274s<br>3.06x | 594.355ms<br>1.43x |
+
+Ratios are over the queries every engine measured, which is 39 on every rung of 43. An engine that cannot express a query, or that ran out of time on one, would otherwise be compared on a different set of queries from the rest.
+
+Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: this machine is not a reporting machine, so nothing here is comparable to a published ClickBench or TPC-H number.
+
+**tpch**, on gamingpc-wsl. Hot query time, median of the runs, and the ratio against duckdb underneath it.
+
+| size | duckdb | duckdb-pinned | clickhouse-local | datafusion | polars | rudb |
+| --- | --- | --- | --- | --- | --- | --- |
+| sf0.01 (86,642 rows) | 95.000ms<br>1.00x | 165.000ms<br>1.74x | 717.000ms<br>7.55x | 257.000ms<br>2.71x | 541.142ms<br>5.70x | 63.032ms<br>0.66x |
+| sf0.1 (866,151 rows) | 164.000ms<br>1.00x | 235.000ms<br>1.43x | 1.129s<br>6.88x | 313.000ms<br>1.91x | 748.537ms<br>4.56x | 221.158ms<br>1.35x |
+| sf1 (8,661,245 rows) | 691.000ms<br>1.00x | 778.000ms<br>1.13x | 2.693s<br>3.90x | 990.000ms<br>1.43x | 2.657s<br>3.84x | 970.480ms<br>1.40x |
+
+Ratios are over the queries every engine measured, which is 19 on every rung of 22. An engine that cannot express a query, or that ran out of time on one, would otherwise be compared on a different set of queries from the rest.
+
+Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: this machine is not a reporting machine, so nothing here is comparable to a published ClickBench or TPC-H number.
+
+<!-- rudb-bench:end ladders -->
+
+### The same thing, drawn
+
+<!-- rudb-bench:begin charts -->
+**clickbench**, on gamingpc-wsl.
+
+```text
+1k (1,000 rows) — hot query time, shorter is better
+  duckdb            █████▌ 78.000ms
+  duckdb-pinned     ████████▏ 116.000ms
+  clickhouse-local  ████████████████████▎ 288.000ms
+  datafusion        ███████████▊ 167.000ms
+  polars            ████████████████████████████████████████ 567.734ms
+  rudb              █▉ 26.035ms
+
+10k (10,000 rows) — hot query time, shorter is better
+  duckdb            ███████▎ 101.000ms
+  duckdb-pinned     █████████▉ 139.000ms
+  clickhouse-local  ██████████████████████▉ 322.000ms
+  datafusion        █████████████████▋ 248.000ms
+  polars            ████████████████████████████████████████ 561.828ms
+  rudb              ████▉ 67.748ms
+
+100k (99,998 rows) — hot query time, shorter is better
+  duckdb            █████████████▍ 242.000ms
+  duckdb-pinned     ██████████████▋ 265.000ms
+  clickhouse-local  ██████████████████████████████████▉ 633.000ms
+  datafusion        ██████████████████▋ 338.000ms
+  polars            ████████████████████████████████████████ 726.690ms
+  rudb              ████████▌ 154.715ms
+
+1m (999,975 rows) — hot query time, shorter is better
+  duckdb            ██████▍ 416.000ms
+  duckdb-pinned     ███████ 454.000ms
+  clickhouse-local  ████████████████████████████████████████ 2.585s
+  datafusion        ████████████████▏ 1.042s
+  polars            ███████████████████▊ 1.274s
+  rudb              █████████▎ 594.355ms
+
+vs duckdb, hot query time, under 1.00x is faster than duckdb
+  duckdb-pinned
+    1k    ██████▌ 1.49x
+    10k   ██████ 1.38x
+    100k  ████▉ 1.10x
+    1m    ████▊ 1.09x
+  clickhouse-local
+    1k    ████████████████▎ 3.69x
+    10k   ██████████████ 3.19x
+    100k  ███████████▌ 2.62x
+    1m    ███████████████████████████▍ 6.21x
+  datafusion
+    1k    █████████▍ 2.14x
+    10k   ██████████▊ 2.46x
+    100k  ██████▏ 1.40x
+    1m    ███████████ 2.50x
+  polars
+    1k    ████████████████████████████████ 7.28x
+    10k   ████████████████████████▌ 5.56x
+    100k  █████████████▎ 3.00x
+    1m    █████████████▌ 3.06x
+  rudb
+    1k    █▌ 0.33x
+    10k   ███ 0.67x
+    100k  ██▊ 0.64x
+    1m    ██████▎ 1.43x
+```
+
+Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: this machine is not a reporting machine, so nothing here is comparable to a published ClickBench or TPC-H number.
+
+**tpch**, on gamingpc-wsl.
+
+```text
+sf0.01 (86,642 rows) — hot query time, shorter is better
+  duckdb            █████▎ 95.000ms
+  duckdb-pinned     █████████▎ 165.000ms
+  clickhouse-local  ████████████████████████████████████████ 717.000ms
+  datafusion        ██████████████▍ 257.000ms
+  polars            ██████████████████████████████▎ 541.142ms
+  rudb              ███▌ 63.032ms
+
+sf0.1 (866,151 rows) — hot query time, shorter is better
+  duckdb            █████▊ 164.000ms
+  duckdb-pinned     ████████▍ 235.000ms
+  clickhouse-local  ████████████████████████████████████████ 1.129s
+  datafusion        ███████████▏ 313.000ms
+  polars            ██████████████████████████▌ 748.537ms
+  rudb              ███████▉ 221.158ms
+
+sf1 (8,661,245 rows) — hot query time, shorter is better
+  duckdb            ██████████▎ 691.000ms
+  duckdb-pinned     ███████████▌ 778.000ms
+  clickhouse-local  ████████████████████████████████████████ 2.693s
+  datafusion        ██████████████▊ 990.000ms
+  polars            ███████████████████████████████████████▌ 2.657s
+  rudb              ██████████████▍ 970.480ms
+
+vs duckdb, hot query time, under 1.00x is faster than duckdb
+  duckdb-pinned
+    sf0.01  ███████▍ 1.74x
+    sf0.1   ██████▏ 1.43x
+    sf1     ████▊ 1.13x
+  clickhouse-local
+    sf0.01  ████████████████████████████████ 7.55x
+    sf0.1   █████████████████████████████▎ 6.88x
+    sf1     ████████████████▌ 3.90x
+  datafusion
+    sf0.01  ███████████▌ 2.71x
+    sf0.1   ████████▏ 1.91x
+    sf1     ██████▏ 1.43x
+  polars
+    sf0.01  ████████████████████████▏ 5.70x
+    sf0.1   ███████████████████▍ 4.56x
+    sf1     ████████████████▎ 3.84x
+  rudb
+    sf0.01  ██▉ 0.66x
+    sf0.1   █████▊ 1.35x
+    sf1     ██████ 1.40x
+```
+
+Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: this machine is not a reporting machine, so nothing here is comparable to a published ClickBench or TPC-H number.
+
+<!-- rudb-bench:end charts -->
+
+### Peak resident memory
+
+The other half of the claim. A time that came out of twice the memory is not the same result, which is why rule six says the two are reported together or neither is.
+
+<!-- rudb-bench:begin memory -->
+**clickbench**, on gamingpc-wsl. Worst peak resident set over the suite, per engine.
+
+| size | duckdb | duckdb-pinned | clickhouse-local | datafusion | polars | rudb |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1k (1,000 rows) | 40.39 MiB | 53.02 MiB | 247.78 MiB | 159.01 MiB | 83.24 MiB | 11.23 MiB |
+| 10k (10,000 rows) | 43.82 MiB | 52.99 MiB | 251.21 MiB | 199.03 MiB | 88.75 MiB | 18.45 MiB |
+| 100k (99,998 rows) | 70.07 MiB | 81.55 MiB | 291.98 MiB | 407.48 MiB | 130.59 MiB | 92.64 MiB |
+| 1m (999,975 rows) | 303.39 MiB | 305.39 MiB | 468.82 MiB | 1.13 GiB | 437.08 MiB | 344.17 MiB |
+
+Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: this machine is not a reporting machine, so nothing here is comparable to a published ClickBench or TPC-H number.
+
+**tpch**, on gamingpc-wsl. Worst peak resident set over the suite, per engine.
+
+| size | duckdb | duckdb-pinned | clickhouse-local | datafusion | polars | rudb |
+| --- | --- | --- | --- | --- | --- | --- |
+| sf0.01 (86,642 rows) | 50.14 MiB | 55.90 MiB | 426.12 MiB | 224.61 MiB | 127.34 MiB | 16.73 MiB |
+| sf0.1 (866,151 rows) | 126.07 MiB | 132.22 MiB | 486.86 MiB | 439.23 MiB | 419.36 MiB | 68.20 MiB |
+| sf1 (8,661,245 rows) | 283.89 MiB | 259.80 MiB | 839.93 MiB | 1.37 GiB | 2.51 GiB | 421.99 MiB |
+
+Measured on gamingpc-wsl on 2026-09-21, by rudb-bench at 771b137. Rule seven: this machine is not a reporting machine, so nothing here is comparable to a published ClickBench or TPC-H number.
+
+<!-- rudb-bench:end memory -->
+
+### What ran
+
+Reporting rule one, mechanically: the exact version of everything, on every rung. An engine appearing twice at two versions is an engine whose rungs are not one ladder.
+
+<!-- rudb-bench:begin versions -->
+| engine | version | machine | rungs |
+| --- | --- | --- | --- |
+| clickhouse-local | 26.9.1.1562 | gamingpc-wsl | 7 |
+| datafusion | datafusion-cli 55.1.0 | gamingpc-wsl | 7 |
+| duckdb | v1.5.5 (Variegata) d8cdaa33fd | gamingpc-wsl | 7 |
+| duckdb-pinned | v2.0.0-dev84237 (Development Version) cc7e7bac7f | gamingpc-wsl | 7 |
+| polars | 1.44.2 in sink mode | gamingpc-wsl | 7 |
+| rudb | rudb 0.3.67 | gamingpc-wsl | 7 |
+
+<!-- rudb-bench:end versions -->
+
+### Which version to run
+
+`pins.txt` is the answer to which build of each engine to install, and [the versions workflow](.github/workflows/versions.yml) checks it against what each project has released every morning. When something ships it opens a pull request that bumps the pin and carries the command that re-measures the ladder. It never times anything itself, because no shared CI runner is a machine this project may publish a number from, so a bump and a re-measurement are two separate acts by design. Until the second one happens the block below says which engines the board has not caught up with.
+
+<!-- rudb-bench:begin pins -->
+| what | version to run | follows | why |
+| --- | --- | --- | --- |
+| rudb | `v0.3.67` | [tamnd/rudb](https://github.com/tamnd/rudb/releases), stable | The engine under test. Built from a tag rather than from main, so that a number can be traced to something somebody can check out. |
+| duckdb | `v1.5.5` | [duckdb/duckdb](https://github.com/duckdb/duckdb/releases), stable | The newest stable DuckDB, and the engine every ratio in this repository is taken against. |
+| duckdb-pinned | `v2.0.0-dev84237` | [duckdb/duckdb](https://github.com/duckdb/duckdb/releases), held here | The nightly build rudb's SQL compatibility is written against, measured beside the stable one so that a compatibility target and a comparison target are never the same column. Held because DuckDB's nightlies are not GitHub releases: they come from install.duckdb.org, so a bump is somebody downloading one and saying which build it was. |
+| clickhouse | `26.9.1.1562` | [ClickHouse/ClickHouse](https://github.com/ClickHouse/ClickHouse/releases), held here | One release drives both clickhouse-local and clickhouse-server. Held because this box runs the distribution's package rather than a downloaded tarball, so a bump here is somebody upgrading the package first. |
+| datafusion | `55.1.0` | [datafusion-cli](https://crates.io/crates/datafusion-cli), stable | Installed with `cargo install datafusion-cli`. DataFusion publishes no GitHub releases, so the check reads crates.io. |
+| polars | `1.44.2` | [polars](https://pypi.org/project/polars/), stable | Driven through Python in sink mode. The GitHub tags carry a `py-` prefix and include release candidates, so the check reads PyPI, which only ever has the stable one. |
+
+Every number on the board was measured against these versions.
+
+<!-- rudb-bench:end pins -->
+
+### Reproducing all of it
+
+Reporting rule eight asks for one documented command, in the same artifact as the number. On a machine with every engine installed at the versions above:
+
+```sh
+engines=duckdb,duckdb-pinned,clickhouse-local,datafusion,polars,rudb
+for sf in 0.01 0.1 1 10; do
+  rudb-bench run tpch --scale $sf --engines $engines --runs 5 --timeout 1800 --report --board
+done
+for rows in 1k 10k 100k 1m 10m; do
+  rudb-bench run clickbench --rows $rows --engines $engines --runs 5 --timeout 1800 --report --board
+done
+rudb-bench render
+```
+
+Each engine is pointed at its binary with `RUDB_BENCH_DUCKDB`, `RUDB_BENCH_DUCKDB_PINNED`, `RUDB_BENCH_CLICKHOUSE`, `RUDB_BENCH_DATAFUSION`, `RUDB_BENCH_PYTHON` and `RUDB_BENCH_RUDB`, because a row that guessed would sooner or later measure the wrong build and print the column as if it meant something. Every rung leaves a full per-query report in [`reports/`](reports/) beside the one line it puts on the board.
+
+### What the board replaces, and what it does not
+
+A rung is replaced when it is re-measured, because a board is what is true now. The history is kept somewhere else and never overwritten: [`runs/`](runs/) is the append-only ledger of what each layer of the engine was worth, [`reports/`](reports/) keeps every run that was ever taken with the machine record of the day, and [`baselines/`](baselines/) is the per-query regression gate. The three are different shapes for different questions and are described under [the attribution ledger](#the-attribution-ledger).
+
+## Where rudb's time actually goes
+
+The board above says how far off rudb is. This is meant to say what of, and it is the one part of the comparison no rival column can supply, because every operator of every rudb query writes what it cost.
+
+**It cannot say it today.** At rudb 0.3.67 the per-operator CPU column reads `0.000us` for every kind, on every suite, at every size. The row counts beside it are right, so the operators are being seen and are not being charged, which happened somewhere between 0.3.5 and 0.3.67 and is a defect in the metrics rather than in the engine. Every `Where the time went` table in [`reports/2026-09-21/`](reports/2026-09-21/) is therefore an empty table with a correct shape, and this section is a stale paragraph with a date on it until that is fixed.
+
+What it said when it worked, over a ten million row ClickBench on `gamingpc-wsl` at rudb 0.3.5: FileScan 28.198s and 54.8 percent of the suite, Aggregate 13.427s and 26.1 percent, Filter 5.069s and 9.9 percent, TopN 4.525s and 8.8 percent, Project 228ms and 0.4 percent. Every one of those operators was running the reference implementation of its seam, which is the slow path kept for differential testing, so more than half of that total was a Parquet decode nobody had specialised yet. The two runs in full are [1m](reports/2026-09-14/run-clickbench-gamingpc-wsl-1m-0.3.5.md) and [10m](reports/2026-09-14/run-clickbench-gamingpc-wsl-10m-0.3.5.md), and they are kept at their own version rather than rewritten, because benchmark history that gets updated after the engine improves is not history.
+
+**rudb stopped being a single threaded engine between those two dates**, which is the other half of the explanation and the part the board does not show. At 0.3.5 it averaged 0.99 cores over its hot runs against DuckDB's 9.01. At 0.3.67, at a million rows, it averages 3.15 against DuckDB's 2.35 and DataFusion's 8.61, and it does that while spending 4.490 CPU-seconds where DataFusion spends 20.280 for a slower answer. Any ratio on the board is therefore made of two separable things, a loop that costs what it costs per row and a number of loops running at once, and `hot cpu` over `hot` in every report is the column that separates them.
 
 ## Status
 
@@ -87,7 +320,9 @@ That last pair of lines is the point of this repository existing. The target is 
 
 ### What runs today
 
-`rudb-bench run` measures the smoke suite, which is not one of the seven suites in the specification and is not a benchmark. It generates ten million rows of its own in a few seconds and runs six queries over them that between them touch a scan, a filter, a sum, a group by, a top k, a count distinct and a join. It exists so that the measurement path is exercised on every commit rather than on the day somebody needs a real number and finds out the apparatus rotted.
+`rudb-bench run <suite>` measures ClickBench and TPC-H against all six engines, at any size, and that is what every rung on the board above came out of. `rudb-bench suites` lists the seven suites from the specification with what each one needs first, which is a download or a generator in every case, and TPC-DS, JOB, CEB and H2O are named there and are not yet measured.
+
+`rudb-bench run` with no suite measures the smoke suite, which is not one of the seven and is not a benchmark. It generates ten million rows of its own in a few seconds and runs six queries over them that between them touch a scan, a filter, a sum, a group by, a top k, a count distinct and a join. It exists so that the measurement path is exercised on every commit rather than on the day somebody needs a real number and finds out the apparatus rotted.
 
 ```
 $ rudb-bench run
@@ -117,11 +352,9 @@ That last block is the part worth looking at. A result carries the list of reaso
 
 `rudb-bench machine` records what has to be read next to a number: the processor, the thread count, the memory, the frequency governor, the turbo state, the filesystem under the data and its mount options, whether the page cache can actually be dropped, and which `/usr/bin/time` will be reading the peak. Anything that could not be read is marked and says why, because a field that silently defaulted is a lie that survives into a report.
 
-`rudb-bench suites` lists the seven suites from the specification with what each one needs before it can run, which is a download or a generator in every case.
+### The whole file, which the ladder above is not
 
-### The first full ClickBench, and what it says
-
-ClickBench has now run end to end on `gamingpc-wsl` against all five rivals, on the real hundred million row `hits.parquet`, with each engine loaded the way its own entry on the official board loads it. It is committed as the `2a the baseline` row of `runs/clickbench.txt` and `rudb-bench ledger` renders it.
+Every ClickBench rung on the board is a strided sample. This is the file: a hundred million rows of the real `hits.parquet`, end to end on `gamingpc-wsl` against all five rivals, each engine loaded the way its own entry on the official board loads it. It is committed as the `2a the baseline` row of `runs/clickbench.txt` and `rudb-bench ledger` renders it. rudb has no column here yet, because the file is the rung above the ladder rather than the top of it.
 
 ```
 engine              hot total   hot cpu   peak RSS      load    on disk   vs duckdb
@@ -229,9 +462,9 @@ The property block is the part that exists for the graph work rather than for TP
 
 Every run now reads the manifest beside the files it is about to measure, and checks each file is still the length it was described as. That is not a hash and is not meant to be one, since rehashing thirty gigabytes before every run would cost more than the run. It catches the case that happens, which is a corpus half rewritten by a second generation. A corpus with no manifest is still run, it just cannot say where it came from, and a run that cannot find a corpus at all now ends with the command that makes it.
 
-### The first full TPC-H at scale factor 100, and what it says
+### Scale factor 100, which is two rungs above the ladder
 
-TPC-H has now run end to end on `gamingpc-wsl` over the real 22.50 GiB corpus, all twenty two queries, five runs each, with DuckDB and `clickhouse local` each loading into a format of their own and DataFusion reading the Parquet where it lies. It is committed as the `2a` row of `runs/tpch.txt`.
+The TPC-H ladder on the board stops at scale factor 10, because the DuckDB extension that generates the corpus is only permitted that far. This is the run above it: the real 22.50 GiB corpus at scale factor 100, all twenty two queries, five runs each, on `gamingpc-wsl`, with DuckDB and `clickhouse local` each loading into a format of their own and DataFusion reading the Parquet where it lies. It is committed as the `2a` row of `runs/tpch.txt`.
 
 ```
 engine              hot total   hot cpu   peak RSS      load    on disk   vs duckdb   worst IQR   shape spread
@@ -539,7 +772,7 @@ polars                     3.007s       5.570s   190.71 MiB          0 B      0.
 clickhouse-server          1.896s     not read     not read     not read       6.678s    50.44 MiB
 ```
 
-rudb is not in it, because rudb cannot run a query yet, and the harness says not built did not run rather than printing a blank. That is what the first row of a series looks like and it is worth committing anyway: every later row is a ratio against something, and this is the something.
+rudb is not in that first row, because on the day it was taken rudb could not yet answer a query, and the harness said not built did not run rather than printing a blank. That is what the first row of a series looks like, and it was worth committing precisely then: every later row is a ratio against something, and this is the something. rudb has been a column in every row since, and it is a column on every rung of the board at the top of this file.
 
 Later rows print the change under each number. What matters more than the change is the line above it: when a rival's version moved between two rows the ledger names it and says that a ratio across that boundary is a ratio between two different comparisons. That is the failure this file exists to catch, which is a layer taking the credit for DuckDB shipping a release in the middle of it.
 

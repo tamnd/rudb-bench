@@ -5,10 +5,12 @@
 //! than on any technical decision in the engine. A benchmark number without its methodology is
 //! marketing.
 //!
-//! rudb cannot run a query yet, so what is measured today is a real DuckDB on a small generated
-//! dataset. That is not a placeholder. Every reporting rule in section 15.1 is a property of the
-//! apparatus rather than of the engine, and every one of them is easier to build now, against an
-//! engine nobody has any stake in, than on the afternoon somebody wants a headline.
+//! This apparatus was built before rudb could answer a query, against a real DuckDB on a small
+//! generated dataset, and that was the point rather than a placeholder. Every reporting rule in
+//! section 15.1 is a property of the apparatus rather than of the engine, and every one of them was
+//! easier to build against an engine nobody had any stake in than it would have been on the
+//! afternoon somebody wanted a headline. rudb now runs the whole of ClickBench and the whole of
+//! TPC-H, and it runs them under the same rules it was measured by when it could run neither.
 //!
 //! The rules that are enforced rather than remembered: the median of at least five runs with the
 //! interquartile range, in [`measure`]; peak resident memory as a value that is either a number or
@@ -26,6 +28,7 @@
 
 pub mod answer;
 pub mod attribute;
+pub mod board;
 pub mod corpus;
 pub mod data;
 pub mod engine;
@@ -37,9 +40,11 @@ pub mod markdown;
 pub mod measure;
 pub mod memory;
 pub mod metrics;
+pub mod pins;
 pub mod planning;
 pub mod plans;
 pub mod regress;
+pub mod render;
 pub mod report;
 pub mod saved;
 pub mod suite;

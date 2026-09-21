@@ -1,0 +1,104 @@
+#!/bin/sh
+# What has been released since the versions in pins.txt were pinned.
+#
+#   sh scripts/check-versions           print what moved, change nothing
+#   sh scripts/check-versions --bump    also move the pins that moved
+#
+# Reads pins.txt, asks each project what its newest version is, and prints one line per pin. Three
+# sources because these five projects ship three ways: GitHub releases, crates.io and PyPI. A pin on
+# `channel held` is never asked about, because it is installed by hand on the box and a pull request
+# bumping it would be a pull request nobody can act on without upgrading a package first.
+#
+# This never measures anything and it never can. Reporting rule seven is machine by machine and no
+# shared runner is a machine this project may publish a number from. When something moved, the job
+# that runs this opens a pull request that bumps the line and says which command re-measures it, and
+# a person runs that command on a box in `rudb-bench fleet`.
+#
+# Exit code 0 when nothing moved, 9 when something did, and 1 when something went wrong. Three codes
+# rather than two, because "DuckDB released 1.6" and "the network is down" want different answers
+# from the job that calls this.
+set -eu
+
+bump=no
+for arg in "$@"; do
+  case "$arg" in
+    --bump) bump=yes ;;
+    *) echo "check-versions: unknown argument $arg" >&2; exit 1 ;;
+  esac
+done
+
+pins=${RUDB_BENCH_PINS:-pins.txt}
+test -f "$pins" || { echo "check-versions: no $pins here" >&2; exit 1; }
+
+# One line per pin: name, channel, source kind, what the source names, the pinned version. Written
+# by awk rather than read in the shell loop below, because the loop shells out and a `while read`
+# over a pipe that also runs curl loses the rest of the file to curl's stdin.
+lines=$(awk '
+  /^\[engine\]/ { flush(); name = version = channel = kind = what = "" ; next }
+  $1 == "name"    { name = $2 }
+  $1 == "version" { version = $2 }
+  $1 == "channel" { channel = $2 }
+  $1 == "github"  { kind = "github"; what = $2 }
+  $1 == "crate"   { kind = "crate";  what = $2 }
+  $1 == "pypi"    { kind = "pypi";   what = $2 }
+  END { flush() }
+  function flush() {
+    if (name != "" && channel != "held" && kind != "") print name, kind, what, version
+  }
+' "$pins")
+
+moved=no
+for line in $(echo "$lines" | tr ' ' '\037' | tr '\n' ' '); do
+  name=$(echo "$line" | cut -d"$(printf '\037')" -f1)
+  kind=$(echo "$line" | cut -d"$(printf '\037')" -f2)
+  what=$(echo "$line" | cut -d"$(printf '\037')" -f3)
+  have=$(echo "$line" | cut -d"$(printf '\037')" -f4)
+  [ -n "$name" ] || continue
+  channel=$(awk -v want="$name" '
+    $1 == "name" { here = ($2 == want) }
+    here && $1 == "channel" { print $2; exit }
+  ' "$pins")
+
+  case "$kind" in
+    github)
+      if [ "$channel" = any ]; then
+        # Including prereleases, in the order GitHub lists them, which is newest first. The
+        # compatibility target is a development build on purpose and `releases/latest` would never
+        # return it.
+        latest=$(gh api "repos/$what/releases" --jq '[.[].tag_name][0]' 2>/dev/null || true)
+      else
+        latest=$(gh api "repos/$what/releases/latest" --jq '.tag_name' 2>/dev/null || true)
+      fi
+      ;;
+    crate)
+      latest=$(curl -fsSL --retry 3 "https://crates.io/api/v1/crates/$what" \
+               -H 'User-Agent: rudb-bench version check' |
+               sed -n 's/.*"max_stable_version":"\([^"]*\)".*/\1/p' || true)
+      ;;
+    pypi)
+      latest=$(curl -fsSL --retry 3 "https://pypi.org/pypi/$what/json" |
+               sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | head -1 || true)
+      ;;
+    *)
+      echo "check-versions: $name has a source this script does not know: $kind" >&2
+      exit 1
+      ;;
+  esac
+
+  if [ -z "${latest:-}" ]; then
+    echo "$name  $have  could not be asked ($kind $what)"
+    continue
+  fi
+  if [ "$latest" = "$have" ]; then
+    echo "$name  $have  is the newest"
+    continue
+  fi
+  echo "$name  $have  ->  $latest"
+  moved=yes
+  if [ "$bump" = yes ]; then
+    cargo run -q -- pins --set "$name=$latest" >/dev/null
+  fi
+done
+
+[ "$moved" = yes ] && exit 9
+exit 0

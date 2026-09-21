@@ -1,0 +1,58 @@
+# What to run, and what it is pinned to.
+#
+# One block per engine. Read by `rudb-bench pins`, rendered into the README, and bumped by the
+# scheduled version check, which opens a pull request when a project releases something newer than
+# the line here. That job never times anything: no shared CI runner is a machine this project may
+# publish a number from. It says what moved and what command re-measures it, and a person runs that
+# command on a machine in `rudb-bench fleet`.
+#
+# channel stable  follow the newest release the project marks stable
+# channel any     follow the newest release, prereleases included
+# channel held    never bumped automatically, installed by hand here
+#
+# Changing a version here does not change any number in this repository. The numbers move when
+# somebody re-runs the ladder and commits the board, which is the whole point of keeping the two
+# apart: a README that bumped its versions without re-measuring would be attributing this month's
+# numbers to next month's DuckDB.
+
+[engine]
+name      rudb
+version   v0.3.67
+github    tamnd/rudb
+channel   stable
+why       The engine under test. Built from a tag rather than from main, so that a number can be traced to something somebody can check out.
+
+[engine]
+name      duckdb
+version   v1.5.5
+github    duckdb/duckdb
+channel   stable
+why       The newest stable DuckDB, and the engine every ratio in this repository is taken against.
+
+[engine]
+name      duckdb-pinned
+version   v2.0.0-dev84237
+github    duckdb/duckdb
+channel   held
+why       The nightly build rudb's SQL compatibility is written against, measured beside the stable one so that a compatibility target and a comparison target are never the same column. Held because DuckDB's nightlies are not GitHub releases: they come from install.duckdb.org, so a bump is somebody downloading one and saying which build it was.
+
+[engine]
+name      clickhouse
+version   26.9.1.1562
+github    ClickHouse/ClickHouse
+channel   held
+why       One release drives both clickhouse-local and clickhouse-server. Held because this box runs the distribution's package rather than a downloaded tarball, so a bump here is somebody upgrading the package first.
+
+[engine]
+name      datafusion
+version   55.1.0
+crate     datafusion-cli
+channel   stable
+why       Installed with `cargo install datafusion-cli`. DataFusion publishes no GitHub releases, so the check reads crates.io.
+
+[engine]
+name      polars
+version   1.44.2
+pypi      polars
+channel   stable
+why       Driven through Python in sink mode. The GitHub tags carry a `py-` prefix and include release candidates, so the check reads PyPI, which only ever has the stable one.
