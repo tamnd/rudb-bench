@@ -16,6 +16,8 @@
 //! strict about the shape it expects, so a schema that moves fails loudly on the next run instead
 //! of quietly reading zeros.
 
+use std::collections::HashMap;
+use std::fmt;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
@@ -112,6 +114,13 @@ pub struct Operator {
     pub id: u64,
     /// Which pipeline ran it.
     pub pipeline: u64,
+    /// The operator its rows went into, and nothing for one that produced an answer.
+    ///
+    /// The only edge in the document. `None` for every operator of an engine that does not write
+    /// one, and `None` for every operator of a rudb older than 0.3.83, which is why the two derived
+    /// numbers below are an `Option` rather than a zero: a document with no edges in it cannot be
+    /// told from a plan of one operator unless the absence is carried.
+    pub parent: Option<u64>,
     /// `Get`, `Filter`, `Sort` and so on.
     pub kind: String,
     /// Rows it was handed.
@@ -339,6 +348,57 @@ impl Document {
         folded(one.iter().map(Vec::as_slice))
     }
 
+    /// How many rows this query moved to produce the ones it returned.
+    ///
+    /// `None` when there are no edges to walk, which is an engine that writes no breakdown at all
+    /// and a rudb older than 0.3.83. A plan of one operator has edges and no intermediates, so the
+    /// two cases are told apart by the operator count rather than by the sum coming out at zero.
+    #[must_use]
+    pub fn flow(&self) -> Option<Flow> {
+        if self.operators.len() > 1 && self.operators.iter().all(|o| o.parent.is_none()) {
+            return None;
+        }
+        let (intermediate, result) = self
+            .operators
+            .iter()
+            .fold((0, 0), |(intermediate, result), o| match o.parent {
+                Some(_) => (intermediate + o.rows_out, result),
+                None => (intermediate, result + o.rows_out),
+            });
+        Some(Flow { intermediate, result })
+    }
+
+    /// Every operator whose input disagrees with what the operators under it produced.
+    ///
+    /// Empty is the answer for a document with no edges, for the same reason [`Document::flow`] is
+    /// `None` there: a check nobody can run is not a check that passed, but it is also not a fault,
+    /// and the engines this harness drives as black boxes would otherwise all fail it.
+    ///
+    /// An operator with nothing under it is skipped rather than compared against zero. A scan is
+    /// handed nothing and reads a file, and so is the read of a materialised `WITH`, and neither is
+    /// a hole in the accounting.
+    #[must_use]
+    pub fn miscounts(&self) -> Vec<Miscount> {
+        let mut below: HashMap<u64, u64> = HashMap::new();
+        for operator in &self.operators {
+            if let Some(parent) = operator.parent {
+                *below.entry(parent).or_default() += operator.rows_out;
+            }
+        }
+        self.operators
+            .iter()
+            .filter_map(|operator| {
+                let from_below = *below.get(&operator.id)?;
+                (from_below != operator.rows_in).then(|| Miscount {
+                    id: operator.id,
+                    kind: operator.kind.clone(),
+                    rows_in: operator.rows_in,
+                    from_below,
+                })
+            })
+            .collect()
+    }
+
     /// The accounted CPU against the measured CPU, and against the process, where there is one.
     #[must_use]
     pub fn accounting(&self, process: Option<Duration>) -> Accounting {
@@ -362,6 +422,8 @@ impl Document {
             pipelines: self.pipelines.len(),
             operators: self.operators.len(),
             reference_impls: self.reference_impls(),
+            flow: self.flow(),
+            miscounted: self.miscounts().len(),
         }
     }
 }
@@ -405,6 +467,16 @@ pub struct Internal {
     /// engine exists to replace. At F0 it is every operator in every query, and writing it down is
     /// how the row a milestone later is read against this one.
     pub reference_impls: usize,
+    /// How many rows the query moved to produce the ones it returned.
+    ///
+    /// `None` for a record written by an engine with no breakdown, and for one written before rudb
+    /// put the edges in its document. See [`Flow`].
+    pub flow: Option<Flow>,
+    /// How many operators' inputs disagreed with what the operators under them produced.
+    ///
+    /// Not a duration and not a rate. It is a count of faults, it is meant to be zero, and it being
+    /// anything else is what stops the rest of this record from being published. See [`Miscount`].
+    pub miscounted: usize,
 }
 
 impl Pipeline {
@@ -420,6 +492,7 @@ impl Operator {
         Self {
             id: count(json, "id"),
             pipeline: count(json, "pipeline"),
+            parent: json.at("parent").and_then(Json::count),
             kind: json.at("kind").and_then(Json::text).unwrap_or_default(),
             rows_in: count(json, "rows_in"),
             rows_out: count(json, "rows_out"),
@@ -427,6 +500,79 @@ impl Operator {
             cpu: nanos(json, "cpu_ns"),
             reference_impl: json.at("reference_impl").and_then(Json::flag).unwrap_or(false),
         }
+    }
+}
+
+/// How many rows a query moved to produce the ones it returned.
+///
+/// The number every join order paper reports and almost no engine prints. Two plans that answer the
+/// same question in the same time are not the same plan when one of them built a hundred million
+/// intermediate rows and the other built two, because the first one is a plan that got lucky on the
+/// machine it was measured on and will not be lucky on a smaller one. A wall clock cannot tell them
+/// apart and this can.
+///
+/// It is also the one measure of an optimizer that does not move when the kernels get faster. A
+/// suite that gets thirty percent quicker because the hash table was rewritten reports thirty
+/// percent everywhere, and the ratio here does not move at all, which is the answer: nothing about
+/// the plans changed. When this falls, the plans changed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Flow {
+    /// Rows produced by every operator whose rows went into another one.
+    ///
+    /// The sum of the intermediate cardinalities. A scan that reads a hundred million rows for a
+    /// filter that keeps four is a hundred million of this, which is the point: those rows were
+    /// built, and the answer does not say so.
+    pub intermediate: u64,
+    /// Rows the query returned.
+    ///
+    /// The operators nothing reads from, added up. That is one operator for most plans and two for
+    /// a plan holding a materialised `WITH`, since a materialisation is filled and read back rather
+    /// than handed upwards and produces nothing itself.
+    pub result: u64,
+}
+
+impl Flow {
+    /// Intermediate rows per row returned.
+    ///
+    /// `None` for a query that returned nothing, because there is nothing to be a ratio of. A query
+    /// that returns no rows and built a hundred million is a real finding and the number for it is
+    /// [`Flow::intermediate`] on its own.
+    #[must_use]
+    pub fn ratio(&self) -> Option<f64> {
+        if self.result == 0 {
+            return None;
+        }
+        #[expect(clippy::cast_precision_loss, reason = "a ratio printed to one decimal place")]
+        Some(self.intermediate as f64 / self.result as f64)
+    }
+}
+
+/// One operator whose input disagrees with what its children produced.
+///
+/// An instrumentation fault rather than a result. Every row an operator was handed came out of the
+/// operators under it, so the two counts are the same rows counted at the two ends of the same
+/// handover, and a document where they differ is a document where at least one of its numbers is
+/// wrong. Which one is not knowable from here, which is exactly why this is a refusal to publish
+/// rather than a footnote: the breakdown is what the rest of this harness reasons from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Miscount {
+    /// The operator that was handed rows.
+    pub id: u64,
+    /// What it is, so the sentence names something a reader can find in an `EXPLAIN ANALYZE`.
+    pub kind: String,
+    /// What it says it was handed.
+    pub rows_in: u64,
+    /// What the operators under it say they handed it.
+    pub from_below: u64,
+}
+
+impl fmt::Display for Miscount {
+    fn fmt(&self, out: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            out,
+            "operator {} ({}) was handed {} rows and the operators under it produced {}",
+            self.id, self.kind, self.rows_in, self.from_below
+        )
     }
 }
 
@@ -1168,5 +1314,127 @@ mod tests {
         for bad in ["", "{", "{\"a\"}", "{\"a\":}", "[1,]", "{} trailing", "{\"a\":1.2.3}"] {
             assert!(Json::read(bad).is_err(), "`{bad}` read as valid json");
         }
+    }
+
+    /// One operator with a parent and its own row counts, for the two derived numbers.
+    fn linked(id: u64, parent: &str, rows_in: u64, rows_out: u64) -> String {
+        format!(
+            "{{\"id\":{id},\"pipeline\":0,\"parent\":{parent},\"kind\":\"Get\",\
+             \"rows_in\":{rows_in},\"rows_out\":{rows_out},\"wall_ns\":1,\"cpu_ns\":1,\
+             \"reference_impl\":false}}"
+        )
+    }
+
+    /// A scan of a hundred, a filter that keeps ten, an aggregate that returns one. Ten
+    /// intermediate rows per row returned, and the wall clock says nothing about that.
+    #[test]
+    fn the_rows_a_plan_built_are_counted_against_the_rows_it_returned() {
+        let text = one(
+            1000,
+            &format!(
+                "{},{},{}",
+                linked(0, "null", 10, 1),
+                linked(1, "0", 100, 10),
+                linked(2, "1", 0, 100)
+            ),
+        );
+        let document = Document::parse(&text).expect("this is the shape rudb writes");
+        let flow = document.flow().expect("the document has edges in it");
+        assert_eq!(flow.intermediate, 110, "the scan's hundred and the filter's ten");
+        assert_eq!(flow.result, 1, "the aggregate is what nothing reads from");
+        assert!((flow.ratio().expect("it returned a row") - 110.0).abs() < 1e-9);
+    }
+
+    /// A materialisation is filled and read back rather than handed upwards, so it has nothing
+    /// above it and is a second operator the answer is not read from. Its own output is zero,
+    /// which is why adding up everything nothing reads from is the right way to find the answer.
+    #[test]
+    fn a_plan_with_two_operators_nothing_reads_from_still_counts_one_answer() {
+        let text = one(
+            1000,
+            &format!(
+                "{},{},{},{}",
+                linked(0, "null", 8, 0),
+                linked(1, "0", 0, 8),
+                linked(2, "null", 8, 8),
+                linked(3, "2", 0, 8)
+            ),
+        );
+        let flow = Document::parse(&text).expect("valid").flow().expect("the document has edges");
+        assert_eq!(flow.result, 8, "the sink produced nothing and the body produced the answer");
+        assert_eq!(flow.intermediate, 16, "the definition's rows and the body's read of them");
+    }
+
+    /// A query that returned nothing has no ratio, because there is nothing to be a ratio of. The
+    /// intermediate count on its own is the finding there.
+    #[test]
+    fn a_query_that_returned_nothing_has_a_count_and_no_ratio() {
+        let text = one(1000, &format!("{},{}", linked(0, "null", 100, 0), linked(1, "0", 0, 100)));
+        let flow = Document::parse(&text).expect("valid").flow().expect("the document has edges");
+        assert_eq!(flow.intermediate, 100);
+        assert_eq!(flow.ratio(), None);
+    }
+
+    /// An engine that writes no edges, and a rudb older than the field, are the same case: the
+    /// question cannot be asked. Zero would be an answer and it would be the wrong one.
+    #[test]
+    fn a_document_with_no_edges_in_it_has_no_answer_rather_than_zero() {
+        let text = one(
+            1000,
+            &format!("{},{}", operator(0, "Get", 600, true), operator(1, "Filter", 400, false)),
+        );
+        let document = Document::parse(&text).expect("valid");
+        assert_eq!(document.flow(), None);
+        assert!(document.miscounts().is_empty(), "a check nobody can run is not a check that failed");
+    }
+
+    /// A plan of one operator has edges and no intermediates, which is a real zero rather than the
+    /// absence above, and the operator count is what tells the two apart.
+    #[test]
+    fn a_plan_of_one_operator_moved_nothing_and_that_is_an_answer() {
+        let text = one(1000, &linked(0, "null", 0, 4));
+        let flow = Document::parse(&text).expect("valid").flow().expect("one operator is a tree");
+        assert_eq!(flow.intermediate, 0);
+        assert_eq!(flow.result, 4);
+        assert_eq!(flow.ratio(), Some(0.0));
+    }
+
+    /// The cross check one level below the CPU one. Every row an operator was handed came out of
+    /// the operators under it, so a document where the two differ has a number in it that is wrong.
+    #[test]
+    fn an_operator_handed_rows_nobody_produced_is_found() {
+        let text = one(1000, &format!("{},{}", linked(0, "null", 90, 1), linked(1, "0", 0, 100)));
+        let found = Document::parse(&text).expect("valid").miscounts();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, 0);
+        assert_eq!(found[0].rows_in, 90);
+        assert_eq!(found[0].from_below, 100);
+        assert!(found[0].to_string().contains("was handed 90 rows"), "{}", found[0]);
+    }
+
+    /// An operator with two children is compared against both of them added up, which is what a
+    /// join is: the side that was gathered produces nothing onwards and the driving side produces
+    /// every row the join was handed.
+    #[test]
+    fn an_operator_with_two_inputs_is_compared_against_both_of_them() {
+        let text = one(
+            1000,
+            &format!(
+                "{},{},{},{}",
+                linked(0, "null", 40, 40),
+                linked(1, "0", 20, 0),
+                linked(2, "1", 0, 20),
+                linked(3, "0", 0, 40)
+            ),
+        );
+        assert!(Document::parse(&text).expect("valid").miscounts().is_empty());
+    }
+
+    /// A scan is handed nothing and reads a file, and so is the read of a materialised `WITH`.
+    /// Comparing an operator with nothing under it against zero would report every one of those.
+    #[test]
+    fn an_operator_with_nothing_under_it_is_not_a_hole_in_the_accounting() {
+        let text = one(1000, &linked(0, "null", 0, 100));
+        assert!(Document::parse(&text).expect("valid").miscounts().is_empty());
     }
 }

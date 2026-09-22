@@ -27,7 +27,7 @@ use crate::data::Sample;
 use crate::engine::{Loaded, Outcome};
 use crate::measure::{Convention, Distribution, Runs};
 use crate::memory::{Cost, Peak};
-use crate::metrics::{Accounting, Classes, Internal, Spend};
+use crate::metrics::{Accounting, Classes, Flow, Internal, Spend};
 use crate::report::{Abstention, Comparison, QueryResult, SuiteResult};
 use crate::suite::find;
 
@@ -415,18 +415,20 @@ fn maybe(text: &str) -> Option<&str> {
 
 /// What the engine said about its own execution, on one line.
 ///
-/// Eleven fixed fields, in the order they are read back. Only rudb writes one, so the line is absent
-/// for every other engine rather than being eleven dashes.
+/// Fourteen fixed fields, in the order they are read back. Only rudb writes one, so the line is
+/// absent for every other engine rather than being fourteen dashes.
 ///
-/// The build and the planning are last rather than beside the numbers they belong with, because
-/// each was added after the line existed and a file written before it is a file somebody still
-/// wants to open. Appending is what keeps that true, and it costs one arm in the reader.
+/// The build, the planning and the three row counts are last rather than beside the numbers they
+/// belong with, because each was added after the line existed and a file written before it is a
+/// file somebody still wants to open. Appending is what keeps that true, and it costs the reader a
+/// default per field rather than a migration.
 fn inside(i: &Internal) -> String {
+    let dash = || "-".to_owned();
     format!(
-        "{} {} {} {} {} {} {} {} {} {} {}",
+        "{} {} {} {} {} {} {} {} {} {} {} {} {} {}",
         micros(i.accounting.accounted),
         micros(i.accounting.measured),
-        i.accounting.process.map_or_else(|| "-".to_owned(), |d| micros(d).to_string()),
+        i.accounting.process.map_or_else(dash, |d| micros(d).to_string()),
         micros(i.execute),
         micros(i.driver),
         i.peak_bytes,
@@ -434,31 +436,25 @@ fn inside(i: &Internal) -> String {
         i.operators,
         i.reference_impls,
         micros(i.accounting.build),
-        micros(i.planning)
+        micros(i.planning),
+        i.flow.map_or_else(dash, |f| f.intermediate.to_string()),
+        i.flow.map_or_else(dash, |f| f.result.to_string()),
+        i.miscounted
     )
 }
 
 /// Read that back.
+///
+/// Nine fields is the shortest file this still opens, from before the build was split out of the
+/// measured CPU, and zero is what every field added since meant at the time: the engine really did
+/// report nothing there. The rows are the exception, because zero rows and no measurement are
+/// different answers, so they are written as a dash when there is nothing and read back as nothing.
 fn uninside(text: &str) -> Result<Internal, String> {
     let parts: Vec<&str> = text.split_whitespace().collect();
-    // Nine fields is a file written before the build was split out of the measured cpu, and zero is
-    // what it meant at the time: everything the engine measured was on the right of the check. Ten
-    // is a file written before the engine put a clock on its planner, and zero is what it meant
-    // then too, because the three planning phases really did report nothing.
-    let (
-        [accounted, measured, process, execute, driver, peak, pipelines, operators, references],
-        build,
-        planning,
-    ) = match parts[..] {
-        [a, b, c, d, e, f, g, h, i] => ([a, b, c, d, e, f, g, h, i], "0", "0"),
-        [a, b, c, d, e, f, g, h, i, j] => ([a, b, c, d, e, f, g, h, i], j, "0"),
-        [a, b, c, d, e, f, g, h, i, j, k] => ([a, b, c, d, e, f, g, h, i], j, k),
-        _ => {
-            return Err(format!(
-                "an inside line needs nine, ten or eleven fields and this has `{text}`"
-            ));
-        }
-    };
+    if parts.len() < 9 {
+        return Err(format!("an inside line needs at least nine fields and this has `{text}`"));
+    }
+    let field = |at: usize| -> &str { parts.get(at).copied().unwrap_or("0") };
     let time = |field: &str| -> Result<Duration, String> {
         field
             .parse::<u64>()
@@ -468,23 +464,31 @@ fn uninside(text: &str) -> Result<Internal, String> {
     let number = |field: &str| -> Result<u64, String> {
         field.parse::<u64>().map_err(|_| format!("{field} is not a number"))
     };
+    let flow = match (maybe(field(11)), maybe(field(12))) {
+        (Some(intermediate), Some(result)) => {
+            Some(Flow { intermediate: number(intermediate)?, result: number(result)? })
+        }
+        _ => None,
+    };
     Ok(Internal {
         accounting: Accounting {
-            accounted: time(accounted)?,
-            measured: time(measured)?,
-            build: time(build)?,
-            process: match maybe(process) {
+            accounted: time(field(0))?,
+            measured: time(field(1))?,
+            build: time(field(9))?,
+            process: match maybe(field(2)) {
                 Some(field) => Some(time(field)?),
                 None => None,
             },
         },
-        execute: time(execute)?,
-        planning: time(planning)?,
-        driver: time(driver)?,
-        peak_bytes: number(peak)?,
-        pipelines: number(pipelines)? as usize,
-        operators: number(operators)? as usize,
-        reference_impls: number(references)? as usize,
+        execute: time(field(3))?,
+        planning: time(field(10))?,
+        driver: time(field(4))?,
+        peak_bytes: number(field(5))?,
+        pipelines: number(field(6))? as usize,
+        operators: number(field(7))? as usize,
+        reference_impls: number(field(8))? as usize,
+        flow,
+        miscounted: number(field(13))? as usize,
     })
 }
 
@@ -757,7 +761,7 @@ mod tests {
     use crate::engine::{Loaded, Outcome};
     use crate::measure::{Distribution, Runs};
     use crate::memory::{Cost, Peak};
-    use crate::metrics::{Accounting, Classes, Internal, Spend};
+    use crate::metrics::{Accounting, Classes, Flow, Internal, Spend};
     use crate::report::{QueryResult, SuiteResult};
     use crate::suite::{Query, find};
 
@@ -808,6 +812,8 @@ mod tests {
                 pipelines: 2,
                 operators: 4,
                 reference_impls: 4,
+                flow: Some(Flow { intermediate: 1_200_000, result: 2 }),
+                miscounted: 0,
             }),
             spend: vec![
                 Spend {

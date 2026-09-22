@@ -793,6 +793,21 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
         if let Some(why) = query.internal.as_ref().and_then(|i| i.accounting.why(&query.name)) {
             reasons.push(why);
         }
+        // The same check one level down. The CPU one asks whether the breakdown adds up to the
+        // clock, and this asks whether the breakdown adds up to itself: every row an operator was
+        // handed came out of the operators under it, so the two counts are the same rows counted at
+        // the two ends of one handover. There is no tolerance on it, because unlike two clocks
+        // these are two counts of the same thing and a count is either right or it is not.
+        let miscounted = query.internal.as_ref().map_or(0, |i| i.miscounted);
+        if miscounted > 0 {
+            reasons.push(format!(
+                "{} has {miscounted} operator{} whose input disagrees with what the operators \
+                 under {} produced, which is an instrumentation fault and not a result",
+                query.name,
+                if miscounted == 1 { "" } else { "s" },
+                if miscounted == 1 { "it" } else { "them" },
+            ));
+        }
     }
     reasons
 }

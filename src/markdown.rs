@@ -637,6 +637,10 @@ fn inside(result: &SuiteResult) -> String {
                 show(i.accounting.build),
                 i.accounting.unattributed().map_or_else(|| "not read".to_owned(), show),
                 peak_cell(&Peak::Bytes(i.peak_bytes)),
+                match i.flow.and_then(|flow| flow.ratio()) {
+                    Some(ratio) => format!("{ratio:.1}x"),
+                    None => "not read".to_owned(),
+                },
                 format!("{} of {}", i.reference_impls, i.operators),
             ])
         })
@@ -658,6 +662,7 @@ fn inside(result: &SuiteResult) -> String {
             "build",
             "outside",
             "held",
+            "moved",
             "reference",
         ],
         &rows,
@@ -679,10 +684,14 @@ fn inside(result: &SuiteResult) -> String {
          engine spent putting the tree together, which is before there is a pipeline to charge and \
          is why it is off the right hand side of the check. `outside` is the CPU the process spent \
          on everything else, which is starting, opening the data and printing the answer, and it \
-         is the reason the wall clock column and the query time column differ. `held` is what the operators \
-         reserved, which is not the resident set of the process. `reference` is how many \
-         operators ran the reference implementation of their seam, which is the slow path kept \
-         for differential testing.\n\n",
+         is the reason the wall clock column and the query time column differ. `held` is what the \
+         operators reserved, which is not the resident set of the process. `moved` is every \
+         intermediate row the plan built divided by the rows it returned, which is the one column \
+         here that does not move when the kernels get faster: a suite that gets thirty percent \
+         quicker on a rewritten hash table reports thirty percent everywhere else and nothing at \
+         all here, and when this falls it is because the plans changed. `reference` is how many \
+         operators ran the reference implementation of their seam, which is the slow path kept for \
+         differential testing.\n\n",
     );
     out
 }
