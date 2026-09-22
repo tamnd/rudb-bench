@@ -23,8 +23,8 @@
 suite     smoke
 data      no rows
 engine    rudb
-version   rudb 0.3.54
-recorded  2026-09-19
+version   rudb 0.3.85
+recorded  2026-09-22
 planned   5 of 5
 
 query     q1
