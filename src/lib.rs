@@ -39,6 +39,7 @@ pub mod memory;
 pub mod metrics;
 pub mod planning;
 pub mod plans;
+pub mod qualified;
 pub mod regress;
 pub mod report;
 pub mod saved;
