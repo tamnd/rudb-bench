@@ -458,7 +458,18 @@ every plan in smoke is the one that was written down
 every plan in tpch is the one that was written down
 ```
 
-It needs no data. A plan needs a schema to bind against and a zero row Parquet file carries its whole schema in the footer, so the tables it plans against are the empty ones in `fixtures/`, which are 36 KB for the whole of TPC-H and the smoke suite together. That is the decision that lets this be a CI job rather than a thing that needs the fifteen gigabyte corpus and therefore never runs where it was supposed to. What it costs is stated in `fixtures/README.md` and in the header of every baseline file: a pass that decides something from a row count is not exercised here the way a real run exercises it. Today that costs less than it sounds like, because rudb prints `rows unknown` on almost every node of these plans rather than an estimate, and join order is not among the nine passes it runs yet.
+It needs no data. A plan needs a schema to bind against and a zero row Parquet file carries its whole schema in the footer, so the tables it plans against are the empty ones in `fixtures/`, which are 36 KB for the whole of TPC-H and the smoke suite together. That is the decision that lets this be a CI job rather than a thing that needs the fifteen gigabyte corpus and therefore never runs where it was supposed to. What it costs is stated in `fixtures/README.md` and in the header of every baseline file: a pass that decides something from a row count is not exercised here the way a real run exercises it.
+
+That cost used to be small, because rudb printed `rows unknown` on almost every node of these plans rather than an estimate, and join order was not among the passes it ran. Join order is among them now, so there is a second tier. `rudb-bench plans --suite tpch --scale 1 --record` takes the tables from the real SF1 corpus instead of from the fixtures and writes `baselines/plans-tpch-sf1.txt`, which is where a join order change shows up as a reviewed diff. It is recorded on a machine that has the corpus rather than run in CI, for the same reason the first tier exists at all, and the two are never compared against each other: every baseline carries a `data` line naming its tier, a plan over no rows and a plan over SF1 are two different plans of the same query on purpose, and a gate that diffed them would report that as twenty two regressions.
+
+The difference between the tiers is visible on the first line of the first query. Over the fixtures the scan of `lineitem` says `0 rows exact from row count` and every estimate above it follows from that. Over SF1 it says this, and the filter above it has a zone map to work from:
+
+```
+Filter (#0.6::DATE <= 10471::DATE)::BOOLEAN  [~5790398 rows estimated from zone map]
+  TableFunction read_parquet args=['<corpus>/lineitem.parquet'::VARCHAR] #0 [...]  [6001215 rows exact from row count]
+```
+
+Twenty two of twenty two plan at SF1 with nothing refused, and twenty one of the sixty nine join nodes in that file carry a `build=` side, which is the decision that is made from row counts and is the reason this tier exists.
 
 What is in the file is the shape, and the shape is where a pass shows up. This is q1 of the smoke suite, which is `SELECT count(*)`:
 
