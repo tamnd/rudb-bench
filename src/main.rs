@@ -33,6 +33,7 @@ use rudb_bench::kernels;
 use rudb_bench::ledger;
 use rudb_bench::machine;
 use rudb_bench::planning;
+use rudb_bench::plans::Over;
 use rudb_bench::regress::{self, FACTOR, Watch};
 use rudb_bench::report::{Abstention, comparison, table};
 use rudb_bench::suite::{SUITES, Scale, Suite, queries};
@@ -1295,6 +1296,12 @@ fn generate(args: &[String]) -> ExitCode {
 /// because recording everything at once is how a plan change in the suite nobody was looking at
 /// gets committed along with the one somebody meant.
 ///
+/// `--scale <n>` takes the tables from the real corpus at that scale factor instead of from the
+/// fixtures, and reads and writes `baselines/plans-<suite>-sf<n>.txt`. That is the tier where a
+/// pass that decides something from a row count is actually exercised, join order being the one
+/// that made it due. It needs the corpus on the machine, so it is recorded where the data is rather
+/// than run in CI, and the two tiers are never compared against each other.
+///
 /// It exits non-zero on any change at all, including a query that started binding. The reasoning is
 /// in [`rudb_bench::plans::Change::fails`]: a category of plan change that only printed a warning
 /// would be the category people stop reading.
@@ -1307,6 +1314,7 @@ fn plans(args: &[String]) -> ExitCode {
     let mut wanted: Option<String> = None;
     let mut record = false;
     let mut ablate: Option<String> = None;
+    let mut scale_name: Option<String> = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -1315,6 +1323,13 @@ fn plans(args: &[String]) -> ExitCode {
                 Some(name) => wanted = Some(name.clone()),
                 None => {
                     eprintln!("rudb-bench: --suite wants a suite name after it");
+                    return ExitCode::FAILURE;
+                }
+            },
+            "--scale" => match rest.next() {
+                Some(name) => scale_name = Some(name.clone()),
+                None => {
+                    eprintln!("rudb-bench: --scale wants a scale factor after it");
                     return ExitCode::FAILURE;
                 }
             },
@@ -1327,13 +1342,20 @@ fn plans(args: &[String]) -> ExitCode {
             },
             other => {
                 eprintln!("rudb-bench: unknown argument {other}");
-                eprintln!("rudb-bench: plans [--suite s] [--record] [--ablate rule]");
+                eprintln!("rudb-bench: plans [--suite s] [--scale n] [--record] [--ablate rule]");
                 return ExitCode::FAILURE;
             }
         }
     }
     if record && ablate.is_some() {
         eprintln!("rudb-bench: --ablate compares two captures and there is nothing to record");
+        return ExitCode::FAILURE;
+    }
+    // One suite at a time for a scale, because a scale factor is a fact about one suite's generator
+    // and handing the same label to every suite that has fixtures would silently mean something
+    // different in each of them.
+    if scale_name.is_some() && wanted.is_none() {
+        eprintln!("rudb-bench: --scale takes one suite at a time, so say which with --suite");
         return ExitCode::FAILURE;
     }
     let root = rudb_bench::plans::root();
@@ -1365,6 +1387,16 @@ fn plans(args: &[String]) -> ExitCode {
         eprintln!("rudb-bench: --record takes one suite at a time, so say which with --suite");
         return ExitCode::FAILURE;
     }
+    // `None` here is the empty tier and not the suite's default scale, which is the one place this
+    // deliberately differs from `run`. A plans command with no `--scale` has always meant the
+    // fixtures, and quietly promoting it to the default corpus would make the gate need one.
+    let scale = match chosen_scale(chosen[0].name, scale_name.as_deref()) {
+        Ok(scale) => scale,
+        Err(e) => {
+            eprintln!("rudb-bench: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
 
     let scratch = match scratch() {
         Ok(at) => at,
@@ -1388,7 +1420,7 @@ fn plans(args: &[String]) -> ExitCode {
             let _ = std::fs::remove_dir_all(&scratch);
             return ExitCode::FAILURE;
         }
-        match one_suite(&root, &mut engine, suite, record, ablate.as_deref()) {
+        match one_suite(&root, &scratch, &mut engine, suite, scale, record, ablate.as_deref()) {
             Ok(false) => worst = ExitCode::FAILURE,
             Ok(true) => {}
             Err(e) => {
@@ -1413,21 +1445,30 @@ fn built() -> &'static Suite {
 /// the second one's diff is the thing somebody is about to need.
 fn one_suite(
     root: &std::path::Path,
+    scratch: &std::path::Path,
     engine: &mut dyn Engine,
     suite: &'static Suite,
+    scale: Option<&'static Scale>,
     record: bool,
     ablate: Option<&str>,
 ) -> Result<bool, String> {
     let Some(queries) = queries(suite.name) else {
         return Err(format!("the {} suite needs {}", suite.name, suite.needs));
     };
-    let tables = rudb_bench::plans::tables(root, suite)?;
+    let (tables, over) = match scale {
+        None => (rudb_bench::plans::tables(root, suite)?, Over::Empty),
+        Some(scale) => {
+            let data = rudb_bench::data::prepare(suite, scratch, None, Some(scale))
+                .map_err(|e| e.to_string())?;
+            (data.tables, Over::Scale(scale.label.to_owned()))
+        }
+    };
     let today = regress::today();
     if let Some(name) = ablate {
-        return both_ways(engine, suite, queries, &tables, &today, name);
+        return both_ways(engine, suite, queries, &tables, &over, &today, name);
     }
-    let captured = rudb_bench::plans::capture(engine, suite, queries, &tables, &today)?;
-    let at = rudb_bench::plans::path(root, suite.name);
+    let captured = rudb_bench::plans::capture(engine, suite, queries, &tables, &over, &today)?;
+    let at = rudb_bench::plans::path(root, suite.name, &over);
 
     if record {
         let text = rudb_bench::plans::render(&captured);
@@ -1437,10 +1478,11 @@ fn one_suite(
         }
         std::fs::write(&at, text).map_err(|e| format!("cannot write {}: {e}", at.display()))?;
         println!(
-            "wrote {}: {} plans, {} refused, against {}",
+            "wrote {}: {} plans, {} refused, over {}, against {}",
             at.display(),
             captured.plans.len(),
             captured.refused.len(),
+            over.label(),
             captured.version
         );
         return Ok(true);
@@ -1448,9 +1490,10 @@ fn one_suite(
 
     let text = std::fs::read_to_string(&at).map_err(|e| {
         format!(
-            "{}: {e}. Record it with `rudb-bench plans --suite {} --record`",
+            "{}: {e}. Record it with `rudb-bench plans --suite {}{} --record`",
             at.display(),
-            suite.name
+            suite.name,
+            scale.map_or_else(String::new, |s| format!(" --scale {}", s.label))
         )
     })?;
     let committed =
@@ -1477,13 +1520,14 @@ fn both_ways(
     suite: &'static Suite,
     queries: &[rudb_bench::suite::Query],
     tables: &[rudb_bench::data::Table],
+    over: &Over,
     today: &str,
     name: &str,
 ) -> Result<bool, String> {
     engine.set_rule(name, true)?;
-    let on = rudb_bench::plans::capture(engine, suite, queries, tables, today)?;
+    let on = rudb_bench::plans::capture(engine, suite, queries, tables, over, today)?;
     engine.set_rule(name, false)?;
-    let off = rudb_bench::plans::capture(engine, suite, queries, tables, today)?;
+    let off = rudb_bench::plans::capture(engine, suite, queries, tables, over, today)?;
     let changes = rudb_bench::plans::compare(&on, &off);
     print!("{}", rudb_bench::plans::ablation(suite.name, name, &changes));
     Ok(changes.is_empty())

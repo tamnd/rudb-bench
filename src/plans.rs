@@ -12,27 +12,35 @@
 //! committed. A pass that stops firing is then a failed check on the commit that did it, with the
 //! before and after printed, rather than an archaeology exercise later.
 //!
-//! # No data, on purpose
+//! # Two tiers, and they ask two different questions
 //!
-//! The baselines are captured against tables that have the right schema and no rows, out of
+//! The first tier is captured against tables that have the right schema and no rows, out of
 //! `fixtures/<suite>/`, which is 36 KB for the whole of TPC-H and the smoke suite together. That is
 //! the decision that makes this runnable in CI at all, and the box does say "diffed in CI". The
 //! alternative is a baseline that needs the real ClickBench file, which is fifteen gigabytes and is
 //! on two machines in the fleet, neither of which is a GitHub runner, so a baseline built that way
 //! would be a baseline that never runs where it is supposed to run.
 //!
-//! What it costs is stated rather than hidden. The estimates in the plan are estimates over no
+//! What that costs is stated rather than hidden. The estimates in the plan are estimates over no
 //! rows, so any pass that decides something from a row count is not being exercised the way a real
-//! run exercises it. Today that costs less than it sounds like, and the reason is measurable rather
-//! than hopeful: rudb prints `[rows unknown]` on almost every node of these plans instead of `[~0
-//! rows]`, because the statistics it has are the ones a Parquet footer carries, and join order is
-//! not among the nine passes rudb runs yet. The day it is, this file needs a second tier captured
-//! where the data is, and the header of every baseline file says which tier it was.
+//! run exercises it. That used to cost less than it sounds like, because rudb printed `[rows
+//! unknown]` on almost every node of these plans instead of `[~0 rows]` and join order was not among
+//! the passes it ran. Join order is among them now, which is what this module said would make a
+//! second tier due.
 //!
-//! What it catches today is everything that comes out of the pass list rather than out of the row
-//! counts: a predicate that stopped moving below a join, a projection that went back to reading
-//! every column, a `TopN` that turned back into a sort and a limit, a limit that stopped reaching
-//! through a projection, a subquery that stopped being flattened. That is most of what E1 builds.
+//! So the second tier is captured against the real corpus at a scale factor, with `--scale`, and it
+//! lands in `baselines/plans-<suite>-sf<n>.txt`. It is the tier where a join order change is a
+//! reviewed diff, and it is recorded on a machine that has the corpus rather than checked on every
+//! commit, because a check that needs a corpus no runner has is a check that never runs. Every
+//! baseline carries a `data` line naming its tier, and [`compare`] refuses to diff two files that
+//! do not agree on it, because a plan over no rows and a plan over SF1 are two different plans of
+//! the same query on purpose and diffing them would report that as a regression per query.
+//!
+//! What the empty tier catches on its own is everything that comes out of the pass list rather than
+//! out of the row counts: a predicate that stopped moving below a join, a projection that went back
+//! to reading every column, a `TopN` that turned back into a sort and a limit, a limit that stopped
+//! reaching through a projection, a subquery that stopped being flattened. That is most of what E1
+//! builds, and it is why the empty tier stays the one the gate runs rather than being replaced.
 //!
 //! # rudb only
 //!
@@ -60,9 +68,9 @@
 //! rudb inlines a view, so a plan holds `TableFunction read_parquet args=['/some/absolute/path']`,
 //! and where that path is depends on the checkout. A baseline holding it would differ on every
 //! machine, which is a baseline that fails for everyone and means nothing. So every table's path is
-//! replaced by `<fixture>/<file>` before the plan is written down or compared. This is the only
-//! edit made to what the engine printed, and it is made in one place, [`settle`], so that the
-//! recording side and the checking side cannot drift apart.
+//! replaced by `<fixture>/<file>`, or by `<corpus>/<file>` at the scale tier, before the plan is
+//! written down or compared. This is the only edit made to what the engine printed, and it is made
+//! in one place, [`settle`], so that the recording side and the checking side cannot drift apart.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -89,11 +97,64 @@ pub struct Refusal {
     pub why: String,
 }
 
+/// What a baseline's plans were planned against.
+///
+/// Two tiers, and they are two different questions rather than a cheap version and a good one.
+/// [`Over::Empty`] asks what comes out of the pass list, runs on a GitHub runner on every commit
+/// and cannot exercise anything that reads a row count. [`Over::Scale`] asks what the optimizer
+/// does when it knows how big the tables are, which is where join order lives, and it needs the
+/// corpus, so it runs where the corpus is and gets recorded rather than checked on every commit.
+///
+/// The tier is in the file rather than only in its name, because the two files hold plans of the
+/// same twenty two queries and the difference between them is invisible to a reader who does not
+/// already know which is which.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Over {
+    /// The zero row tables in `fixtures/<suite>`.
+    Empty,
+    /// The real corpus at a scale factor, by the label `--scale` takes.
+    Scale(String),
+}
+
+impl Over {
+    /// What the file says it was captured over.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match self {
+            Self::Empty => "no rows".to_owned(),
+            Self::Scale(at) => format!("SF{at}"),
+        }
+    }
+
+    /// What goes on the end of the baseline's file name, so the two tiers are two files.
+    #[must_use]
+    pub fn suffix(&self) -> String {
+        match self {
+            Self::Empty => String::new(),
+            Self::Scale(at) => format!("-sf{at}"),
+        }
+    }
+
+    /// The tier a `data` line names, or [`Over::Empty`] when a file has no such line.
+    ///
+    /// Absent means empty because the two baselines committed before there was a second tier were
+    /// captured that way, and a default that quietly says otherwise would relabel them.
+    #[must_use]
+    pub fn read(value: &str) -> Self {
+        match value.trim().strip_prefix("SF") {
+            Some(at) => Self::Scale(at.to_owned()),
+            None => Self::Empty,
+        }
+    }
+}
+
 /// Every plan in one suite, as one committed block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plans {
     /// The suite these are the plans of.
     pub suite: String,
+    /// What the queries were planned against.
+    pub over: Over,
     /// The engine, which is rudb and is written down anyway so the file says what it is.
     pub engine: String,
     /// The exact version, per reporting rule one.
@@ -163,6 +224,13 @@ pub enum Change {
         /// What the engine just said.
         after: String,
     },
+    /// The two sides were planned against different data, so nothing below them was compared.
+    Retiered {
+        /// What the baseline was captured over.
+        before: String,
+        /// What the capture in hand was captured over.
+        after: String,
+    },
 }
 
 impl Change {
@@ -176,6 +244,9 @@ impl Change {
             | Self::Appeared { name }
             | Self::Gone { name }
             | Self::Rerefused { name, .. } => name,
+            // Not about a query. This one is about the whole file, and the alternative to a name
+            // here is an Option every caller has to unwrap for a case that has one member.
+            Self::Retiered { .. } => "every query",
         }
     }
 
@@ -202,10 +273,14 @@ pub fn root() -> PathBuf {
     std::env::var_os("RUDB_BENCH_ROOT").map_or_else(|| PathBuf::from("."), PathBuf::from)
 }
 
-/// Where a suite's baseline lives.
+/// Where a suite's baseline lives, per tier.
+///
+/// The empty tier keeps the name it has had since there was only one tier, because renaming it
+/// would be a diff of two files with no plan change in it and would break every link that points at
+/// the old name.
 #[must_use]
-pub fn path(root: &Path, suite: &str) -> PathBuf {
-    root.join("baselines").join(format!("plans-{suite}.txt"))
+pub fn path(root: &Path, suite: &str, over: &Over) -> PathBuf {
+    root.join("baselines").join(format!("plans-{suite}{}.txt", over.suffix()))
 }
 
 /// Where a suite's empty tables live.
@@ -246,13 +321,20 @@ pub fn capture(
     suite: &'static Suite,
     queries: &[Query],
     tables: &[Table],
+    over: &Over,
     today: &str,
 ) -> Result<Plans, String> {
     // The load is the view declarations and nothing else, because rudb reads the Parquet where it
-    // lies. Its timing is thrown away rather than reported: loading no rows takes no time and a
-    // number saying so would be a measurement of an empty file.
+    // lies. Its timing is thrown away rather than reported: on the empty tier loading no rows takes
+    // no time, and on a real corpus the number would be a load time nobody asked for in a command
+    // that measures nothing.
     engine.load(tables).map_err(|e| {
-        format!("{} could not be given the empty {} tables: {e}", engine.name(), suite.name)
+        format!(
+            "{} could not be given the {} {} tables: {e}",
+            engine.name(),
+            over.label(),
+            suite.name
+        )
     })?;
     let who = engine.name().to_owned();
     let mut plans = Vec::new();
@@ -266,13 +348,14 @@ pub fn capture(
         };
         match engine.plan(sql) {
             Ok(text) => {
-                plans.push(Plan { name: query.name.to_owned(), text: settle(&text, tables) })
+                plans.push(Plan { name: query.name.to_owned(), text: settle(&text, tables, over) })
             }
             Err(why) => refused.push(Refusal { name: query.name.to_owned(), why: oneline(&why) }),
         }
     }
     let out = Plans {
         suite: suite.name.to_owned(),
+        over: over.clone(),
         engine: who,
         version: engine.version().to_owned(),
         recorded: today.to_owned(),
@@ -285,22 +368,28 @@ pub fn capture(
 
 /// Take the machine out of a plan.
 ///
-/// Two edits and no others. Every fixture path becomes `<fixture>/<file>`, because rudb inlines a
-/// view and the absolute path of the checkout would otherwise be in the baseline. And the `Seams`
-/// block at the end goes, because it is a property of the build rather than of the query and is
-/// byte identical in every query of the suite, so keeping it would put twenty one copies of one
-/// fact in the file and make registering a seam a twenty one query diff.
+/// Two edits and no others. Every table path becomes `<fixture>/<file>` or `<corpus>/<file>`,
+/// because rudb inlines a view and the absolute path of the machine would otherwise be in the
+/// baseline. Which of the two words it is follows the tier, because a file that says `<fixture>`
+/// next to a `lineitem` of six million rows is telling a reader something that is not true. And the
+/// `Seams` block at the end goes, because it is a property of the build rather than of the query
+/// and is byte identical in every query of the suite, so keeping it would put twenty one copies of
+/// one fact in the file and make registering a seam a twenty one query diff.
 ///
 /// The per node `[reference]` markers stay. Those are per node, they say what will actually run,
 /// and a diff that says every `Get` stopped being the reference implementation is a diff somebody
 /// should see exactly once.
 #[must_use]
-pub fn settle(text: &str, tables: &[Table]) -> String {
+pub fn settle(text: &str, tables: &[Table], over: &Over) -> String {
+    let where_from = match over {
+        Over::Empty => "<fixture>",
+        Over::Scale(_) => "<corpus>",
+    };
     let mut out = text.to_owned();
     for table in tables {
         let from = table.path.display().to_string();
         let file = table.path.file_name().map_or_else(String::new, |f| f.to_string_lossy().into());
-        out = out.replace(&from, &format!("<fixture>/{file}"));
+        out = out.replace(&from, &format!("{where_from}/{file}"));
     }
     let cut = out.find("\nSeams\n").unwrap_or(out.len());
     out[..cut].trim_end().to_owned()
@@ -315,9 +404,10 @@ fn oneline(why: &str) -> String {
 #[must_use]
 pub fn render(plans: &Plans) -> String {
     let mut out = String::new();
-    out.push_str(HEADER);
+    out.push_str(&header(&plans.over));
     out.push_str("\n[plans]\n");
     let _ = writeln!(out, "suite     {}", plans.suite);
+    let _ = writeln!(out, "data      {}", plans.over.label());
     let _ = writeln!(out, "engine    {}", plans.engine);
     let _ = writeln!(out, "version   {}", plans.version);
     let _ = writeln!(out, "recorded  {}", plans.recorded);
@@ -352,6 +442,9 @@ pub fn render(plans: &Plans) -> String {
 /// against half of it.
 pub fn parse(text: &str) -> Result<Plans, String> {
     let mut suite = None;
+    // Absent is the empty tier rather than an error, because the two baselines committed before
+    // there was a second tier have no such line and they are not malformed, they are the first one.
+    let mut over = Over::Empty;
     let mut engine = None;
     let mut version = None;
     let mut recorded = None;
@@ -384,6 +477,7 @@ pub fn parse(text: &str) -> Result<Plans, String> {
         let value = value.trim();
         match key {
             "suite" => suite = Some(value.to_owned()),
+            "data" => over = Over::read(value),
             "engine" => engine = Some(value.to_owned()),
             "version" => version = Some(value.to_owned()),
             "recorded" => recorded = Some(value.to_owned()),
@@ -405,6 +499,7 @@ pub fn parse(text: &str) -> Result<Plans, String> {
 
     Ok(Plans {
         suite: suite.ok_or("no suite line")?,
+        over,
         engine: engine.ok_or("no engine line")?,
         version: version.ok_or("no version line")?,
         recorded: recorded.ok_or("no recorded line")?,
@@ -418,8 +513,16 @@ pub fn parse(text: &str) -> Result<Plans, String> {
 /// The version and the date are deliberately not compared. A baseline recorded against an older
 /// rudb whose plans are all still the same is not stale, it is a baseline that held, and failing on
 /// the version would make every engine release a red build with no plan change in it.
+///
+/// The tier is compared, and it is the one difference that stops the comparison rather than adding
+/// to it. A plan over no rows and a plan over a real corpus are two different plans of the same
+/// query by design, so diffing them would print twenty two replanned queries and every one of them
+/// would be the harness comparing the wrong pair of files.
 #[must_use]
 pub fn compare(before: &Plans, after: &Plans) -> Vec<Change> {
+    if before.over != after.over {
+        return vec![Change::Retiered { before: before.over.label(), after: after.over.label() }];
+    }
     let mut changes = Vec::new();
     for plan in &after.plans {
         match (before.find(&plan.name), before.refusal(&plan.name)) {
@@ -545,12 +648,49 @@ fn body(changes: &[Change]) -> String {
             Change::Gone { name } => {
                 let _ = writeln!(out, "{name} is in the baseline and not in the suite\n");
             }
+            Change::Retiered { before, after } => {
+                let _ = writeln!(out, "these were planned against different data, so nothing was");
+                let _ = writeln!(out, "compared below this line");
+                let _ = writeln!(out, "  was  {before}");
+                let _ = writeln!(out, "  is   {after}\n");
+            }
         }
     }
     out
 }
 
-/// The sentence at the top of every baseline file.
+/// The sentence at the top of a baseline file, with the paragraph that says which tier it is.
+fn header(over: &Over) -> String {
+    let tier = match over {
+        Over::Empty => EMPTY_TIER,
+        Over::Scale(_) => SCALE_TIER,
+    };
+    format!("{HEADER}{tier}#\n{TAIL}")
+}
+
+/// The paragraph a zero row baseline carries.
+const EMPTY_TIER: &str = "\
+# Captured against the zero row tables in fixtures/<suite>, which have the schema and none of the
+# data. That is what lets this run on a GitHub runner, and what it costs is that any pass deciding
+# something from a row count is not exercised here the way a real run exercises it. rudb prints
+# `rows unknown` on almost every node below rather than an estimate, which is the same fact seen
+# from the other side.
+";
+
+/// The paragraph a baseline over a real corpus carries.
+const SCALE_TIER: &str = "\
+# Captured against the real corpus at the scale factor on the data line, so the estimates below
+# are over real row counts and the passes that read one, join order first among them, are exercised
+# here the way a run exercises them. What it costs is the other half of the same trade: the corpus
+# is not on a GitHub runner, so this file is recorded on a machine that has the data and reviewed
+# as a diff rather than checked on every commit.
+#
+# The two tiers are two files and they are never diffed against each other. A plan over no rows and
+# a plan over this corpus are two different plans of the same query on purpose, and the data line
+# is what keeps the gate from reporting that difference as twenty two regressions.
+";
+
+/// The first half of the header, above the paragraph that differs per tier.
 const HEADER: &str = "\
 # Committed plan baselines, read by the plan gate.
 #
@@ -559,12 +699,10 @@ const HEADER: &str = "\
 # asks for this so that a plan change is a reviewed diff rather than something noticed three weeks
 # later in a performance run.
 #
-# Captured against the zero row tables in fixtures/<suite>, which have the schema and none of the
-# data. That is what lets this run on a GitHub runner, and what it costs is that any pass deciding
-# something from a row count is not exercised here the way a real run exercises it. rudb prints
-# `rows unknown` on almost every node below rather than an estimate, which is the same fact seen
-# from the other side.
-#
+";
+
+/// The second half of the header, below the paragraph that differs per tier.
+const TAIL: &str = "\
 # Nothing here is a measurement and no number in it is a time. A plan is a shape, and the only
 # question this file asks is whether it is still the same shape.
 #
@@ -579,7 +717,9 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use super::{Change, Plan, Plans, Refusal, ablation, capture, compare, parse, render, settle};
+    use super::{
+        Change, Over, Plan, Plans, Refusal, ablation, capture, compare, parse, path, render, settle,
+    };
     use crate::data::Table;
     use crate::engine::{Ability, BenchError, Engine, Loaded, Ran};
     use crate::suite::{Suite, find};
@@ -647,7 +787,8 @@ mod tests {
         let queries = crate::suite::SMOKE;
         let mut fake = Fake { who: "rudb", answers: Vec::new(), asked: std::cell::Cell::new(0) };
         let tables = [table("smoke", "/tmp/smoke.parquet")];
-        let out = capture(&mut fake, suite, queries, &tables, "2026-09-18").expect("a capture");
+        let out = capture(&mut fake, suite, queries, &tables, &Over::Empty, "2026-09-18")
+            .expect("a capture");
         let given = queries.iter().filter(|q| q.sql_for("rudb").is_some()).count();
         assert_eq!(out.plans.len(), given);
         assert!(out.refused.is_empty());
@@ -663,7 +804,8 @@ mod tests {
             answers: vec![Err("Binder Error:\n  no such column".to_owned())],
             asked: std::cell::Cell::new(0),
         };
-        let out = capture(&mut fake, suite, crate::suite::SMOKE, &[], "2026-09-18").expect("ok");
+        let out = capture(&mut fake, suite, crate::suite::SMOKE, &[], &Over::Empty, "2026-09-18")
+            .expect("ok");
         assert_eq!(out.refused.len(), 1);
         // One line, because a refusal is a line in a committed file.
         assert_eq!(out.refused[0].why, "Binder Error: no such column");
@@ -672,6 +814,7 @@ mod tests {
     fn plans(plans: Vec<Plan>, refused: Vec<Refusal>) -> Plans {
         Plans {
             suite: "tpch".to_owned(),
+            over: Over::Empty,
             engine: "rudb".to_owned(),
             version: "rudb 0.3.31".to_owned(),
             recorded: "2026-09-18".to_owned(),
@@ -691,7 +834,15 @@ mod tests {
         let tables = [table("nation", "/home/someone/rudb-bench/fixtures/tpch/nation.parquet")];
         let text =
             "Get read_parquet args=['/home/someone/rudb-bench/fixtures/tpch/nation.parquet']";
-        assert_eq!(settle(text, &tables), "Get read_parquet args=['<fixture>/nation.parquet']");
+        assert_eq!(
+            settle(text, &tables, &Over::Empty),
+            "Get read_parquet args=['<fixture>/nation.parquet']"
+        );
+        // The same edit and a word that is true at the other tier.
+        assert_eq!(
+            settle(text, &tables, &Over::Scale("1".to_owned())),
+            "Get read_parquet args=['<corpus>/nation.parquet']"
+        );
     }
 
     /// One fact about the build, repeated once per query, would make registering a seam look like
@@ -699,7 +850,7 @@ mod tests {
     #[test]
     fn the_seam_block_is_not_part_of_the_plan() {
         let text = "Get x\n\nPipelines\n  pipeline 0\n\nSeams\n  26 seams have nothing registered";
-        assert_eq!(settle(text, &[]), "Get x\n\nPipelines\n  pipeline 0");
+        assert_eq!(settle(text, &[], &Over::Empty), "Get x\n\nPipelines\n  pipeline 0");
     }
 
     #[test]
@@ -839,5 +990,82 @@ mod tests {
     fn a_file_this_cannot_read_says_so_rather_than_comparing_against_half_of_it() {
         assert!(parse("[plans]\nsuite tpch\nnonsense here\n").is_err());
         assert!(parse("[plans]\nengine rudb\n").is_err());
+    }
+
+    /// The two tiers are two files, because they hold the plans of the same twenty two queries and
+    /// one name for both would mean recording one of them deletes the other.
+    #[test]
+    fn the_two_tiers_land_in_two_files() {
+        let root = PathBuf::from("/repo");
+        assert_eq!(
+            path(&root, "tpch", &Over::Empty),
+            PathBuf::from("/repo/baselines/plans-tpch.txt")
+        );
+        assert_eq!(
+            path(&root, "tpch", &Over::Scale("1".to_owned())),
+            PathBuf::from("/repo/baselines/plans-tpch-sf1.txt")
+        );
+    }
+
+    /// The two baselines that were committed before there was a second tier have no data line, and
+    /// they were captured over no rows. A default that said anything else would relabel them.
+    #[test]
+    fn a_baseline_with_no_data_line_is_the_empty_tier() {
+        let text = "[plans]\nsuite tpch\nengine rudb\nversion rudb 0.3.31\nrecorded 2026-09-18\n";
+        assert_eq!(parse(text).expect("a baseline").over, Over::Empty);
+    }
+
+    #[test]
+    fn the_tier_survives_being_written_down_and_read_back() {
+        let mut one = plans(vec![plan("q1", "Get x")], vec![]);
+        one.over = Over::Scale("1".to_owned());
+        let back = parse(&render(&one)).expect("what render wrote");
+        assert_eq!(back.over, Over::Scale("1".to_owned()));
+        assert_eq!(back, one);
+    }
+
+    /// The guard that makes two tiers safe. Without it, checking an SF1 capture against the empty
+    /// baseline would print every query as replanned, which is the harness comparing the wrong pair
+    /// of files and saying the optimizer broke.
+    #[test]
+    fn two_tiers_are_never_diffed_against_each_other() {
+        let before = plans(vec![plan("q1", "Get x")], vec![]);
+        let mut after = plans(vec![plan("q1", "Filter y\n  Get x")], vec![]);
+        after.over = Over::Scale("1".to_owned());
+        let changes = compare(&before, &after);
+        assert_eq!(
+            changes,
+            vec![Change::Retiered { before: "no rows".to_owned(), after: "SF1".to_owned() }]
+        );
+    }
+
+    /// The header is the only place a reader of the committed file learns which tier it is, short
+    /// of the file name, so the two headers have to differ in the paragraph that says it.
+    #[test]
+    fn the_header_says_which_tier_the_file_is() {
+        let mut one = plans(vec![plan("q1", "Get x")], vec![]);
+        let empty = render(&one);
+        one.over = Over::Scale("1".to_owned());
+        let scaled = render(&one);
+        assert!(empty.contains("# Captured against the zero row tables"));
+        assert!(scaled.contains("# Captured against the real corpus"));
+        assert!(empty.contains("\ndata      no rows\n"));
+        assert!(scaled.contains("\ndata      SF1\n"));
+    }
+
+    /// The committed baselines are what `--record` would write today, header and all.
+    ///
+    /// Reading them back and writing them out again has to produce the same bytes, because a file
+    /// whose header no longer matches the one this module writes turns the next recording into a
+    /// diff of prose next to a diff of plans, and that is the diff nobody reads carefully.
+    #[test]
+    fn the_committed_baselines_are_what_this_writes_today() {
+        for name in ["smoke", "tpch"] {
+            let at = path(&super::root(), name, &Over::Empty);
+            let text = std::fs::read_to_string(&at).expect("a committed baseline");
+            let back = parse(&text).unwrap_or_else(|e| panic!("{}: {e}", at.display()));
+            assert_eq!(back.over, Over::Empty);
+            assert_eq!(render(&back), text, "{} is not what render writes", at.display());
+        }
     }
 }
