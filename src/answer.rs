@@ -40,6 +40,25 @@
 //! compared as text, exactly, after the quotes and the padding come off. That is stricter than what
 //! it replaced rather than looser: a title that came back wrong used to be invisible unless it
 //! happened to contain a different set of digits, and now it is a disagreement.
+//!
+//! ## The three steps, in that order and only in that order
+//!
+//! `spec/bench/tpc-h/04-the-answers.md` section 4.4 sets the rule, and it is a ladder rather than a
+//! choice. Compare the rows in the order both engines produced them. If that fails, sort both and
+//! compare as multisets, which is a tie broken two ways and is recorded as [`Agreement::Tied`]
+//! rather than as a failure. If that fails, look at the boundary: two engines that cut a tie at a
+//! `LIMIT` kept different rows, and what can still be checked is the part the tie did not reach.
+//! Anything else is a failure.
+//!
+//! The order is the whole point. Sorting first would hide a wrong sort, which is a real class of
+//! bug and one rudb has a `TopN` operator for, so the ordered comparison has to be tried and has to
+//! be tried first. Going straight to the boundary would call a wrong answer a tie.
+//!
+//! Row by row, and not the flat multiset of fields it used to be. Two engines that returned the
+//! same values arranged into different rows have not returned the same answer, and under the flat
+//! comparison they did.
+
+use std::cmp::Ordering;
 
 /// How far apart two numbers may be and still be the same number.
 ///
@@ -49,25 +68,62 @@
 /// than a checker with a tolerance in it.
 const TOLERANCE: f64 = 1e-9;
 
+/// How two answers agreed, when they agreed.
+///
+/// Three states rather than a boolean, because the three are not the same claim. The first says the
+/// engines produced the same rows in the same order, which is everything the query asked for. The
+/// second says they produced the same rows and put them in a different order, which an `ORDER BY`
+/// that does not totally order the rows permits and which nobody should be failed for. The third
+/// says a `LIMIT` cut a tie and the engines kept different halves of it, so what was checked is the
+/// part before the cut and how many rows came back, and a reader is owed that sentence rather than
+/// a tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Agreement {
+    /// Row for row, in the order both of them produced them.
+    Ordered,
+    /// The same rows in a different order.
+    Tied,
+    /// The rows the tie did not reach, and the count, with a `LIMIT` cutting the rest.
+    Boundary,
+}
+
+impl Agreement {
+    /// The word a report prints for it.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Ordered => "ordered",
+            Self::Tied => "tied",
+            Self::Boundary => "boundary",
+        }
+    }
+}
+
 /// Whether two answers say the same thing.
+///
+/// The first two steps of the ladder. The third needs the same query run again without its `LIMIT`,
+/// which is a thing only the harness can do, so it is [`boundary`] and the caller reaches for it
+/// when this says no.
+#[must_use]
+pub fn agreement(a: &str, b: &str) -> Option<Agreement> {
+    let (mut left, mut right) = (table(a), table(b));
+    // Different row counts is not a tie about anything. Two engines that cut the same `LIMIT` at
+    // the same place return the same number of rows whichever rows they chose.
+    if left.len() != right.len() {
+        return None;
+    }
+    if left.iter().zip(&right).all(|(x, y)| alike(x, y)) {
+        return Some(Agreement::Ordered);
+    }
+    left.sort_by(|x, y| order(x, y));
+    right.sort_by(|x, y| order(x, y));
+    left.iter().zip(&right).all(|(x, y)| alike(x, y)).then_some(Agreement::Tied)
+}
+
+/// Whether two answers say the same thing, by any of the rules that count as saying it.
 #[must_use]
 pub fn same(a: &str, b: &str) -> bool {
-    let (mut left, mut right) = (printed(a), printed(b));
-    if left.len() != right.len() {
-        return false;
-    }
-    left.sort_by(|x, y| f64::total_cmp(&x.0, &y.0));
-    right.sort_by(|x, y| f64::total_cmp(&x.0, &y.0));
-    if !left.iter().zip(&right).all(|(x, y)| close(*x, *y)) {
-        return false;
-    }
-    // The text fields too, exactly. Sorted for the same reason the numbers are: two engines that
-    // grouped the same data may hand the groups back in different orders and a query with no
-    // `ORDER BY` did not ask for one.
-    let (mut left, mut right) = (words(a), words(b));
-    left.sort();
-    right.sort();
-    left == right
+    agreement(a, b).is_some()
 }
 
 /// Two numbers that are the same number, to the last place the shorter of them was printed to.
@@ -153,13 +209,16 @@ fn body(text: &str) -> &str {
     text
 }
 
-/// Every field of every row, with the quoting and the padding taken off.
+/// Every row of an answer, as its fields, with the quoting and the padding taken off.
 ///
 /// Three shapes of output reach this. CSV from the engines asked for it, which needs a split that
 /// knows a comma inside quotes is not a separator. A bordered table from the one engine that draws
 /// one, whose rows are cut by pipes and whose borders carry nothing. And a single column of values
 /// with no separator at all, where the line is the field.
-fn cells(text: &str) -> Vec<String> {
+///
+/// Empty fields go, which is one engine printing a trailing separator and another not, and a row
+/// left with nothing in it goes with them.
+fn table(text: &str) -> Vec<Vec<String>> {
     let mut out = Vec::new();
     for line in body(text).lines() {
         let trimmed = line.trim();
@@ -170,14 +229,61 @@ fn cells(text: &str) -> Vec<String> {
         if trimmed.starts_with('+') && trimmed.chars().all(|c| c == '+' || c == '-') {
             continue;
         }
-        if trimmed.starts_with('|') {
-            out.extend(trimmed.trim_matches('|').split('|').map(tidy));
-            continue;
+        let mut fields: Vec<String> = if trimmed.starts_with('|') {
+            trimmed.trim_matches('|').split('|').map(tidy).collect()
+        } else {
+            row(trimmed)
+        };
+        fields.retain(|field| !field.is_empty());
+        if !fields.is_empty() {
+            out.push(fields);
         }
-        out.extend(row(trimmed));
     }
-    out.retain(|cell| !cell.is_empty());
     out
+}
+
+/// Every field of every row, in the order they appear.
+fn cells(text: &str) -> Vec<String> {
+    table(text).into_iter().flatten().collect()
+}
+
+/// Whether two fields say the same thing, which is by value when both are numbers and exactly when
+/// neither is.
+///
+/// An engine that printed a number where another printed a word disagrees whatever the two say. The
+/// one case that reaches this is a null rendered as a word by one engine and as nothing by the
+/// other, and the nothing is already gone by the time anything gets here, so the rows are a
+/// different width and never reach the field comparison at all.
+fn matches(a: &str, b: &str) -> bool {
+    match (one(a), one(b)) {
+        (Some(x), Some(y)) => close(x, y),
+        (None, None) => a == b,
+        _ => false,
+    }
+}
+
+/// Whether two rows say the same thing, field for field.
+fn alike(a: &[String], b: &[String]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| matches(x, y))
+}
+
+/// A total order over rows, by every column in turn, which is what the multiset step sorts by.
+///
+/// Numbers before words at the same position, and numbers by value rather than by their text, so
+/// that `6.8e6` and `6800000` land next to each other rather than a page apart.
+fn order(a: &[String], b: &[String]) -> Ordering {
+    for (x, y) in a.iter().zip(b) {
+        let by = match (one(x), one(y)) {
+            (Some(p), Some(q)) => f64::total_cmp(&p.0, &q.0),
+            (None, None) => x.cmp(y),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+        };
+        if by != Ordering::Equal {
+            return by;
+        }
+    }
+    a.len().cmp(&b.len())
 }
 
 /// One CSV row, split on the commas that are not inside quotes.
@@ -306,6 +412,158 @@ pub fn scan(text: &str) -> Vec<(f64, Option<u32>)> {
     found
 }
 
+/// What a query asked for at the end, which is what decides whether a tie can change the rows.
+///
+/// Read out of the SQL rather than configured per query, because the suites are somebody else's
+/// query sets and a list of which of their queries have a `LIMIT` is a list that goes stale on the
+/// day they change one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Cut {
+    /// How many expressions the `ORDER BY` names, which is how many leading fields of a row are the
+    /// sort key.
+    ///
+    /// Zero when there is no `ORDER BY`, and a query with no `ORDER BY` has no boundary: it did not
+    /// ask for an order, so there is nothing for a tie to be a tie in.
+    pub keys: usize,
+    /// How many rows the `LIMIT` asked for, when it asked for any.
+    pub limit: Option<usize>,
+}
+
+/// The `ORDER BY` width and the `LIMIT` of a statement.
+///
+/// Only the outermost ones. An `ORDER BY` inside a window frame or a subquery is inside brackets,
+/// so counting bracket depth is enough to tell the query's own from everything that looks like it,
+/// and both of the suites here put theirs at the end of the statement where this expects it.
+#[must_use]
+pub fn cut(sql: &str) -> Cut {
+    let lower = sql.to_lowercase();
+    let text: Vec<char> = lower.chars().collect();
+    let mut depth = 0i32;
+    let mut order_at = None;
+    let mut limit_at = None;
+    let mut at = 0;
+    while at < text.len() {
+        match text[at] {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ if depth == 0 => {
+                if word_at(&text, at, "order") && after(&text, at + 5, "by").is_some() {
+                    order_at = after(&text, at + 5, "by");
+                    limit_at = None;
+                } else if word_at(&text, at, "limit") {
+                    limit_at = Some(at + 5);
+                }
+            }
+            _ => {}
+        }
+        at += 1;
+    }
+    let keys = order_at.map_or(0, |from| {
+        let to = limit_at.map_or(text.len(), |limit| limit.saturating_sub(5));
+        1 + commas(&text[from..to.max(from)])
+    });
+    Cut { keys, limit: limit_at.and_then(|from| count(&text[from..])) }
+}
+
+/// Whether the word `want` starts at `at` and is a word rather than part of one.
+fn word_at(text: &[char], at: usize, want: &str) -> bool {
+    if at > 0 && (text[at - 1].is_alphanumeric() || text[at - 1] == '_') {
+        return false;
+    }
+    let end = at + want.len();
+    if end > text.len() || !text[at..end].iter().copied().eq(want.chars()) {
+        return false;
+    }
+    text.get(end).is_none_or(|&c| !c.is_alphanumeric() && c != '_')
+}
+
+/// Where the text after `want` starts, when `want` is the next word after `at`.
+fn after(text: &[char], at: usize, want: &str) -> Option<usize> {
+    let start = at + text[at.min(text.len())..].iter().take_while(|c| c.is_whitespace()).count();
+    word_at(text, start, want).then_some(start + want.len())
+}
+
+/// How many commas the text holds outside brackets, which is one less than the number of
+/// expressions in a list.
+fn commas(text: &[char]) -> usize {
+    let mut depth = 0i32;
+    let mut found = 0;
+    for &c in text {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => found += 1,
+            _ => {}
+        }
+    }
+    found
+}
+
+/// The first whole number in the text, which is what follows a `LIMIT`.
+fn count(text: &[char]) -> Option<usize> {
+    let digits: String =
+        text.iter().skip_while(|c| c.is_whitespace()).take_while(|c| c.is_ascii_digit()).collect();
+    digits.parse().ok()
+}
+
+/// The third step, which needs the same two queries run again without their `LIMIT`.
+///
+/// Only reached when [`agreement`] has already said no, which is what makes it affordable: running
+/// a TPC-H query at SF100 without its `LIMIT` is expensive and it should never happen.
+///
+/// The question it asks is whether both engines were forced to choose. Take the sort key of the
+/// last row each of them returned. If the two keys differ, the engines stopped at different values
+/// and that is a wrong answer rather than a tie. If they agree, count how many rows of each
+/// engine's unlimited result carry that key: when more of them carry it than there was room for
+/// under the `LIMIT`, that engine had more candidates than places and picked. Both having picked is
+/// what a boundary tie is.
+///
+/// What is then checked is what the tie did not touch: the rows whose key is not the boundary key,
+/// as a multiset, and the number of rows that came back. That is the deterministic part of the
+/// answer, and it is the whole answer for every query where the boundary is not tied.
+#[must_use]
+pub fn boundary(a: &str, b: &str, whole_a: &str, whole_b: &str, cut: Cut) -> Option<Agreement> {
+    let limit = cut.limit?;
+    if cut.keys == 0 {
+        return None;
+    }
+    let (left, right) = (table(a), table(b));
+    if left.len() != right.len() || left.is_empty() {
+        return None;
+    }
+    let (edge_left, edge_right) = (key(left.last()?, cut.keys), key(right.last()?, cut.keys));
+    if !alike(&edge_left, &edge_right) {
+        return None;
+    }
+    // The places the tie had to fill, which is the `LIMIT` less the rows that got in on their own.
+    let settled = |rows: &[Vec<String>], edge: &[String]| -> Vec<Vec<String>> {
+        rows.iter().filter(|row| !alike(&key(row, cut.keys), edge)).cloned().collect()
+    };
+    let (before_left, before_right) = (settled(&left, &edge_left), settled(&right, &edge_right));
+    let room = limit.saturating_sub(before_left.len());
+    if sharing(whole_a, &edge_left, cut.keys) <= room
+        || sharing(whole_b, &edge_right, cut.keys) <= room
+    {
+        return None;
+    }
+    let (mut before_left, mut before_right) = (before_left, before_right);
+    before_left.sort_by(|x, y| order(x, y));
+    before_right.sort_by(|x, y| order(x, y));
+    let settled_agrees = before_left.len() == before_right.len()
+        && before_left.iter().zip(&before_right).all(|(x, y)| alike(x, y));
+    settled_agrees.then_some(Agreement::Boundary)
+}
+
+/// The leading `keys` fields of a row, which is its sort key.
+fn key(row: &[String], keys: usize) -> Vec<String> {
+    row.iter().take(keys).cloned().collect()
+}
+
+/// How many rows of an unlimited answer carry this sort key.
+fn sharing(whole: &str, edge: &[String], keys: usize) -> usize {
+    table(whole).iter().filter(|row| alike(&key(row, keys), edge)).count()
+}
+
 /// Which engines disagreed with the first one, given what each of them answered.
 ///
 /// The first is the reference rather than a vote, because a majority of three engines agreeing is
@@ -323,11 +581,28 @@ pub fn disagreements(answers: &[(String, String)]) -> Vec<String> {
     let Some((reference, expected)) = answers.first() else { return Vec::new() };
     let mut out = Vec::new();
     for (engine, got) in answers.iter().skip(1) {
-        if !same(expected, got) {
+        if agreement(expected, got).is_none() {
             out.push(format!("{engine} does not agree with {reference}: {}", how(expected, got)));
         }
     }
     out
+}
+
+/// Which engines agreed with the first one only after both answers were sorted.
+///
+/// Recorded rather than passed over. A query whose `ORDER BY` does not totally order its rows was
+/// checked less thoroughly than one that does, and a report that ticks both the same way is a
+/// report claiming a check it did not make. It is also the sentence that says which queries the
+/// suite would want a tiebreaking column on.
+#[must_use]
+pub fn ties(answers: &[(String, String)]) -> Vec<String> {
+    let Some((_, expected)) = answers.first() else { return Vec::new() };
+    answers
+        .iter()
+        .skip(1)
+        .filter(|(_, got)| agreement(expected, got) == Some(Agreement::Tied))
+        .map(|(engine, _)| engine.clone())
+        .collect()
 }
 
 /// Which half of an answer the disagreement is in, for the sentence above.
@@ -353,7 +628,112 @@ fn how(expected: &str, got: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{disagreements, numbers, same, scan, words};
+    use super::{
+        Agreement, Cut, agreement, boundary, cut, disagreements, numbers, same, scan, ties, words,
+    };
+
+    #[test]
+    fn two_engines_that_produced_the_same_rows_in_the_same_order_agree_outright() {
+        assert_eq!(agreement("a,1\nb,2", "a,1\nb,2"), Some(Agreement::Ordered));
+    }
+
+    /// The step that exists because sorting first would hide a wrong sort, which is a real bug in a
+    /// `TopN` operator and not a hypothetical one.
+    #[test]
+    fn the_same_rows_in_a_different_order_are_a_tie_and_not_an_agreement_outright() {
+        assert_eq!(agreement("a,1\nb,2", "b,2\na,1"), Some(Agreement::Tied));
+        assert_eq!(ties(&engines("a,1\nb,2", "b,2\na,1")), vec!["rudb".to_owned()]);
+        assert!(ties(&engines("a,1\nb,2", "a,1\nb,2")).is_empty(), "an ordered match is not a tie");
+    }
+
+    /// Two engines that returned the same values arranged into different rows have not returned the
+    /// same answer, and under the flat comparison this replaced they did.
+    #[test]
+    fn the_same_values_in_different_rows_is_a_disagreement() {
+        assert_eq!(agreement("a,1\nb,2", "a,2\nb,1"), None);
+    }
+
+    #[test]
+    fn a_word_where_another_engine_printed_a_number_is_a_disagreement() {
+        assert_eq!(agreement("a,1", "a,x"), None);
+    }
+
+    #[test]
+    fn the_order_by_width_and_the_limit_come_out_of_the_query() {
+        assert_eq!(cut("SELECT 1"), Cut { keys: 0, limit: None });
+        assert_eq!(cut("SELECT x FROM t ORDER BY x LIMIT 10"), Cut { keys: 1, limit: Some(10) });
+        assert_eq!(
+            cut("SELECT x FROM t ORDER BY a, b DESC, c LIMIT 100"),
+            Cut { keys: 3, limit: Some(100) }
+        );
+        // The commas that belong to a function call are not the commas that separate the keys.
+        assert_eq!(
+            cut("SELECT x FROM t ORDER BY coalesce(a, b), c LIMIT 5"),
+            Cut { keys: 2, limit: Some(5) }
+        );
+    }
+
+    #[test]
+    fn an_order_by_inside_brackets_is_not_the_query_s_own() {
+        // A window frame carries one and a subquery carries one, and neither of them decides what
+        // the rows that come back are ordered by.
+        assert_eq!(
+            cut("SELECT row_number() OVER (ORDER BY a) FROM t LIMIT 3"),
+            Cut { keys: 0, limit: Some(3) }
+        );
+        assert_eq!(
+            cut("SELECT * FROM (SELECT x FROM t ORDER BY x, y) ORDER BY z LIMIT 3"),
+            Cut { keys: 1, limit: Some(3) }
+        );
+    }
+
+    /// Q2, Q3, Q10, Q18 and Q21 of TPC-H in miniature. Two engines order by one column, limit to
+    /// three, and the value at the cut is held by four rows, so each of them keeps two of the four
+    /// and they do not keep the same two.
+    #[test]
+    fn a_limit_that_cut_a_tie_is_checked_on_the_part_the_tie_did_not_reach() {
+        let asked = Cut { keys: 1, limit: Some(3) };
+        let duckdb = "9,a\n5,b\n5,c";
+        let rudb = "9,a\n5,d\n5,b";
+        let whole = "9,a\n5,b\n5,c\n5,d\n5,e\n1,f";
+        assert_eq!(agreement(duckdb, rudb), None, "the rows differ and the sorted rows differ");
+        assert_eq!(boundary(duckdb, rudb, whole, whole, asked), Some(Agreement::Boundary));
+    }
+
+    #[test]
+    fn a_boundary_the_engines_stopped_at_different_values_of_is_a_wrong_answer() {
+        let asked = Cut { keys: 1, limit: Some(3) };
+        let whole = "9,a\n5,b\n5,c\n5,d\n1,f";
+        assert_eq!(boundary("9,a\n5,b\n5,c", "9,a\n5,b\n1,f", whole, whole, asked), None);
+    }
+
+    #[test]
+    fn a_boundary_that_had_room_for_every_row_holding_it_is_not_a_tie() {
+        // Three rows carry the cut value and there are three places for them, so neither engine
+        // chose anything and a difference here is a difference about the rows.
+        let asked = Cut { keys: 1, limit: Some(4) };
+        let whole = "9,a\n5,b\n5,c\n5,d\n1,f";
+        assert_eq!(boundary("9,a\n5,b\n5,c\n5,d", "9,a\n5,d\n5,c\n5,e", whole, whole, asked), None);
+    }
+
+    #[test]
+    fn a_difference_before_the_boundary_is_not_excused_by_the_boundary() {
+        let asked = Cut { keys: 1, limit: Some(3) };
+        let whole = "9,a\n5,b\n5,c\n5,d\n5,e";
+        // The nine is not tied with anything and the two engines returned different nines.
+        assert_eq!(boundary("9,a\n5,b\n5,c", "9,z\n5,b\n5,d", whole, whole, asked), None);
+    }
+
+    #[test]
+    fn a_query_with_no_limit_and_no_order_by_has_no_boundary_to_check() {
+        assert_eq!(boundary("a,1", "a,2", "a,1", "a,2", Cut { keys: 1, limit: None }), None);
+        assert_eq!(boundary("a,1", "a,2", "a,1", "a,2", Cut { keys: 0, limit: Some(1) }), None);
+    }
+
+    /// Two answers, as the first engine and the second gave them.
+    fn engines(first: &str, second: &str) -> Vec<(String, String)> {
+        vec![("duckdb".to_owned(), first.to_owned()), ("rudb".to_owned(), second.to_owned())]
+    }
 
     #[test]
     fn a_csv_row_is_its_fields_and_not_one_long_number() {

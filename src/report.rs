@@ -1321,6 +1321,30 @@ impl Comparison {
         out
     }
 
+    /// The queries where the engines agreed only after both answers were sorted.
+    ///
+    /// Recorded rather than passed over, because it is a weaker check than the one every other row
+    /// in the table got. An `ORDER BY` that does not totally order its rows lets two correct engines
+    /// hand the same rows back in different orders, which is not a failure, and a report that ticks
+    /// those the same way as the ones checked row for row is claiming a check it did not make.
+    #[must_use]
+    pub fn tied(&self) -> Vec<(String, Vec<String>)> {
+        let mut out = Vec::new();
+        let Some(reference) = self.results.first() else { return out };
+        for query in &reference.queries {
+            let answers: Vec<(String, String)> = self
+                .results
+                .iter()
+                .filter_map(|r| r.find(&query.name).map(|q| (r.engine.clone(), q.answer.clone())))
+                .collect();
+            let tied = crate::answer::ties(&answers);
+            if !tied.is_empty() {
+                out.push((query.name.clone(), tied));
+            }
+        }
+        out
+    }
+
     /// The queries where the engines answered differently and the data does not say which is right.
     ///
     /// Named rather than dropped. A reader who counts twenty six checked queries out of forty three
@@ -1718,6 +1742,23 @@ pub fn comparison(compared: &Comparison) -> String {
         line(
             &mut out,
             "would go unnoticed here. Every other query in the suite is checked in full.",
+        );
+    }
+    // The ones that agreed, and agreed less strongly than the rest. Under the disagreements for the
+    // same reason the list above is, and worth a line because an engine that returns the right rows
+    // in the wrong order passes here and the reader should know which queries could not have caught
+    // it.
+    let tied = compared.tied();
+    if !tied.is_empty() {
+        line(&mut out, "");
+        line(&mut out, "These agreed on the rows and not on the order they came back in:");
+        for (name, engines) in &tied {
+            line(&mut out, &format!("  {name}: {}", engines.join(", ")));
+        }
+        line(&mut out, "An ORDER BY that does not totally order its rows lets two correct engines");
+        line(
+            &mut out,
+            "answer this way, so it is not a failure and it is not a full check either.",
         );
     }
     // These are differences with an answer, so they read as the open ones do until the sentence

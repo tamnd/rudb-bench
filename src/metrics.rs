@@ -358,10 +358,8 @@ impl Document {
         if self.operators.len() > 1 && self.operators.iter().all(|o| o.parent.is_none()) {
             return None;
         }
-        let (intermediate, result) = self
-            .operators
-            .iter()
-            .fold((0, 0), |(intermediate, result), o| match o.parent {
+        let (intermediate, result) =
+            self.operators.iter().fold((0, 0), |(intermediate, result), o| match o.parent {
                 Some(_) => (intermediate + o.rows_out, result),
                 None => (intermediate, result + o.rows_out),
             });
@@ -1385,7 +1383,10 @@ mod tests {
         );
         let document = Document::parse(&text).expect("valid");
         assert_eq!(document.flow(), None);
-        assert!(document.miscounts().is_empty(), "a check nobody can run is not a check that failed");
+        assert!(
+            document.miscounts().is_empty(),
+            "a check nobody can run is not a check that failed"
+        );
     }
 
     /// A plan of one operator has edges and no intermediates, which is a real zero rather than the
