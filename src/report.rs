@@ -1345,6 +1345,44 @@ impl Comparison {
         out
     }
 
+    /// The queries where an engine disagreed with the answer TPC-H publishes for it, per engine.
+    ///
+    /// Empty on every run but one shape of run, which is TPC-H over the SF1 corpus, because the
+    /// published answers are answers to that database and to no other. See [`crate::qualified`].
+    ///
+    /// This is the only check here that is not one engine against another, so it is the only one
+    /// that can catch every engine in the table being wrong in the same way. That is not a remote
+    /// possibility on a benchmark whose every column is money and whose engines mostly copied each
+    /// other's decimal rules.
+    #[must_use]
+    pub fn unqualified(&self) -> Vec<(String, Vec<String>)> {
+        let mut out = Vec::new();
+        if !crate::qualified::applies(self.suite.name, self.corpus.as_deref()) {
+            return out;
+        }
+        let Some(reference) = self.results.first() else { return out };
+        for query in &reference.queries {
+            if crate::qualified::answer(&query.name).is_none() {
+                continue;
+            }
+            let wrong: Vec<String> = self
+                .results
+                .iter()
+                .filter_map(|r| r.find(&query.name).map(|q| (&r.engine, q)))
+                // A query that failed or ran out of time has no answer to check, and its row
+                // already says so. Reporting it here as well would put the same loss in the report
+                // twice under two different headings.
+                .filter(|(_, q)| !q.answer.trim().is_empty())
+                .filter(|(_, q)| crate::qualified::agrees(&query.name, &q.answer).is_none())
+                .map(|(engine, _)| engine.clone())
+                .collect();
+            if !wrong.is_empty() {
+                out.push((query.name.clone(), wrong));
+            }
+        }
+        out
+    }
+
     /// The queries where the engines answered differently and the data does not say which is right.
     ///
     /// Named rather than dropped. A reader who counts twenty six checked queries out of forty three
@@ -1760,6 +1798,24 @@ pub fn comparison(compared: &Comparison) -> String {
             &mut out,
             "answer this way, so it is not a failure and it is not a full check either.",
         );
+    }
+    // The one check in this report that is not an engine against an engine, so it goes above the
+    // rest of them. Everything else here says the columns agree, which is a claim about the table
+    // and not about the truth, and this is the line that is about the truth.
+    let unqualified = compared.unqualified();
+    if !unqualified.is_empty() {
+        line(&mut out, "");
+        line(&mut out, "These do not match the answer TPC-H publishes for them at SF1:");
+        for (name, engines) in &unqualified {
+            let tie = if crate::qualified::ties(name) {
+                ", whose LIMIT can cut a tie, so this may be a different correct set of rows"
+            } else {
+                ""
+            };
+            line(&mut out, &format!("  {name}: {}{tie}", engines.join(", ")));
+        }
+        line(&mut out, "That reference is the specification's own and not another engine's, so a");
+        line(&mut out, "difference here is a wrong answer rather than a disagreement.");
     }
     // These are differences with an answer, so they read as the open ones do until the sentence
     // says where the argument is. Kept apart from the list above for that reason.
@@ -2189,6 +2245,70 @@ mod tests {
             timeout: None,
             corpus: None,
         }
+    }
+
+    /// A TPC-H run at SF1, with whatever answers the caller wants to give the one engine in it.
+    fn against_the_specification(answers: &[(&str, String)]) -> Comparison {
+        let mut engine = result(Peak::Bytes(1024), 5);
+        engine.engine = "rudb".to_owned();
+        let template = engine.queries[0].clone();
+        engine.queries = answers
+            .iter()
+            .map(|(name, answer)| {
+                let mut query = template.clone();
+                query.name = (*name).to_owned();
+                query.answer = answer.clone();
+                query
+            })
+            .collect();
+        let mut compared = compared(vec![engine], Vec::new());
+        compared.suite = find("tpch").unwrap();
+        compared.corpus =
+            Some("duckdb-tpch SF1, corpus e02fbb7bb0145593, written 2026-09-18".to_owned());
+        compared
+    }
+
+    /// The published answers are the one reference in this report that is not another engine, so
+    /// the case that matters is a table whose columns all agree with each other and disagree with
+    /// the specification. Nothing else here would say a word about that.
+    #[test]
+    fn an_engine_that_disagrees_with_the_published_tpch_answer_is_named() {
+        let published =
+            |query: &str| crate::qualified::answer(query).expect("committed").to_owned();
+        let mut compared = against_the_specification(&[
+            ("q06", published("q06")),
+            ("q14", "1.0\n".to_owned()),
+            ("q19", published("q19")),
+        ]);
+        assert_eq!(compared.unqualified(), vec![("q14".to_owned(), vec!["rudb".to_owned()])]);
+        let said = comparison(&compared);
+        assert!(said.contains("These do not match the answer TPC-H publishes"), "{said}");
+        assert!(said.contains("  q14: rudb"), "{said}");
+
+        // The same answers over a hundred times as much data are answers to a different database,
+        // and a check that failed on all twenty two of them is a check somebody turns off.
+        compared.corpus =
+            Some("duckdb-tpch SF100, corpus e02fbb7bb0145593, written 2026-09-18".to_owned());
+        assert!(compared.unqualified().is_empty());
+        assert!(!comparison(&compared).contains("These do not match the answer TPC-H publishes"));
+    }
+
+    /// A query that never produced an answer is a loss, and its row says so. Counting it as a wrong
+    /// answer as well would report one failure twice and under the wrong heading.
+    #[test]
+    fn a_query_with_no_answer_at_all_is_not_a_wrong_answer() {
+        let compared = against_the_specification(&[("q06", String::new())]);
+        assert!(compared.unqualified().is_empty());
+    }
+
+    /// Five of the twenty two cut a tie with their `LIMIT`, so a difference in one of them is not
+    /// settled until somebody runs it without the `LIMIT`, and the report has to say so where the
+    /// difference is printed rather than in a document nobody has open.
+    #[test]
+    fn a_difference_in_a_query_that_can_tie_at_its_limit_says_so() {
+        let compared = against_the_specification(&[("q03", "1,2,3,4\n".to_owned())]);
+        let said = comparison(&compared);
+        assert!(said.contains("q03: rudb, whose LIMIT can cut a tie"), "{said}");
     }
 
     /// The limit is a fact about the table, not a footnote on whichever query happened to hit it.

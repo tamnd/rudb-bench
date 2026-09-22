@@ -156,6 +156,14 @@ That is stricter rather than looser, and it changed what the suite knows about i
 
 So nineteen of the forty three are named in `CLICKBENCH_UNSETTLED` with the reason, and they are reported under the table as answered differently with the data not saying which is right, rather than as disagreements. The cost is real and the README should say it plainly: a wrong answer from rudb on any of those nineteen would go unnoticed here. Twenty four are still checked to the last significant digit of a double, the whole smoke suite is still checked because it was written with a total order on every query, and catching a wrong q33 is a job for the differential harness in `tamnd/rudb-compat`, which can compare against one engine on data it controls, rather than for a benchmark comparing five.
 
+### The one reference that is not an engine
+
+Everything in the section above is engines checking each other, and the paragraph about q4 is what that is worth at its limit: five engines in a table, one of them wrong, and the only reason anybody found out is that somebody added the column up outside a database. A check that compares two implementations of the same rule will agree loudly when the rule is wrong.
+
+So the TPC-H answers are committed. The specification defines a qualification database at scale factor one with the substitution parameters fixed and publishes the answer to each of the twenty two queries, and those answers do not come from anybody's implementation. They are in `answers/tpch-sf1/`, one file per query, and `src/qualified.rs` compares every engine's answer against them on any TPC-H run whose corpus says SF1. At any other scale they are answers to a different database and the check stays out of the way.
+
+Two things about it are worth saying rather than leaving in a doc comment. The files were taken out of DuckDB's `tpch` extension, which ships the published set, rather than retyped from the specification's appendix, so they are not independent of DuckDB in the way a retyped set would be. They are still independent of rudb, which is the bug this is meant to catch. And five of the twenty two, q2, q3, q10, q18 and q21, cut a tie with a `LIMIT`, so the published answer there is one correct choice of rows and an engine that kept a different tied set is not wrong. Those five are reported with that sentence attached until [#148](https://github.com/tamnd/rudb-bench/issues/148) makes the boundary check runnable.
+
 ### ClickBench is five query sets, not one
 
 The official ClickBench repository keeps a `queries.sql` per engine and they are not copies of each other. Running one engine's text against all of them would be a measurement of somebody's translation, so this harness carries the official text per engine and says in the query table which engine gets which, and why.

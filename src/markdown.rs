@@ -927,6 +927,23 @@ fn caveats(compared: &Comparison) -> String {
              other query in the suite.\n\n",
         );
     }
+    let unqualified = compared.unqualified();
+    if !unqualified.is_empty() {
+        out.push_str("These do not match the answer TPC-H publishes for them at SF1:\n\n");
+        for (name, engines) in &unqualified {
+            let tie = if crate::qualified::ties(name) {
+                ", whose LIMIT can cut a tie, so this may be a different correct set of rows"
+            } else {
+                ""
+            };
+            out.push_str(&format!("- {name}: {}{tie}\n", engines.join(", ")));
+        }
+        out.push_str(
+            "\nThat reference is the specification's own and not another engine's, so a difference \
+             here is a wrong answer rather than a disagreement. It is also the only check in this \
+             report that can catch every engine being wrong the same way.\n\n",
+        );
+    }
     if !diverged.is_empty() {
         out.push_str("These were answered differently and which engine is wrong is settled:\n\n");
         for (name, why) in &diverged {
