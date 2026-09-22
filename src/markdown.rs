@@ -914,6 +914,19 @@ fn caveats(compared: &Comparison) -> String {
              go unnoticed here. Every other query in the suite is checked in full.\n\n",
         );
     }
+    let tied = compared.tied();
+    if !tied.is_empty() {
+        out.push_str("These agreed on the rows and not on the order they came back in:\n\n");
+        for (name, engines) in &tied {
+            out.push_str(&format!("- {name}: {}\n", engines.join(", ")));
+        }
+        out.push_str(
+            "\nAn ORDER BY that does not totally order its rows lets two correct engines answer \
+             this way, so it is not a failure. It is also not a full check: an engine that \
+             returned the right rows in the wrong order passes one of these and would fail every \
+             other query in the suite.\n\n",
+        );
+    }
     if !diverged.is_empty() {
         out.push_str("These were answered differently and which engine is wrong is settled:\n\n");
         for (name, why) in &diverged {
