@@ -1,5 +1,7 @@
 # tpch on macbook-air-m4
 
+**Superseded. Do not quote the 901.01x.** This run is rudb 0.3.38 reading the source Parquet through a view, so every query paid a full Parquet decode while DuckDB queried a file it had loaded once. That is why 17 of the 22 queries ran out of their 60 seconds. The harness now loads rudb into a native database file by default and rudb has had one since 0.4, so neither the timeouts nor the ratio describes the engine any more. On rudb 0.4.20 all 22 queries finish and all 22 answers agree with DuckDB. See `reports/2026-09-24/where-tpch-actually-stands.md`. The run below is left as it was written, because it is a correct record of what that version did.
+
 This is one run of the tpch suite on macbook-air-m4, over 2 engines and 22 queries, with 5 hot runs of each query after one cold one. It was written by `rudb-bench run --report` and nothing in it was typed by hand. The command that reproduces it is below.
 
 ## What ran
