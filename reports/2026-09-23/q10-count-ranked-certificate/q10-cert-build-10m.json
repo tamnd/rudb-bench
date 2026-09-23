@@ -1,0 +1,51 @@
+[
+  {
+    "trial": 0,
+    "wall_ns": 659727116,
+    "cpu_s": 0.659678,
+    "peak_rss_bytes": 130789376,
+    "added_bytes": 18087
+  },
+  {
+    "trial": 1,
+    "wall_ns": 633058678,
+    "cpu_s": 0.6330089999999999,
+    "peak_rss_bytes": 130801664,
+    "added_bytes": 18087
+  },
+  {
+    "trial": 2,
+    "wall_ns": 629216183,
+    "cpu_s": 0.629159,
+    "peak_rss_bytes": 130801664,
+    "added_bytes": 18087
+  },
+  {
+    "trial": 3,
+    "wall_ns": 640332746,
+    "cpu_s": 0.6402920000000001,
+    "peak_rss_bytes": 130797568,
+    "added_bytes": 18087
+  },
+  {
+    "trial": 4,
+    "wall_ns": 631814749,
+    "cpu_s": 0.631754,
+    "peak_rss_bytes": 130830336,
+    "added_bytes": 18087
+  },
+  {
+    "trial": 5,
+    "wall_ns": 623510259,
+    "cpu_s": 0.6234689999999999,
+    "peak_rss_bytes": 130793472,
+    "added_bytes": 18087
+  },
+  {
+    "trial": 6,
+    "wall_ns": 628538498,
+    "cpu_s": 0.6285040000000001,
+    "peak_rss_bytes": 130772992,
+    "added_bytes": 18087
+  }
+]
