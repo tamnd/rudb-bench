@@ -1,0 +1,22 @@
+TopN 10 offset 0 [#2.1::BIGINT DESC NULLS LAST]  [~10 rows estimated from dictionary] [pipeline 1] [reference]  [10 rows, 154.871us wall, 158.477us cpu]
+  Project #2 [#1.0::INTEGER AS RegionID, #1.1::BIGINT AS u]  [~6817 rows estimated from dictionary] [pipeline 1] [reference]  [640 rows, 41.247us wall, 41.591us cpu]
+    Aggregate #1 groups=[#0.0::INTEGER] aggregates=[count(DISTINCT #0.1::BIGINT)::BIGINT]  [~6817 rows estimated from dictionary] [pipeline 2] [room for 6,817 groups] [reference]  [640 rows, 246.061ms wall, 245.875ms cpu]
+      Get memory.main.hits AS hits #0 [RegionID::INTEGER, UserID::BIGINT]  [9999750 rows exact from row count] [pipeline 2] [reference]  [9999750 rows, 139.154ms wall, 121.552ms cpu]
+
+Pipelines
+  pipeline 0 waits for 1, and the answer comes out of it  [4.663us wall, 4.659us cpu]
+  pipeline 1 waits for 2  [355.482us wall, 355.520us cpu]
+  pipeline 2 waits for nothing  [43.081ms wall, 373.703ms cpu]
+
+Seams
+  chunk.compaction = never (default)
+  26 seams have nothing registered and are running their reference implementation, see rudb_strategies()
+
+Totals
+  637.740us planning, 173.497us building the tree, 43.600ms running it, 44.411ms in all
+  374.396ms of cpu, 247.8 MiB held at the peak
+
+Warnings
+  4 of the 4 operators ran a reference implementation, which is the slow path kept for differential testing, and none of them had a seam with a second implementation registered to choose from
+  operator 1 (Project) was estimated at 6,817 rows and produced 640 (q-error 10.7)
+  operator 2 (Aggregate) was estimated at 6,817 rows and produced 640 (q-error 10.7)
