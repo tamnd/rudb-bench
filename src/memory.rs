@@ -145,7 +145,7 @@ impl Spent {
     ///
     /// Times and bytes add and the peak is the larger of the two, because the two processes did
     /// not run at the same time. Anything missing on either side is missing in the sum, for the
-    /// same reason [`parse`] will not report half a CPU total.
+    /// same reason `parse` will not report half a CPU total.
     #[must_use]
     pub fn and(self, other: Self) -> Self {
         Self {
