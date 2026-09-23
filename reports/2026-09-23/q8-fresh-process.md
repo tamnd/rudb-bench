@@ -1,5 +1,7 @@
 # ClickBench Q8 in fresh processes
 
+This is a historical measurement of a metadata-backed grouped answer. The native frequency synopsis held every `AdvEngineID` value and its exact count, so this path did not measure row aggregation. The [Q2-onward correction](../2026-09-24/q2-onward-grouped-count-correction.md) replaces it for the runtime aggregation goal.
+
 Q8 is `SELECT AdvEngineID, COUNT(*) FROM hits WHERE AdvEngineID <> 0 GROUP BY AdvEngineID ORDER BY COUNT(*) DESC`. The native writer's frequency synopsis lists every `AdvEngineID` value and exact row count at all four sizes. Its omitted-value bound is zero. The engine now keeps complete numeric lists with at most 64 entries in the small native catalog. A query checks the table-directory checksum before using the certificate; incomplete lists use regular execution. For the exact read-only, headerless CSV command, rudb formats the certified groups directly without building general SQL result vectors.
 
 Each invocation opens one native database, runs the same SQL, prints CSV, and exits. The C resource helper measures the child with `wait4` for wall time, user plus system CPU time, and peak resident memory. The runner alternates rudb with the catalog certificate and general result path, rudb with the direct CSV path, and DuckDB for 51 trials per size. Both rudb runs use the same file, and the DuckDB native file holds the same rows. Every full CSV output matched DuckDB byte for byte.

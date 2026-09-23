@@ -1,5 +1,7 @@
 # Native storage audit from Q2 through Q8
 
+Correction: the Q8 classification below was too permissive. Its complete frequency list contained every group key and exact count, which made the stored synopsis equivalent to Q8's grouped answer. The [runtime aggregation correction](q2-onward-grouped-count-correction.md) removes the grouped-result shortcuts and remeasures Q8.
+
 The native file should hold facts about a table or column that another query can reuse. It should not hold a saved result for one ClickBench statement. A query may recognize a narrow SQL shape and use those facts, provided it still derives the result at runtime and falls back when the facts do not prove the answer.
 
 | Query | Stored input | Runtime work | Audit result |
@@ -10,7 +12,7 @@ The native file should hold facts about a table or column that another query can
 | Q5, distinct users | Per-column exact distinct-value count | Read the column statistic | Reusable cardinality statistic |
 | Q6, distinct phrases | The same per-column distinct-value count | Read the column statistic | Reusable cardinality statistic |
 | Q7, date bounds | Per-column exact minimum and maximum | Select the requested column bounds | Reusable column statistics |
-| Q8, grouped count | Complete numeric value frequencies | Filter zero and null, then order groups by count | Reusable frequency table |
+| Q8, grouped count | Complete numeric value frequencies | Filter zero and null, then order groups by count | Stored grouped answer in practice; corrected later |
 
 Q2 was the exception. Its catalog field stored the exact nonzero count, which was the ClickBench Q2 answer for `AdvEngineID`. New files leave that legacy field empty. The reader ignores the field in older files, and the [corrected Q2 measurements](q2-generic-frequency.md) use the query-time frequency calculation. The earlier [stored-count report](../2026-09-23/q2-fresh-process-catalog-count.md) is marked historical.
 
