@@ -2,6 +2,8 @@
 """Measure ClickBench Q8 with one SQL statement in each new process."""
 
 import argparse
+import csv
+import io
 import json
 import os
 import pathlib
@@ -9,6 +11,15 @@ import statistics
 import subprocess
 import sys
 import tempfile
+
+
+def grouped_counts(output):
+    rows = [(int(key), int(count)) for key, count in csv.reader(io.StringIO(output))]
+    if len({key for key, _ in rows}) != len(rows):
+        raise ValueError('a group key appeared more than once')
+    if any(rows[index][1] < rows[index + 1][1] for index in range(len(rows) - 1)):
+        raise ValueError('groups are not ordered by descending count')
+    return sorted(rows)
 
 
 def main():
@@ -33,7 +44,7 @@ def main():
         parser.error('compile scripts/measure-child.c first')
 
     sql = 'SELECT AdvEngineID, COUNT(*) FROM hits WHERE AdvEngineID <> 0 GROUP BY AdvEngineID ORDER BY COUNT(*) DESC'
-    expected = args.expected_file.read_text()
+    expected = grouped_counts(args.expected_file.read_text())
     cases = [('rudb', args.rudb, args.rudb_db), ('duckdb', args.duckdb, args.duckdb_db)]
     if args.rudb_main:
         cases.insert(0, ('rudb-main', args.rudb_main, args.rudb_main_db or args.rudb_db))
@@ -55,7 +66,11 @@ def main():
                     )
                 resource = json.loads(resource_path.read_text()) if resource_path.exists() else {}
                 output = stdout_path.read_text()
-                if process.returncode != 0 or resource.get('exit_code') != 0 or output != expected:
+                try:
+                    actual = grouped_counts(output)
+                except (ValueError, TypeError) as problem:
+                    raise RuntimeError(f'{engine} trial {trial}: invalid grouped output: {problem}') from problem
+                if process.returncode != 0 or resource.get('exit_code') != 0 or actual != expected:
                     raise RuntimeError(
                         f'{engine} trial {trial}: status={process.returncode}, stdout={output!r}, '
                         f'stderr={stderr_path.read_text()!r}'
