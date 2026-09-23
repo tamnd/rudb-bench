@@ -536,6 +536,20 @@ fn write_one(result: &SuiteResult, machine: &str, source_bytes: u64) -> String {
     let _ = writeln!(out, "load-disk {}", l.on_disk);
     let _ = writeln!(out, "load-conv {}", if l.converted { "yes" } else { "no" });
     let _ = writeln!(out, "load-what {}", escape(&l.on_disk_is));
+    // The write path's columns, each a dash when it was not measured. A file from before they
+    // existed has none of these lines and reads back as nothing measured, which is what it was.
+    let time = |d: Option<Duration>| d.map_or_else(|| "-".to_owned(), |d| micros(d).to_string());
+    let count = |n: Option<u64>| n.map_or_else(|| "-".to_owned(), |n| n.to_string());
+    let _ = writeln!(out, "load-user {}", time(l.cpu_user));
+    let _ = writeln!(out, "load-sys  {}", time(l.cpu_sys));
+    let _ = writeln!(out, "load-dev  {}", count(l.device_bytes));
+    let _ = writeln!(out, "load-rss  {}", count(l.peak_rss));
+    let _ = writeln!(out, "load-acct {}", count(l.accounted_peak));
+    let _ = writeln!(
+        out,
+        "load-sync {}",
+        l.sync_call.as_deref().map_or_else(|| "-".to_owned(), escape)
+    );
 
     for q in &result.queries {
         let _ = writeln!(out, "query     {} {}", q.name, escape(&q.shape));
@@ -621,6 +635,18 @@ fn read_one(engine: &str, block: &str) -> Result<(SuiteResult, u64), String> {
             .map_err(|_| format!("{engine} has an unreadable load size"))?,
         on_disk_is: unescape(need("load-what")?),
         converted: need("load-conv")? == "yes",
+        cpu_user: value(block, "load-user")
+            .and_then(maybe)
+            .and_then(|n| n.parse().ok())
+            .map(Duration::from_micros),
+        cpu_sys: value(block, "load-sys")
+            .and_then(maybe)
+            .and_then(|n| n.parse().ok())
+            .map(Duration::from_micros),
+        device_bytes: value(block, "load-dev").and_then(maybe).and_then(|n| n.parse().ok()),
+        peak_rss: value(block, "load-rss").and_then(maybe).and_then(|n| n.parse().ok()),
+        accounted_peak: value(block, "load-acct").and_then(maybe).and_then(|n| n.parse().ok()),
+        sync_call: value(block, "load-sync").and_then(maybe).map(unescape),
     };
 
     // The query lines are one key and the five lines under each are five more, so the block is cut
@@ -847,6 +873,12 @@ mod tests {
                 on_disk_is: "its own database file".to_owned(),
                 converted: true,
                 cpu: Some(Duration::from_millis(3560)),
+                cpu_user: Some(Duration::from_millis(3100)),
+                cpu_sys: Some(Duration::from_millis(460)),
+                device_bytes: Some(41_943_040),
+                peak_rss: Some(812_646_400),
+                accounted_peak: None,
+                sync_call: Some("fdatasync".to_owned()),
             },
             queries: vec![query("q1"), query("q2")],
             missing: vec!["q19".to_owned()],
@@ -941,6 +973,34 @@ mod tests {
         let inside = after.queries[0].internal.as_ref().expect("rudb wrote an inside line");
         assert_eq!(inside.accounting.build, Duration::ZERO, "no build means none of it was build");
         assert_eq!(inside.execute, before.queries[0].internal.as_ref().unwrap().execute);
+    }
+
+    #[test]
+    fn a_file_written_before_the_load_columns_reads_back_as_nothing_measured() {
+        // Every saved result up to now has five load lines, and reading one of them as a load that
+        // wrote zero bytes in zero seconds of system time would be a claim nobody measured.
+        let text = write_one(&result(), "here", 1);
+        let older: String = text
+            .lines()
+            .filter(|line| {
+                !["load-user", "load-sys", "load-dev", "load-rss", "load-acct", "load-sync"]
+                    .iter()
+                    .any(|key| line.starts_with(key))
+            })
+            .map(|line| format!("{line}\n"))
+            .collect();
+        let loaded = read_one("duckdb", &older).unwrap().0.loaded;
+        let before = result().loaded;
+        assert_eq!(
+            (loaded.took, loaded.cpu, loaded.on_disk),
+            (before.took, before.cpu, before.on_disk)
+        );
+        assert_eq!((loaded.cpu_user, loaded.cpu_sys), (None, None));
+        assert_eq!(
+            (loaded.device_bytes, loaded.peak_rss, loaded.accounted_peak),
+            (None, None, None)
+        );
+        assert_eq!(loaded.sync_call, None);
     }
 
     #[test]

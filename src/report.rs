@@ -1094,6 +1094,25 @@ pub fn table(result: &SuiteResult) -> String {
         ),
     );
     line(&mut out, &format!("on disk  is {}", result.loaded.on_disk_is));
+    // Only for a load that measured any of it, which is a load that converted on a machine with a
+    // GNU timer. A row of five dashes under every engine that reads the Parquet in place would be
+    // five columns saying the same thing as the line above.
+    let l = &result.loaded;
+    if l.cpu_user.is_some() || l.device_bytes.is_some() || l.peak_rss.is_some() {
+        let size = |n: Option<u64>| n.map_or_else(|| "-".to_owned(), crate::memory::bytes);
+        let time = |d: Option<Duration>| d.map_or_else(|| "-".to_owned(), show);
+        line(
+            &mut out,
+            &format!(
+                "writes   {} user, {} system, {} written, {} peak resident, {} accounted",
+                time(l.cpu_user),
+                time(l.cpu_sys),
+                size(l.device_bytes),
+                size(l.peak_rss),
+                size(l.accounted_peak)
+            ),
+        );
+    }
     if let Some(corpus) = &result.corpus {
         line(&mut out, &format!("corpus   {corpus}"));
     }
@@ -2066,6 +2085,7 @@ mod tests {
                 on_disk_is: "its own database file".to_owned(),
                 converted: true,
                 cpu: Some(Duration::from_secs(3)),
+                ..Loaded::default()
             },
             queries: vec![QueryResult {
                 reported: None,

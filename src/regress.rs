@@ -738,6 +738,7 @@ mod tests {
                 on_disk_is: "its own database file".to_owned(),
                 converted: true,
                 cpu: Some(Duration::from_secs(3)),
+                ..Loaded::default()
             },
             queries: vec![QueryResult {
                 reported: None,

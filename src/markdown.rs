@@ -1128,6 +1128,7 @@ mod tests {
                 on_disk_is: "its own database file".to_owned(),
                 converted: true,
                 cpu: Some(Duration::from_millis(900)),
+                ..Loaded::default()
             },
             queries: vec![query("q1", hot), query("q2", hot)],
             missing: Vec::new(),

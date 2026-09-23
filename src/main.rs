@@ -1409,7 +1409,7 @@ fn plans(args: &[String]) -> ExitCode {
     for suite in chosen {
         // A fresh engine per suite, because the view declarations a capture leaves behind are the
         // previous suite's tables and a plan over those is a plan of a different query.
-        let mut engine = Rudb::discover(&scratch, suite);
+        let mut engine = Rudb::discover(&scratch, suite).viewing();
         // Asked about the smoke suite and not about this one, which is deliberate. rudb declines
         // TPC-H because every join in it is a nested loop, and that is a statement about execution:
         // planning executes nothing, and that refusal is exactly why nobody has ever found out

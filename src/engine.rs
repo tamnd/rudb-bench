@@ -46,7 +46,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crate::data::{Finished, Table, both_within, output, size_of_tree};
-use crate::memory::{Cost, Timer};
+use crate::memory::{Cost, Spent, Timer};
 use crate::metrics::Document;
 use crate::suite::{Fixup, Loading, Suite, loading, sorting_key};
 
@@ -107,7 +107,10 @@ impl Ability {
 }
 
 /// What loading a suite's data cost.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Default` is a load that took nothing and measured nothing, which is what an engine that reads
+/// the Parquet where it lies reports and what every field added after the first five starts as.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Loaded {
     /// Wall clock time to build the dataset in this engine's own format.
     pub took: Duration,
@@ -134,6 +137,52 @@ pub struct Loaded {
     /// much about the machine as about the engine. M1 measured rudb encoding at 5 MB/s of values a
     /// core, and that is a sentence about CPU seconds that a wall clock cannot make.
     pub cpu: Option<Duration>,
+    /// The user half of [`Self::cpu`].
+    ///
+    /// Apart because a write path splits differently from a query. Converting and encoding is user
+    /// time, and faulting in pages, copying into the page cache and waiting on a sync is system
+    /// time, so two loads with the same total can be two engines doing different things.
+    pub cpu_user: Option<Duration>,
+    /// The system half of [`Self::cpu`].
+    pub cpu_sys: Option<Duration>,
+    /// Bytes the load wrote that reached the block layer.
+    ///
+    /// Not [`Self::on_disk`]. The file an engine leaves is what it kept, and this is what it wrote
+    /// to get there, which includes a log it wrote and threw away, a sort that spilled and a file it
+    /// rewrote. The ratio of the two is the write amplification of the load, and it is the number
+    /// that says how long a load would take on a disk slower than the one it was measured on.
+    pub device_bytes: Option<u64>,
+    /// High water mark of resident set size over the load, in bytes.
+    pub peak_rss: Option<u64>,
+    /// The most the engine says it was holding at once during the load, where it will say.
+    ///
+    /// Only rudb says, through the metrics document of the statement that loaded. The gap between
+    /// this and [`Self::peak_rss`] is memory nobody budgeted for, and the load gates in the v4 spec
+    /// hold it to a quarter of the resident peak.
+    pub accounted_peak: Option<u64>,
+    /// The call a durable commit on this machine goes through, from the device card.
+    ///
+    /// `fdatasync` on Linux and `F_FULLFSYNC` on a Mac, and `None` until the card is taken. Next to
+    /// the load because a load that synced a hundred times costs very different amounts on a disk
+    /// that does a sync in 20 µs and on one that takes 3 ms.
+    pub sync_call: Option<String>,
+}
+
+impl Loaded {
+    /// Fill in the columns the timer measured for the whole load.
+    #[must_use]
+    pub const fn spent(mut self, spent: Spent) -> Self {
+        self.cpu_user = spent.user;
+        self.cpu_sys = spent.system;
+        // A load that left a file behind wrote at least that file, so a zero here is a kernel
+        // that does not count block writes for this process (WSL2 is one) and not a measurement.
+        self.device_bytes = match spent.written {
+            Some(0) if self.on_disk > 0 && self.converted => None,
+            written => written,
+        };
+        self.peak_rss = spent.peak;
+        self
+    }
 }
 
 /// One run of one query: what it cost, and what it answered.
@@ -565,6 +614,17 @@ impl Runner {
         self.metrics.as_deref()
     }
 
+    /// The load columns of the last run's report, and nothing when there is no timer.
+    ///
+    /// Read from the report [`Self::go`] left behind, so it has to be asked before the next run
+    /// replaces it.
+    fn spent(&self) -> Spent {
+        match &self.timer {
+            Ok(_) => Timer::spent(&self.report),
+            Err(_) => Spent::default(),
+        }
+    }
+
     /// A command that will be timed, or a plain one when there is no timer here.
     fn command(&self, program: &Path) -> Command {
         match &self.timer {
@@ -844,11 +904,13 @@ impl Engine for Duckdb {
 
         let start = Instant::now();
         let build = self.exec(&refs, None)?;
+        let spent = self.runner.spent();
         // CHECKPOINT before the clock stops, because a load that left the write ahead log to be
         // replayed later is a load whose cost has been moved into the first query. Rule five puts
         // load time next to every runtime result precisely so that trade shows up, and it cannot
         // show up if the load stops timing before the data is durable.
         let checkpoint = self.exec(&["CHECKPOINT"], None)?;
+        let spent = spent.and(self.runner.spent());
         let took = start.elapsed();
 
         let on_disk = std::fs::metadata(&self.database).map(|m| m.len()).map_err(|e| {
@@ -860,7 +922,9 @@ impl Engine for Duckdb {
             on_disk_is: "its own database file".to_owned(),
             converted: true,
             cpu: add(build.cost.cpu, checkpoint.cost.cpu),
-        })
+            ..Loaded::default()
+        }
+        .spent(spent))
     }
 
     fn run(&mut self, sql: &str, limit: Option<Duration>) -> Result<Ran, BenchError> {
@@ -986,6 +1050,11 @@ impl Engine for ClickhouseLocal {
 
         let start = Instant::now();
         let mut cpu = Some(Duration::ZERO);
+        let mut spent: Option<Spent> = None;
+        let mut tally = |runner: &Runner| {
+            let now = runner.spent();
+            spent = Some(spent.map_or(now, |before| before.and(now)));
+        };
         for table in tables {
             // ORDER BY tuple() means no sorting key, which is the honest default for a comparison
             // where nobody else was given one either. ClickBench's own create.sql picks a sorting
@@ -1005,6 +1074,7 @@ impl Engine for ClickhouseLocal {
                         table.path.display()
                     );
                     let made = self.exec(&create, None)?;
+                    tally(&self.runner);
                     cpu = add(cpu, made.cost.cpu);
                     self.exec(&insert, None)?
                 }
@@ -1018,6 +1088,7 @@ impl Engine for ClickhouseLocal {
                     None,
                 )?,
             };
+            tally(&self.runner);
             cpu = add(cpu, ran.cost.cpu);
         }
         let took = start.elapsed();
@@ -1028,7 +1099,9 @@ impl Engine for ClickhouseLocal {
                 .to_owned(),
             converted: true,
             cpu,
-        })
+            ..Loaded::default()
+        }
+        .spent(spent.unwrap_or_default()))
     }
 
     fn run(&mut self, sql: &str, limit: Option<Duration>) -> Result<Ran, BenchError> {
@@ -1379,8 +1452,10 @@ impl Engine for ClickhouseServer {
             converted: true,
             // Not None because nothing was measured, but because what could be measured is the
             // client's, and a load whose CPU column was the cost of reading a file and writing it
-            // to a socket would understate the real one by whatever the server spent sorting.
+            // to a socket would understate the real one by whatever the server spent sorting. The
+            // same goes for the split, the bytes written and the peak, which stay at nothing.
             cpu: None,
+            ..Loaded::default()
         })
     }
 
@@ -1630,6 +1705,7 @@ impl Engine for Datafusion {
                 .to_owned(),
             converted: false,
             cpu: Some(Duration::ZERO),
+            ..Loaded::default()
         })
     }
 
@@ -1778,6 +1854,7 @@ impl Engine for Polars {
                 .to_owned(),
             converted: false,
             cpu: Some(Duration::ZERO),
+            ..Loaded::default()
         })
     }
 
@@ -1801,9 +1878,16 @@ impl Engine for Polars {
 
 /// rudb, driven through `rudb-cli` the same way everything else here is driven.
 ///
-/// It read the Parquet where it lies rather than loading it, which puts it in the same column as
-/// DataFusion and Polars: no storage format of its own yet, an empty load time, and the on disk
-/// number is the source file. Persistence is E2 and this row should not pretend otherwise.
+/// It loads the way DuckDB loads: a `CREATE TABLE ... AS SELECT` from the Parquet into its own
+/// database file, timed, with the file as the on disk number, and every query opens that file. The
+/// query columns are then the same comparison as the DuckDB row's, an engine reading its own format
+/// against an engine reading its own format, and the load column is the write path the v4 spec is
+/// about rather than an empty cell.
+///
+/// `RUDB_BENCH_RUDB_VIEWS` puts back the way it ran before rudb had a format: a view over the
+/// Parquet replayed in front of every query, nothing converted and nothing timed. It is there for
+/// the one comparison that needs it, how much of a query's time was the Parquet decode, and a run
+/// that sets it reports rudb in the same column as DataFusion and Polars.
 ///
 /// The arguments are DuckDB's arguments. `-batch -csv -noheader -c` is what the DuckDB row above
 /// sends and it is what this row sends, which is the drop in claim tested rather than asserted, and
@@ -1812,6 +1896,10 @@ impl Engine for Polars {
 pub struct Rudb {
     binary: Option<PathBuf>,
     version: String,
+    /// The database file the load writes and every query opens, and `None` for a run over views.
+    database: Option<PathBuf>,
+    /// Whether [`Engine::load`] has written [`Self::database`], so that a query knows to open it.
+    loaded: bool,
     ddl: Vec<String>,
     source_bytes: u64,
     runner: Runner,
@@ -1841,9 +1929,12 @@ impl Rudb {
         let binary =
             std::env::var_os("RUDB_BENCH_RUDB").map_or_else(|| on_path("rudb"), PathBuf::from);
         let found = version_of(&binary, &["--version"], "RUDB_BENCH_RUDB");
+        let views = std::env::var_os("RUDB_BENCH_RUDB_VIEWS").is_some_and(|v| v != "0");
         Self {
             binary: found.is_ok().then_some(binary),
             version: found.unwrap_or_else(|_| "not built".to_owned()),
+            database: (!views).then(|| scratch.join("rudb.rudb")),
+            loaded: false,
             ddl: Vec::new(),
             source_bytes: 0,
             runner: Runner::new(scratch, "rudb", Reported::RunTime).watching(scratch, "rudb"),
@@ -1851,6 +1942,19 @@ impl Rudb {
             pins: Vec::new(),
             prelude: Vec::new(),
         }
+    }
+
+    /// Read the Parquet through views rather than loading it, whatever the environment says.
+    ///
+    /// For the two callers that measure something a load would only get in the way of. The plan
+    /// gate compares against plans that were written down over views, and a plan over a native
+    /// table is a different plan, so loading would fail every baseline at once without anything
+    /// having changed. A seam sweep starts a fresh engine per variant, and loading per variant
+    /// would spend four minutes of ClickBench conversion per row on work every row shares.
+    #[must_use]
+    pub fn viewing(mut self) -> Self {
+        self.database = None;
+        self
     }
 
     /// Pin one seam to one implementation for every query this engine runs.
@@ -1879,6 +1983,99 @@ impl Rudb {
     }
 }
 
+impl Rudb {
+    /// The query that produces one table from its Parquet, which a view declares and a load runs.
+    ///
+    /// The suite's own conversion where the board publishes one. On ClickBench that is the four
+    /// integer columns the file stores as seconds and days, and without it q19's
+    /// `extract(minute FROM EventTime)` has nothing to resolve against. rudb shares DuckDB's entry
+    /// because it is DuckDB's SQL: `* REPLACE`, `make_date` and `epoch_ms` all bind.
+    fn source(&self, t: &Table) -> String {
+        match loading(self.suite, "rudb", &t.name) {
+            Some(Loading { fixup: Fixup::Select(select), options, .. }) => format!(
+                "SELECT {select} FROM read_parquet('{}'{}{options})",
+                t.path.display(),
+                if options.is_empty() { "" } else { ", " }
+            ),
+            _ => format!("SELECT * FROM read_parquet('{}')", t.path.display()),
+        }
+    }
+
+    /// Declare a view per table and remember the declarations, which is the whole of a load over
+    /// views.
+    fn declare(&mut self, tables: &[Table]) -> Loaded {
+        // A view and not a `CREATE TABLE AS SELECT` into memory, which rudb also has. That would be
+        // a load of fourteen gigabytes into a process that is about to be thrown away, once per
+        // query, and the number it produced would be a number about `INSERT` rather than about the
+        // scan.
+        self.ddl = tables
+            .iter()
+            .map(|t| format!("CREATE VIEW {} AS {}", t.name, self.source(t)))
+            .collect();
+        self.source_bytes = tables.iter().map(|t| t.bytes).sum();
+        Loaded {
+            took: Duration::ZERO,
+            on_disk: self.source_bytes,
+            on_disk_is: "the source Parquet, read in place through a view".to_owned(),
+            converted: false,
+            cpu: Some(Duration::ZERO),
+            ..Loaded::default()
+        }
+    }
+
+    /// The statements that build the database file, one `CREATE TABLE ... AS SELECT` per table.
+    fn statements(&self, tables: &[Table]) -> Vec<String> {
+        tables.iter().map(|t| format!("CREATE TABLE {} AS {}", t.name, self.source(t))).collect()
+    }
+
+    /// Build the database file, timed, and size it.
+    fn build(&mut self, database: &Path, tables: &[Table]) -> Result<Loaded, BenchError> {
+        let Some(binary) = self.binary.clone() else {
+            return Err(BenchError::new("there is no rudb to load with"));
+        };
+        let _ = std::fs::remove_file(database);
+        self.ddl = Vec::new();
+        self.source_bytes = tables.iter().map(|t| t.bytes).sum();
+
+        // One process for every table, so the load is one open and one metrics document per
+        // statement rather than a process start per table. There is no CHECKPOINT after it the way
+        // DuckDB has one, because there is nothing to checkpoint: a native file is durable when the
+        // statement that wrote it returns, and the clock stops after that.
+        let mut command = self.runner.command(&binary);
+        command.arg("-batch").arg("-csv").arg("-noheader");
+        if let Some(path) = self.runner.metrics_path() {
+            command.arg("--metrics").arg(path);
+        }
+        command.arg(database);
+        for statement in self.statements(tables) {
+            command.arg("-c").arg(statement);
+        }
+        let start = Instant::now();
+        let ran = self.runner.go(command, "rudb", None)?;
+        let took = start.elapsed();
+        let spent = self.runner.spent();
+
+        let on_disk = std::fs::metadata(database)
+            .map(|m| m.len())
+            .map_err(|e| BenchError::new(format!("cannot size {}: {e}", database.display())))?;
+        self.loaded = true;
+        Ok(Loaded {
+            took,
+            on_disk,
+            on_disk_is: "its own database file".to_owned(),
+            converted: true,
+            cpu: ran.cost.cpu,
+            // The last statement's document, which is the largest table on every suite here that
+            // has more than one. rudb 0.4 writes no document for a `CREATE TABLE ... AS SELECT`, so
+            // today this is empty, and it fills in when the load profile carries the budget's peak
+            // rather than needing a change here.
+            accounted_peak: ran.metrics.as_ref().map(|m| m.peak_bytes),
+            ..Loaded::default()
+        }
+        .spent(spent))
+    }
+}
+
 impl Engine for Rudb {
     fn name(&self) -> &str {
         "rudb"
@@ -1902,44 +2099,20 @@ impl Engine for Rudb {
     }
 
     fn load(&mut self, tables: &[Table]) -> Result<Loaded, BenchError> {
-        // Nothing is converted, so nothing is timed, and the views are replayed in front of every
-        // query because this harness starts a fresh process per run on purpose.
-        //
-        // A view and not a `CREATE TABLE AS SELECT`, which rudb also has. The CTAS holds the table
-        // in memory, so on ClickBench it would be a load of fourteen gigabytes into a process that
-        // is about to be thrown away, once per query, and the number it produced would be a number
-        // about `INSERT` rather than about the scan this milestone is measuring.
-        self.ddl = Vec::with_capacity(tables.len());
-        for t in tables {
-            // The suite's own conversion where the board publishes one. On ClickBench that is the
-            // four integer columns the file stores as seconds and days, and without it q19's
-            // `extract(minute FROM EventTime)` has nothing to resolve against. rudb shares DuckDB's
-            // entry because it is DuckDB's SQL: `* REPLACE`, `make_date` and `epoch_ms` all bind.
-            match loading(self.suite, "rudb", &t.name) {
-                Some(Loading { fixup: Fixup::Select(select), options, .. }) => {
-                    self.ddl.push(format!(
-                        "CREATE VIEW {} AS SELECT {select} FROM read_parquet('{}'{}{options})",
-                        t.name,
-                        t.path.display(),
-                        if options.is_empty() { "" } else { ", " }
-                    ));
-                }
-                _ => self.ddl.push(format!(
-                    "CREATE VIEW {} AS SELECT * FROM read_parquet('{}')",
-                    t.name,
-                    t.path.display()
-                )),
-            }
+        match self.database.clone() {
+            Some(database) => self.build(&database, tables),
+            None => Ok(self.declare(tables)),
         }
-        self.source_bytes = tables.iter().map(|t| t.bytes).sum();
-        Ok(Loaded {
-            took: Duration::ZERO,
-            on_disk: self.source_bytes,
-            on_disk_is: "the source Parquet, this engine has no storage format of its own yet"
-                .to_owned(),
-            converted: false,
-            cpu: Some(Duration::ZERO),
-        })
+    }
+
+    fn unload(&mut self) {
+        if keeping() {
+            return;
+        }
+        if let Some(database) = &self.database {
+            let _ = std::fs::remove_file(database);
+        }
+        self.loaded = false;
     }
 
     fn run(&mut self, sql: &str, limit: Option<Duration>) -> Result<Ran, BenchError> {
@@ -1959,6 +2132,11 @@ impl Engine for Rudb {
         // in `crate::metrics` reads and what puts a per operator column in the report.
         if let Some(path) = self.runner.metrics_path() {
             command.arg("--metrics").arg(path);
+        }
+        // The file the load wrote, when it wrote one, and an in-memory database with the views
+        // replayed below when it did not.
+        if let Some(database) = self.database.as_ref().filter(|_| self.loaded) {
+            command.arg(database);
         }
         // `.timer on` and the same `Run Time (s):` line DuckDB prints, because rudb's shell is
         // DuckDB's shell. One more place the drop in claim is tested rather than asserted.
@@ -2113,10 +2291,11 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        Ability, Duckdb, Engine, PINNED, POLARS_SCRIPT, Reported, Rudb, Runner, elapsed, explained,
-        on_path, rule, run_time, seconds, took,
+        Ability, Duckdb, Engine, Loaded, PINNED, POLARS_SCRIPT, Reported, Rudb, Runner, elapsed,
+        explained, on_path, rule, run_time, seconds, took,
     };
     use crate::data::Table;
+    use crate::memory::Spent;
     use crate::suite::{Suite, find};
 
     fn scratch(what: &str) -> std::path::PathBuf {
@@ -2129,6 +2308,8 @@ mod tests {
         Rudb {
             binary: Some(std::path::PathBuf::from("rudb")),
             version: "under test".to_owned(),
+            database: None,
+            loaded: false,
             ddl: Vec::new(),
             source_bytes: 0,
             runner: Runner::new(&scratch("rudb"), "rudb", Reported::RunTime),
@@ -2178,6 +2359,39 @@ mod tests {
         assert_eq!(loaded.on_disk, hits.bytes, "the source file is the on disk number");
         assert!(!loaded.converted);
         assert!(loaded.on_disk_is.contains("Parquet"), "{}", loaded.on_disk_is);
+    }
+
+    /// A load is the same query the view declares, written into the file instead of replayed.
+    ///
+    /// The conversion has to reach the table for the same reason it has to reach the view: a
+    /// native `hits` with `EventTime` stored as an integer answers six of the forty three queries
+    /// with a type error, and it would do it in every run after the load rather than once.
+    #[test]
+    fn a_kernel_that_counts_no_writes_leaves_the_written_column_empty() {
+        let kept = Loaded { on_disk: 1 << 20, converted: true, ..Loaded::default() };
+        let zero = Spent { written: Some(0), ..Spent::default() };
+        assert_eq!(kept.clone().spent(zero).device_bytes, None, "a file of 1 MiB wrote something");
+        let some = Spent { written: Some(4096), ..Spent::default() };
+        assert_eq!(kept.spent(some).device_bytes, Some(4096));
+        let view = Loaded { on_disk: 1 << 20, converted: false, ..Loaded::default() };
+        assert_eq!(view.spent(zero).device_bytes, Some(0), "a view writes nothing and says so");
+    }
+
+    #[test]
+    fn a_load_writes_the_same_select_the_view_would_have_declared() {
+        let clickbench = find("clickbench").unwrap();
+        let rudb = built(clickbench);
+        let hits = Table {
+            name: "hits".to_owned(),
+            path: std::path::PathBuf::from("/tmp/hits.parquet"),
+            bytes: 1,
+        };
+        let [made] = rudb.statements(std::slice::from_ref(&hits)).try_into().unwrap();
+        assert!(made.starts_with("CREATE TABLE hits AS SELECT * REPLACE ("), "{made}");
+        assert!(made.ends_with(&format!("AS {}", rudb.source(&hits))), "{made}");
+        let mut viewing = built(clickbench);
+        viewing.load(std::slice::from_ref(&hits)).expect("declaring a view is not a load");
+        assert_eq!(viewing.ddl, [made.replacen("CREATE TABLE", "CREATE VIEW", 1)]);
     }
 
     /// The view carries the board's own conversion, which is where six of the forty three live.

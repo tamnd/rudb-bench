@@ -296,6 +296,14 @@ So `Engine::unload` exists and the comparison calls it the moment an engine fini
 
 What this does cost is the afternoon where somebody wants to open an engine's database after a run and look at what it built. `RUDB_BENCH_KEEP` turns the whole thing off for that. It is set deliberately and never by default, because a debugging convenience that quietly triples the disk a run needs is a debugging convenience that stops the run.
 
+### rudb loads into its own file now
+
+Until rudb had a storage format, its row declared a view over the Parquet and replayed it in front of every query, so its load column was empty and its query columns paid for a Parquet decode that DuckDB had paid for once at load time. rudb has had a native format for a while, so its row now loads the way DuckDB's does: one `CREATE TABLE ... AS SELECT` per table from the Parquet, with the suite's own conversion, into a database file in the scratch directory, timed, and every query opens that file. The load column is the write path the engine-v4 work is about, and the query columns compare two engines reading their own formats.
+
+Two callers still use views on purpose. The plan gate compares against plans that were written down over views, and a plan over a native table is a different plan. A seam sweep starts a fresh engine per variant, and loading per variant would spend minutes of conversion on work every row shares. `RUDB_BENCH_RUDB_VIEWS=1` puts the old behaviour back for a whole run, which is how to measure how much of a query was the Parquet decode.
+
+A load also records more than it used to. Next to the wall clock, the CPU total and the size on disk, it keeps user and system time apart, the bytes that reached the block layer (from the GNU timer's `File system outputs`, so nothing on a Mac), the peak resident set, the peak the engine says it budgeted where it will say, and the sync call from the device card once the harness takes one. The first two answer whether a load is converting or waiting on the kernel, and the ratio of bytes written to bytes kept is the load's write amplification. Saved results from before these existed read back with them empty rather than zero.
+
 ### A smaller ClickBench, for the loop rather than for the board
 
 A full ClickBench is hours, and most of the changes that want one are asking whether they did anything at all. `rudb-bench run clickbench --rows 1m` answers that question in minutes. It writes a smaller copy of `hits` next to the original once, reuses it on every later run, and prints exactly the same table over it. On `server3` the copy is 146 MB against 14.8 GB, DuckDB loads it in 14 seconds against forty minutes, and the whole 43 query suite is 16 seconds of hot time. The row count is written the way people say it, so `1m`, `200k` and `500000` all work.
