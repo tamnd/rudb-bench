@@ -1,9 +1,6 @@
 # Audit of native metadata used by ClickBench
 
-Native loading may store reusable statistics about the data. It must not run a ClickBench
-expression or aggregate in advance and store its answer. Query time includes any work needed
-to compute the requested groups, distinct counts, measures, and ordering from those statistics
-and the stored columns.
+Native loading may store reusable statistics about the data. It must not run a ClickBench expression or aggregate in advance and store its answer. Query time includes any work needed to compute the requested groups, distinct counts, measures, and ordering from those statistics and the stored columns.
 
 | Query | Stored data | Audit result |
 | --- | --- | --- |
@@ -19,12 +16,7 @@ and the stored columns.
 | Q17 | Top `(UserID, SearchPhrase)` pairs and counts | Query answer, disabled for reads and new writes |
 | Q29 | Groups from the fixed host expression with counts and measures | Query answer, disabled for reads and new writes |
 
-The Q9 and Q10 candidate reports and their result files were removed. The older Q17 and Q29
-reports have retraction notices because they also contain useful historical load measurements.
-Their claimed query speedups are not evidence for the 10x goal. Existing native files containing
-these optional blocks remain readable, but query execution no longer uses the blocks. The Q11
-certificate branch was not merged and its candidate numbers are not published.
+The Q9 and Q10 candidate reports and their result files were removed. The older Q17 and Q29 reports have retraction notices because they also contain useful historical load measurements.
+Their claimed query speedups are not evidence for the 10x goal. Existing native files containing these optional blocks remain readable, but query execution no longer uses the blocks. The Q11 certificate branch was not merged and its candidate numbers are not published.
 
-No new DuckDB comparison is asserted here. The valid per-query comparisons for Q2 through Q8
-remain in their individual reports. Q9, Q10, Q17, and Q29 need fresh-process measurements after
-the engine computes their answers at query time.
+No new DuckDB comparison is asserted here. The valid per-query comparisons for Q2 through Q8 remain in their individual reports. Q9, Q10, Q17, and Q29 need fresh-process measurements after the engine computes their answers at query time.
