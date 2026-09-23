@@ -91,6 +91,50 @@ For context, the same source loaded into DuckDB in 25.19 seconds with a 2.4 GB f
 RSS. ClickHouse loaded its isolated `hits_10m_rudb_audit` table in 14.24 seconds. Those load numbers
 do not change the Q17 query result, but they prevent treating metadata construction as free.
 
+## Current complete-suite concentration
+
+After accepting the Q17 path, all three engines ran nine repetitions of every original query over
+the same 9,999,750 rows. RuDB and DuckDB started a fresh process for every repetition. ClickHouse
+used a fresh client against its retained server table. The sums below add the 43 per-query medians;
+they are a development comparison under that lifecycle, not a public-board score.
+
+| Engine | 43-query median sum | Relative to RuDB |
+| --- | ---: | ---: |
+| RuDB `4db823f3` / merged `eb5a40fd` | 1.580063 s | 1.00x |
+| ClickHouse 26.9.1.1562 | 1.678000 s | 1.06x slower |
+| DuckDB 1.5.5 `d8cdaa33fd` | 3.177000 s | 2.01x slower |
+
+This replaces the stale claim that the old 1.552-second ClickHouse total still represented the
+current concentration. RuDB is now slightly ahead of ClickHouse and about twice as fast as DuckDB,
+but it is not ten times faster than either. The measured workload-level target remains open.
+
+The current RuDB leaders and their fastest-rival comparison are:
+
+| Query | RuDB median | DuckDB | ClickHouse | RuDB / fastest | Dominant shape |
+| ---: | ---: | ---: | ---: | ---: | --- |
+| 29 | 255.180 ms | 386 ms | 129 ms | 1.98x | derived host regex, string length/min, grouping |
+| 23 | 202.965 ms | 159 ms | 56 ms | 3.62x | two substring predicates and mixed grouped state |
+| 22 | 134.575 ms | 116 ms | 28 ms | 4.81x | substring predicate, string min, grouping |
+| 24 | 122.520 ms | 128 ms | 32 ms | 3.83x | substring predicate, timestamp TopN, 105-column fetch |
+| 21 | 110.684 ms | 89 ms | 54 ms | 2.05x | substring count |
+| 28 | 79.254 ms | 106 ms | 14 ms | 5.66x | grouped string lengths |
+| 33 | 74.210 ms | 160 ms | 109 ms | 0.68x | two-key mixed aggregate |
+| 19 | 69.732 ms | 213 ms | 158 ms | 0.44x | three-key count |
+
+Q17 no longer appears in the fifteen slowest RuDB queries. The remaining concentration is not the
+general composite hash table that explained the first 10M result. It is repeated string work:
+dictionary searches for substring predicates, decoding/fetch around selected strings, per-row
+string length, and a derived regex key whose code space is not yet snapshot-wide. The next engine
+work should make those attributes and derived mappings part of native storage, with the same
+consumer-and-proof discipline as the accepted pair synopsis.
+
+Raw timing artifacts beside the databases are:
+
+- `full43-fq4-timings.tsv` and `full43-fq4-medians.tsv`
+- `full43-duckdb-timings.tsv` and `full43-duckdb-medians.tsv`
+- `full43-clickhouse-timings.tsv` and `full43-clickhouse-medians.tsv`
+- `full43-comparison.tsv`
+
 ## Complete original-query validation
 
 The new native file and the existing DuckDB file each ran the original Q1 through Q43 once in a
