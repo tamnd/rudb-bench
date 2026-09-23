@@ -174,7 +174,12 @@ impl Loaded {
     pub const fn spent(mut self, spent: Spent) -> Self {
         self.cpu_user = spent.user;
         self.cpu_sys = spent.system;
-        self.device_bytes = spent.written;
+        // A load that left a file behind wrote at least that file, so a zero here is a kernel
+        // that does not count block writes for this process (WSL2 is one) and not a measurement.
+        self.device_bytes = match spent.written {
+            Some(0) if self.on_disk > 0 && self.converted => None,
+            written => written,
+        };
         self.peak_rss = spent.peak;
         self
     }
@@ -2286,10 +2291,11 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        Ability, Duckdb, Engine, PINNED, POLARS_SCRIPT, Reported, Rudb, Runner, elapsed, explained,
-        on_path, rule, run_time, seconds, took,
+        Ability, Duckdb, Engine, Loaded, PINNED, POLARS_SCRIPT, Reported, Rudb, Runner, elapsed,
+        explained, on_path, rule, run_time, seconds, took,
     };
     use crate::data::Table;
+    use crate::memory::Spent;
     use crate::suite::{Suite, find};
 
     fn scratch(what: &str) -> std::path::PathBuf {
@@ -2360,6 +2366,17 @@ mod tests {
     /// The conversion has to reach the table for the same reason it has to reach the view: a
     /// native `hits` with `EventTime` stored as an integer answers six of the forty three queries
     /// with a type error, and it would do it in every run after the load rather than once.
+    #[test]
+    fn a_kernel_that_counts_no_writes_leaves_the_written_column_empty() {
+        let kept = Loaded { on_disk: 1 << 20, converted: true, ..Loaded::default() };
+        let zero = Spent { written: Some(0), ..Spent::default() };
+        assert_eq!(kept.clone().spent(zero).device_bytes, None, "a file of 1 MiB wrote something");
+        let some = Spent { written: Some(4096), ..Spent::default() };
+        assert_eq!(kept.spent(some).device_bytes, Some(4096));
+        let view = Loaded { on_disk: 1 << 20, converted: false, ..Loaded::default() };
+        assert_eq!(view.spent(zero).device_bytes, Some(0), "a view writes nothing and says so");
+    }
+
     #[test]
     fn a_load_writes_the_same_select_the_view_would_have_declared() {
         let clickbench = find("clickbench").unwrap();
