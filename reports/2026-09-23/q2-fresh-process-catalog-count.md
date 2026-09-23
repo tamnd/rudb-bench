@@ -1,5 +1,7 @@
 # ClickBench Q2 in a fresh process
 
+**Historical result using a stored nonzero count.** The count was the answer to Q2's predicate on this data. The accepted [Q2 comparison](../2026-09-24/q2-generic-frequency.md) derives the count at query time from generic column frequencies and supersedes the performance claims below.
+
 `SELECT COUNT(*) FROM hits WHERE AdvEngineID <> 0` runs once per new CLI process. Every result is checked against the expected count. Both engines receive the same SQL and the same `-readonly`, `-noheader`, `-csv`, and `-c` flags. Native files are used on both sides. The operating system page cache is not flushed between processes.
 
 **Measurement correction:** The first version of this report launched SQL directly from Python and used `wait4` in the Python parent. A forked child can inherit the parent's resident high-water mark before `exec`, which inflated rudb's reported RSS. It also included Python's spawn overhead in wall time. The results below were remeasured with the repository's small C `measure-child` helper. That helper calls `posix_spawnp`, times only the SQL child, and reads that child's `wait4` usage. The earlier raw files were removed. A direct GNU `time -v` check found 5,484 KiB for rudb and 65,620 KiB for DuckDB on the 10m query, consistent with the helper's RSS measurements.
