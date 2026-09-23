@@ -1,0 +1,23 @@
+analyzed_plan,"TopN 10 offset 0 [#2.2::BIGINT DESC NULLS LAST]  [~10 rows estimated from dictionary] [pipeline 1] [reference]  [10 rows, 103.776us wall, 104.508us cpu]
+  Project #2 [#1.0::INTEGER AS RegionID, #1.1::HUGEINT AS ""sum(AdvEngineID)"", #1.2::BIGINT AS c, #1.3::DOUBLE AS ""avg(ResolutionWidth)"", #1.4::BIGINT AS ""count(DISTINCT UserID)""]  [~6817 rows estimated from dictionary] [pipeline 1] [reference]  [640 rows, 48.922us wall, 49.234us cpu]
+    Aggregate #1 groups=[#0.0::INTEGER] aggregates=[sum(#0.3::SMALLINT)::HUGEINT, count_star()::BIGINT, avg(#0.2::SMALLINT)::DOUBLE, count(DISTINCT #0.1::BIGINT)::BIGINT]  [~6817 rows estimated from dictionary] [pipeline 2] [room for 6,817 groups] [reference]  [640 rows, 203.469ms wall, 199.634ms cpu]
+      Get memory.main.hits AS hits #0 [RegionID::INTEGER, UserID::BIGINT, ResolutionWidth::SMALLINT, AdvEngineID::SMALLINT]  [9999750 rows exact from row count] [pipeline 2] [reference]  [9999750 rows, 275.025ms wall, 171.050ms cpu]
+
+Pipelines
+  pipeline 0 waits for 1, and the answer comes out of it  [3.032us wall, 3.025us cpu]
+  pipeline 1 waits for 2  [234.360us wall, 234.358us cpu]
+  pipeline 2 waits for nothing  [59.452ms wall, 380.389ms cpu]
+
+Seams
+  chunk.compaction = never (default)
+  26 seams have nothing registered and are running their reference implementation, see rudb_strategies()
+
+Totals
+  380.718us planning, 95.296us building the tree, 59.745ms running it, 60.221ms in all
+  380.778ms of cpu, 214.1 MiB held at the peak
+
+Warnings
+  4 of the 4 operators ran a reference implementation, which is the slow path kept for differential testing, and none of them had a seam with a second implementation registered to choose from
+  operator 1 (Project) was estimated at 6,817 rows and produced 640 (q-error 10.7)
+  operator 2 (Aggregate) was estimated at 6,817 rows and produced 640 (q-error 10.7)
+"
