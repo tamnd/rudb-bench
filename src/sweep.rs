@@ -232,7 +232,7 @@ pub fn sweep(
     let mut rows = Vec::new();
     let mut version = String::new();
     for variant in seam.variants() {
-        let mut engine = Rudb::discover(scratch, suite);
+        let mut engine = Rudb::discover(scratch, suite).viewing();
         if let Some((key, value)) = &variant.pin {
             engine.pin(key, value);
         }

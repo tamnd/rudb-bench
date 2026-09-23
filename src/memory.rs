@@ -114,6 +114,49 @@ impl Cost {
     }
 }
 
+/// The same report read for the columns a load needs and a query does not.
+///
+/// A load is the one run where the split between user and system time says something: an engine
+/// that spends a third of its load in the kernel is spending it on page faults or on writes, and
+/// the total in [`Cost::cpu`] cannot tell that engine from one that spent it converting. The bytes
+/// written are the other half of the same question. They are `ru_oublock`, which on Linux is the
+/// process's `write_bytes` from `/proc/<pid>/io` in 512-byte units, summed over every child it
+/// waited for, so it counts what reached the block layer and not what the engine asked to write.
+/// BSD reports output operations rather than bytes, which cannot be converted, so there it is
+/// `None` and not a guess.
+///
+/// Kept out of [`Cost`] on purpose. A query's cost is three numbers and is written into every
+/// saved result four times per query, and none of these three mean anything for a query that
+/// wrote nothing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Spent {
+    /// User time, over the process and everything it waited for.
+    pub user: Option<Duration>,
+    /// System time, the same way.
+    pub system: Option<Duration>,
+    /// Bytes that reached the block layer as writes.
+    pub written: Option<u64>,
+    /// High water mark of resident set size, in bytes.
+    pub peak: Option<u64>,
+}
+
+impl Spent {
+    /// Two runs that together made one load, as one.
+    ///
+    /// Times and bytes add and the peak is the larger of the two, because the two processes did
+    /// not run at the same time. Anything missing on either side is missing in the sum, for the
+    /// same reason [`parse`] will not report half a CPU total.
+    #[must_use]
+    pub fn and(self, other: Self) -> Self {
+        Self {
+            user: self.user.zip(other.user).map(|(a, b)| a + b),
+            system: self.system.zip(other.system).map(|(a, b)| a + b),
+            written: self.written.zip(other.written).map(|(a, b)| a + b),
+            peak: self.peak.zip(other.peak).map(|(a, b)| a.max(b)),
+        }
+    }
+}
+
 /// The `/usr/bin/time` on this machine, and which flavour it is.
 ///
 /// Found once and reused, because probing it per query would be a subprocess per query for a fact
@@ -178,6 +221,12 @@ impl Timer {
             Err(e) => Cost::unavailable(format!("cannot read the timer report: {e}")),
         }
     }
+
+    /// Read back the load columns of what the timer wrote, and nothing when it wrote nothing.
+    #[must_use]
+    pub fn spent(report: &Path) -> Spent {
+        std::fs::read_to_string(report).map_or_else(|_| Spent::default(), |text| split(&text))
+    }
 }
 
 /// Whether `/usr/bin/time` accepts a flag, decided by running it on something that always works.
@@ -200,55 +249,66 @@ fn probe(binary: &Path, flag: &str) -> bool {
 /// input operations, which cannot be converted to bytes, so its read bytes are unavailable.
 fn parse(text: &str) -> Cost {
     const BLOCK: u64 = 512;
-    let mut peak = None;
-    let mut user = None;
-    let mut system = None;
+    let spent = split(text);
     let mut blocks = None;
-
     for line in text.lines() {
         let line = line.trim();
-        if let Some(rest) = line.strip_prefix("Maximum resident set size (kbytes):") {
-            peak = rest.trim().parse::<u64>().ok().and_then(|kib| kib.checked_mul(1024));
-        } else if let Some(rest) = line.strip_prefix("User time (seconds):") {
-            user = seconds(rest);
-        } else if let Some(rest) = line.strip_prefix("System time (seconds):") {
-            system = seconds(rest);
-        } else if let Some(rest) = line.strip_prefix("File system inputs:") {
+        if let Some(rest) = line.strip_prefix("File system inputs:") {
             blocks = rest.trim().parse::<u64>().ok();
-        } else if line.ends_with("maximum resident set size") {
-            peak = leading(line);
         } else if line.ends_with("block input operations") {
             // BSD reports operations, not Linux 512-byte accounting units.
             // There is no portable conversion from an operation count to bytes.
             blocks = None;
-        } else if line.contains(" real ") && line.contains(" user ") {
-            // BSD puts all three on one line as `0.01 real 0.00 user 0.00 sys`, so the number in
-            // front of each name is the one that belongs to it.
-            let words: Vec<&str> = line.split_whitespace().collect();
-            for pair in words.windows(2) {
-                match pair[1] {
-                    "user" => user = seconds(pair[0]),
-                    "sys" => system = seconds(pair[0]),
-                    _ => {}
-                }
-            }
         }
     }
 
     // Either half of the CPU total on its own would be a number that looks like CPU seconds and is
     // not, so a report with only one of them has none.
-    let cpu = match (user, system) {
-        (Some(u), Some(s)) => Some(u + s),
-        _ => None,
-    };
+    let cpu = spent.user.zip(spent.system).map(|(u, s)| u + s);
     Cost {
-        peak: peak.map_or_else(
+        peak: spent.peak.map_or_else(
             || Peak::Unavailable("the timer report had no peak in it".to_owned()),
             Peak::Bytes,
         ),
         cpu,
         read: blocks.and_then(|n| n.checked_mul(BLOCK)),
     }
+}
+
+/// User time, system time, bytes written and the peak, whichever flavour wrote the report.
+///
+/// The half of [`parse`] that a load wants separately. GNU's peak is kibibytes and BSD's is bytes,
+/// and GNU's `File system outputs` is 512-byte units where BSD's `block output operations` is a
+/// count of operations, which is why BSD has no bytes written.
+fn split(text: &str) -> Spent {
+    const BLOCK: u64 = 512;
+    let mut spent = Spent::default();
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("Maximum resident set size (kbytes):") {
+            spent.peak = rest.trim().parse::<u64>().ok().and_then(|kib| kib.checked_mul(1024));
+        } else if let Some(rest) = line.strip_prefix("User time (seconds):") {
+            spent.user = seconds(rest);
+        } else if let Some(rest) = line.strip_prefix("System time (seconds):") {
+            spent.system = seconds(rest);
+        } else if let Some(rest) = line.strip_prefix("File system outputs:") {
+            spent.written = rest.trim().parse::<u64>().ok().and_then(|n| n.checked_mul(BLOCK));
+        } else if line.ends_with("maximum resident set size") {
+            spent.peak = leading(line);
+        } else if line.contains(" real ") && line.contains(" user ") {
+            // BSD puts all three on one line as `0.01 real 0.00 user 0.00 sys`, so the number in
+            // front of each name is the one that belongs to it.
+            let words: Vec<&str> = line.split_whitespace().collect();
+            for pair in words.windows(2) {
+                match pair[1] {
+                    "user" => spent.user = seconds(pair[0]),
+                    "sys" => spent.system = seconds(pair[0]),
+                    _ => {}
+                }
+            }
+        }
+    }
+    spent
 }
 
 /// A count of seconds written as a decimal, as both flavours write one.
@@ -305,7 +365,7 @@ pub fn bytes(n: u64) -> String {
 mod tests {
     use std::time::Duration;
 
-    use super::{Cost, Peak, Timer, bytes, own_peak, parse};
+    use super::{Cost, Peak, Spent, Timer, bytes, own_peak, parse, split};
 
     const GNU: &str = "\tCommand being timed: \"duckdb\"
 \tUser time (seconds): 3.25
@@ -313,7 +373,7 @@ mod tests {
 \tPercent of CPU this job got: 380%
 \tMaximum resident set size (kbytes): 2048
 \tFile system inputs: 4096
-\tFile system outputs: 0
+\tFile system outputs: 64
 ";
 
     const BSD: &str = "        1.20 real         0.90 user         0.10 sys
@@ -335,6 +395,28 @@ mod tests {
         assert_eq!(cost.peak, Peak::Bytes(1_245_184));
         assert_eq!(cost.cpu, Some(Duration::from_millis(1000)));
         assert_eq!(cost.read, None);
+    }
+
+    #[test]
+    fn a_load_reads_user_and_system_apart_and_the_bytes_it_wrote() {
+        let spent = split(GNU);
+        assert_eq!(spent.user, Some(Duration::from_millis(3250)));
+        assert_eq!(spent.system, Some(Duration::from_millis(750)));
+        assert_eq!(spent.written, Some(64 * 512));
+        assert_eq!(spent.peak, Some(2048 * 1024));
+        let bsd = split(BSD);
+        assert_eq!(bsd.system, Some(Duration::from_millis(100)));
+        assert_eq!(bsd.written, None, "operations are not bytes");
+    }
+
+    #[test]
+    fn two_runs_of_one_load_add_their_times_and_keep_the_larger_peak() {
+        let one = split(GNU);
+        let both = one.and(one);
+        assert_eq!(both.user, Some(Duration::from_millis(6500)));
+        assert_eq!(both.written, Some(2 * 64 * 512));
+        assert_eq!(both.peak, one.peak);
+        assert_eq!(one.and(Spent::default()).user, None, "half a load is not a load");
     }
 
     #[test]

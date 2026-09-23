@@ -764,6 +764,7 @@ mod tests {
                 on_disk_is: "nothing at all".to_owned(),
                 converted: false,
                 cpu: Some(Duration::ZERO),
+                ..Loaded::default()
             })
         }
 
