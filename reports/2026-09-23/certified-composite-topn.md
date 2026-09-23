@@ -266,3 +266,86 @@ Host artifacts:
 The failed first load command created a 33,990-byte database with an empty `hits` table because it
 omitted the required time conversions. Its zero row count was verified and that exact failed file
 was removed before the successful load; the source Parquet file was not modified.
+
+## One-million rebased audit and selected-code follow-up
+
+On the `e0961c8c` base, native Q17 exceeds the query-level target at one million rows. rudb answers in 1.140 ms with 15.14 MiB peak RSS. DuckDB native answers in 17.000 ms with 176.65 MiB peak RSS on the same host and data.
+
+| Engine | Q17 hot median | Peak RSS | Time relative to rudb | RSS relative to rudb |
+| --- | ---: | ---: | ---: | ---: |
+| rudb native | 1.140 ms | 15.14 MiB | 1.00x | 1.00x |
+| DuckDB native | 17.000 ms | 176.65 MiB | 14.91x | 11.67x |
+
+That base already contains the architectural fix that makes this possible. It took 1.093 ms and 15.15 MiB in a separate complete audit. The follow-up change keeps the same query behavior and reduces the work used to construct pair summaries during native load.
+
+| rudb revision | Q17 hot median | Peak RSS |
+| --- | ---: | ---: |
+| Base `e0961c8c` | 1.093 ms | 15.15 MiB |
+| Selected code decoding | 1.140 ms | 15.14 MiB |
+
+This complete 43-query audit predates the later `7055083b` rebase and does not yet meet the project-wide 10x target. At one million rows, rudb native is 1.44x faster than DuckDB native by summed query medians and uses 1.30x less peak RSS. rudb Parquet is 2.57x faster and uses 1.31x less peak RSS.
+
+| Mode | DuckDB time | rudb time | rudb speedup | DuckDB peak RSS | rudb peak RSS | rudb RSS reduction |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Native | 0.560000 s | 0.389607 s | 1.44x | 304.59 MiB | 234.32 MiB | 1.30x |
+| Parquet | 1.699000 s | 0.660438 s | 2.57x | 369.30 MiB | 283.04 MiB | 1.31x |
+
+### Selected code decoding
+
+Pair-summary construction previously decoded every dictionary code in a part whenever that part held at least one candidate row. The follow-up reads each stripe sequentially but decodes only requested positions inside its candidate parts.
+
+Packed integer pages invert the FastLanes permutation and read the word or two that hold a selected value. RLE pages walk run lengths, identify requested run indices, and decode only those run values. Other cascade forms retain a full-decode fallback.
+
+Three alternating load runs against the current `7055083b` main used the same 999,975-row Parquet file and SQL. The selected decoder reduced mean load wall time by 3.1 percent. Mean peak RSS was effectively unchanged, with run-to-run variation larger than the difference. Q17 output from the first main and patch files had the same SHA-256.
+
+| Revision | Run 1 wall | Run 2 wall | Run 3 wall | Mean wall | Mean peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Main `7055083b` | 10.547 s | 10.641 s | 11.011 s | 10.733 s | 670.37 MiB |
+| Selected decoding `bdaf22df` | 10.270 s | 10.394 s | 10.552 s | 10.405 s | 670.26 MiB |
+
+These figures replace the earlier two-run comparison on `e0961c8c`, which showed a larger RSS difference. The later main revision changed the load path. The [paired load records](certified-composite-topn/paired-load-latest-main.json) include every process wall time, CPU time, peak RSS, binary hash, and output file size.
+
+### Size ladder
+
+All 43 queries completed at 1,000 and 10,000 rows in native and Parquet modes.
+
+| Size | Mode | DuckDB time | rudb time | rudb speedup | DuckDB peak RSS | rudb peak RSS | rudb RSS reduction |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1k | Native | 0.137000 s | 0.037757 s | 3.63x | 56.38 MiB | 16.18 MiB | 3.48x |
+| 1k | Parquet | 0.172000 s | 0.034059 s | 5.05x | 56.08 MiB | 10.41 MiB | 5.39x |
+| 10k | Native | 0.162000 s | 0.080470 s | 2.01x | 56.44 MiB | 22.48 MiB | 2.51x |
+| 10k | Parquet | 0.216000 s | 0.072807 s | 2.97x | 60.31 MiB | 15.82 MiB | 3.81x |
+
+| Size | Mode | DuckDB Q17 | rudb Q17 | DuckDB peak RSS | rudb peak RSS |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1k | Native | 3.000 ms | 1.384 ms | 47.43 MiB | 14.91 MiB |
+| 1k | Parquet | 4.000 ms | 0.655 ms | 46.86 MiB | 9.56 MiB |
+| 10k | Native | 3.000 ms | 1.567 ms | 47.84 MiB | 18.06 MiB |
+| 10k | Parquet | 5.000 ms | 2.579 ms | 50.63 MiB | 12.66 MiB |
+
+### Load and file cost
+
+The one million row native load remains slower than DuckDB. rudb uses 2.72x less load peak RSS and produces a file 26.2 percent smaller, but takes 2.13x as long. This remains a separate optimization target.
+
+| Engine | Load wall | Load CPU | Load peak RSS | Native bytes |
+| --- | ---: | ---: | ---: | ---: |
+| DuckDB native | 4.957225 s | 8.766230 s | 1838.87 MiB | 281,030,656 |
+| rudb native | 10.550321 s | 25.905747 s | 675.93 MiB | 207,502,186 |
+
+### Method
+
+The audit runs each query once and then five hot repetitions. Every repetition starts a fresh process. The CLI timer covers query execution and result rendering. Linux `wait4` counters cover the exact child process and report wall time, CPU time, and maximum resident set size. Native modes open loaded single-file databases. Parquet modes read the same source Parquet on every query.
+
+All 43 original queries completed in all four modes at every measured size. At one million rows, 28 answers matched directly, seven had the same rows in another allowed order, and eight matched after an untimed deterministic tie-break retest. No unresolved answer difference remains.
+
+Supporting files:
+
+- [Small-size audit](certified-composite-topn/small-report.md)
+- [One-million-row audit](certified-composite-topn/one-million-report.md)
+- [Latest-main one-million-row baseline](certified-composite-topn/baseline-one-million-report.md)
+- [Small-size correctness classifications](certified-composite-topn/small-correctness.json)
+- [One-million-row correctness classifications](certified-composite-topn/one-million-correctness.json)
+- [Small-size machine-readable summary](certified-composite-topn/small-summary.json)
+- [One-million-row machine-readable summary](certified-composite-topn/one-million-summary.json)
+- [One-million-row metadata](certified-composite-topn/one-million-metadata.json)
+- [Paired load records on current main](certified-composite-topn/paired-load-latest-main.json)
