@@ -1,0 +1,79 @@
+{
+  "base_commit": "7055083b5ba40c868c574dcff9af955f4636424d",
+  "patch_commit": "bdaf22df",
+  "source_parquet": "/home/gopher/rudb-data/clickbench-rg8k-ladder/hits-1m.parquet",
+  "source_sha256": "3e42e6dfbca66f7cde45785373ae6990e2f65ce19d92f7d4380b21ed9f648091",
+  "measurement": "Linux wait4 per child; same SQL and source; alternating order",
+  "binaries": {
+    "main": {
+      "path": "/home/gopher/gate/rudb-main-latest/target/release/rudb",
+      "sha256": "04818272f2d23261a50ce91bdd89acf5d4856ec1b34fb709a7b63b8981b028e0"
+    },
+    "patch": {
+      "path": "/home/gopher/gate/rudb-anchored-counts/target/release/rudb",
+      "sha256": "58703602e7507635494ccbe5802f862f33ef9b1ecaf491cc259edc41bb750db7"
+    }
+  },
+  "runs": [
+    {
+      "engine": "main",
+      "round": 1,
+      "exit_code": 0,
+      "wall_s": 10.54713772,
+      "user_s": 24.184792,
+      "system_s": 3.483332,
+      "peak_rss_bytes": 710311936,
+      "database_bytes": 207447720
+    },
+    {
+      "engine": "patch",
+      "round": 1,
+      "exit_code": 0,
+      "wall_s": 10.270359513,
+      "user_s": 24.135999,
+      "system_s": 3.194924,
+      "peak_rss_bytes": 704028672,
+      "database_bytes": 207568187
+    },
+    {
+      "engine": "patch",
+      "round": 2,
+      "exit_code": 0,
+      "wall_s": 10.394041805,
+      "user_s": 24.799186,
+      "system_s": 3.247512,
+      "peak_rss_bytes": 686624768,
+      "database_bytes": 207538759
+    },
+    {
+      "engine": "main",
+      "round": 2,
+      "exit_code": 0,
+      "wall_s": 10.641191924,
+      "user_s": 23.534593,
+      "system_s": 2.963519,
+      "peak_rss_bytes": 707350528,
+      "database_bytes": 207527104
+    },
+    {
+      "engine": "main",
+      "round": 3,
+      "exit_code": 0,
+      "wall_s": 11.010831638,
+      "user_s": 24.653593,
+      "system_s": 2.767885,
+      "peak_rss_bytes": 691138560,
+      "database_bytes": 207590953
+    },
+    {
+      "engine": "patch",
+      "round": 3,
+      "exit_code": 0,
+      "wall_s": 10.552063806,
+      "user_s": 24.429094,
+      "system_s": 2.671863,
+      "peak_rss_bytes": 717787136,
+      "database_bytes": 207486238
+    }
+  ]
+}

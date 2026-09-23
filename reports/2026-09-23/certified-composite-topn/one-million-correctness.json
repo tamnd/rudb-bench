@@ -1,0 +1,273 @@
+[
+  {
+    "size": "1m",
+    "query": 1,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 2,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 3,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 4,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 5,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 6,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 7,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 8,
+    "result": "same rows; different order"
+  },
+  {
+    "size": "1m",
+    "query": 9,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 10,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 11,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 12,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 13,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 14,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 15,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 16,
+    "result": "deterministic retest match",
+    "statuses": [
+      "ok",
+      "ok",
+      "ok",
+      "ok"
+    ],
+    "sql": "SELECT UserID, COUNT(*) FROM hits GROUP BY UserID ORDER BY COUNT(*) DESC, 1, 2 LIMIT 10"
+  },
+  {
+    "size": "1m",
+    "query": 17,
+    "result": "same rows; different order"
+  },
+  {
+    "size": "1m",
+    "query": 18,
+    "result": "deterministic retest match",
+    "statuses": [
+      "ok",
+      "ok",
+      "ok",
+      "ok"
+    ],
+    "sql": "SELECT UserID, SearchPhrase, COUNT(*) FROM hits GROUP BY UserID, SearchPhrase ORDER BY 1, 2, 3 LIMIT 10"
+  },
+  {
+    "size": "1m",
+    "query": 19,
+    "result": "deterministic retest match",
+    "statuses": [
+      "ok",
+      "ok",
+      "ok",
+      "ok"
+    ],
+    "sql": "SELECT UserID, extract(minute FROM EventTime) AS m, SearchPhrase, COUNT(*) FROM hits GROUP BY UserID, m, SearchPhrase ORDER BY COUNT(*) DESC, 1, 2, 3, 4 LIMIT 10"
+  },
+  {
+    "size": "1m",
+    "query": 20,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 21,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 22,
+    "result": "same rows; different order"
+  },
+  {
+    "size": "1m",
+    "query": 23,
+    "result": "deterministic retest match",
+    "statuses": [
+      "ok",
+      "ok",
+      "ok",
+      "ok"
+    ],
+    "sql": "SELECT SearchPhrase, MIN(URL), MIN(Title), COUNT(*) AS c, COUNT(DISTINCT UserID) FROM hits WHERE Title LIKE '%Google%' AND URL NOT LIKE '%.google.%' AND SearchPhrase <> '' GROUP BY SearchPhrase ORDER BY c DESC, 1, 2, 3, 4, 5 LIMIT 10"
+  },
+  {
+    "size": "1m",
+    "query": 24,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 25,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 26,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 27,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 28,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 29,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 30,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 31,
+    "result": "same rows; different order"
+  },
+  {
+    "size": "1m",
+    "query": 32,
+    "result": "deterministic retest match",
+    "statuses": [
+      "ok",
+      "ok",
+      "ok",
+      "ok"
+    ],
+    "sql": "SELECT WatchID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG(ResolutionWidth) FROM hits WHERE SearchPhrase <> '' GROUP BY WatchID, ClientIP ORDER BY c DESC, 1, 2, 3, 4, 5 LIMIT 10"
+  },
+  {
+    "size": "1m",
+    "query": 33,
+    "result": "deterministic retest match",
+    "statuses": [
+      "ok",
+      "ok",
+      "ok",
+      "ok"
+    ],
+    "sql": "SELECT WatchID, ClientIP, COUNT(*) AS c, SUM(IsRefresh), AVG(ResolutionWidth) FROM hits GROUP BY WatchID, ClientIP ORDER BY c DESC, 1, 2, 3, 4, 5 LIMIT 10"
+  },
+  {
+    "size": "1m",
+    "query": 34,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 35,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 36,
+    "result": "same rows; different order"
+  },
+  {
+    "size": "1m",
+    "query": 37,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 38,
+    "result": "same rows; different order"
+  },
+  {
+    "size": "1m",
+    "query": 39,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 40,
+    "result": "deterministic retest match",
+    "statuses": [
+      "ok",
+      "ok",
+      "ok",
+      "ok"
+    ],
+    "sql": "SELECT TraficSourceID, SearchEngineID, AdvEngineID, CASE WHEN (SearchEngineID = 0 AND AdvEngineID = 0) THEN Referer ELSE '' END AS Src, URL AS Dst, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2013-07-01' AND EventDate <= '2013-07-31' AND IsRefresh = 0 GROUP BY TraficSourceID, SearchEngineID, AdvEngineID, Src, Dst ORDER BY PageViews DESC, 1, 2, 3, 4, 5, 6 LIMIT 10 OFFSET 1000"
+  },
+  {
+    "size": "1m",
+    "query": 41,
+    "result": "deterministic retest match",
+    "statuses": [
+      "ok",
+      "ok",
+      "ok",
+      "ok"
+    ],
+    "sql": "SELECT URLHash, EventDate, COUNT(*) AS PageViews FROM hits WHERE CounterID = 62 AND EventDate >= '2013-07-01' AND EventDate <= '2013-07-31' AND IsRefresh = 0 AND TraficSourceID IN (-1, 6) AND RefererHash = 3594120000172545465 GROUP BY URLHash, EventDate ORDER BY PageViews DESC, 1, 2, 3 LIMIT 10 OFFSET 100"
+  },
+  {
+    "size": "1m",
+    "query": 42,
+    "result": "original match"
+  },
+  {
+    "size": "1m",
+    "query": 43,
+    "result": "original match"
+  }
+]
