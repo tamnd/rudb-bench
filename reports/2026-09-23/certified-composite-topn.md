@@ -121,6 +121,68 @@ The current RuDB leaders and their fastest-rival comparison are:
 | 33 | 74.210 ms | 160 ms | 109 ms | 0.68x | two-key mixed aggregate |
 | 19 | 69.732 ms | 213 ms | 158 ms | 0.44x | three-key count |
 
+### Accepted directory-resident string frequency values
+
+The next complete-suite run found that twelve queries paid a fixed planning tax before execution.
+The bounded frequency synopsis stored stable dictionary codes, so estimating a literal such as
+`URL <> ''` called `frequency_prefix`, opened the multi-million-value global dictionary, decoded
+every bounded frequency code, and fetched scattered dictionary blocks merely to compare the
+literal. Persisted distinct counts were not responsible. Phase timings isolated 15--27 ms in the
+optimizer for the affected predicates; Q34 and Q35 spent about 26 ms building the physical plan.
+
+[tamnd/rudb#1425](https://github.com/tamnd/rudb/pull/1425), merged as
+`7055083b5ba40c868c574dcff9af955f4636424d`, adds the optional `RUDBFT1` directory block. While the
+writer already has the global dictionary decoded to rank its bounded frequencies, it copies the
+exact text aligned with at most 512 entries. The payload is capped at 1 MiB per column; a column
+over budget keeps the old code-only synopsis and query-time fallback. Old files remain readable.
+The planner now compares directory bytes and does not open the global dictionary.
+
+The direct old-file/new-file A/B used the same feature binary and alternated nine fresh processes
+per path. These are the twelve affected-query medians:
+
+| Query | Old format | `RUDBFT1` | Reduction |
+| ---: | ---: | ---: | ---: |
+| Q13 | 19.708 ms | 0.845 ms | 95.7% |
+| Q14 | 41.391 ms | 18.424 ms | 55.5% |
+| Q15 | 37.095 ms | 15.793 ms | 57.4% |
+| Q22 | 160.190 ms | 120.973 ms | 24.5% |
+| Q23 | 215.934 ms | 199.897 ms | 7.4% |
+| Q28 | 82.099 ms | 66.078 ms | 19.5% |
+| Q31 | 34.853 ms | 18.106 ms | 48.1% |
+| Q32 | 35.990 ms | 22.408 ms | 37.7% |
+| Q34 | 26.462 ms | 0.632 ms | 97.6% |
+| Q35 | 26.686 ms | 0.620 ms | 97.7% |
+| Q37 | 32.500 ms | 11.250 ms | 65.4% |
+| Q38 | 31.211 ms | 9.058 ms | 71.0% |
+| **sum** | **744.118 ms** | **484.083 ms** | **35.0%** |
+
+Across all 43 original queries, the same-commit old-format sum was 1.621008035 seconds and the
+new-format sum was 1.340982541 seconds: **1.209x faster**, or 17.27% lower. The retained rival
+measurements put the new RuDB total 1.25x ahead of ClickHouse's 1.678 seconds and 2.37x ahead of
+DuckDB's 3.177 seconds. This is the new accepted complete-suite state, but it is still not the
+ten-times workload target.
+
+The exact-parent load comparison separates the metadata cost from other engine changes:
+
+| Format | Load wall | User CPU | System CPU | Peak RSS | File bytes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| parent `e0961c8c`, code-only | 81.61 s | 196.20 s | 21.79 s | 2,315,800 KiB | 1,672,670,032 |
+| feature, `RUDBFT1` | 85.15 s | 191.05 s | 22.25 s | 2,287,576 KiB | 1,673,021,319 |
+
+The block adds 351,287 bytes, or 0.0210%. The single load sample is 3.54 seconds (4.34%) slower in
+wall time even though user CPU falls 5.15 seconds (2.62%) and peak RSS falls 28,224 KiB (1.22%).
+The wall regression is retained as measured rather than dismissed as noise.
+
+All 43 queries executed successfully. Thirty-five old/new outputs were byte-identical. Q23 had the
+same rows in a different order. Q18, Q22, Q32, Q33, Q39, Q40, and Q41 selected tied `LIMIT` rows;
+the deterministic verifier made every one byte-identical. The rebased implementation passed 146
+native, 41 catalog, and 470 executor tests plus strict Clippy before merge.
+
+The new concentration is led by Q29 (277.360 ms), Q23 (194.920 ms), Q24 (122.565 ms), Q22
+(121.390 ms), and Q21 (105.798 ms). This confirms the next storage gate: persist the versioned Q29
+source-to-host mapping and its target dictionary. Repeating that derivation in every query was
+already rejected below.
+
 ### Rejected query-time Q29 dictionary rewrite
 
 The first Q29 follow-up was deliberately measured before merge. Commit `06070e30` rewrote every
@@ -159,6 +221,10 @@ Raw timing artifacts beside the databases are:
 - `full43-clickhouse-timings.tsv` and `full43-clickhouse-medians.tsv`
 - `full43-comparison.tsv`
 - `q29-stable-regex-ab/ab-times.tsv` and its 18 byte-identical query outputs
+- `frequency-text-ab/timings.tsv` and `frequency-text-ab/medians.tsv`
+- `full43-ft1-old-db/timings.tsv` and `full43-ft1-old-db/medians.tsv`
+- `full43-ft1/timings.tsv` and `full43-ft1/medians.tsv`
+- `full43-ft1-verify/` for the seven tied-result deterministic comparisons
 
 ## Complete original-query validation
 
@@ -190,6 +256,8 @@ Host artifacts:
 
 - run root: `/home/gopher/clickbench-native-audit/20260923-frequency-pairs`
 - accepted native file: `hits-fq4.db`
+- accepted frequency-text file: `hits-ft1.db`
+- exact-parent frequency-text comparison file: `hits-ft1-parent.db`
 - FQ3 comparison file: `hits-fq3.db`
 - DuckDB comparison file: `hits.duckdb`
 - full-query outputs and deterministic retests: `full43-fq4/`
