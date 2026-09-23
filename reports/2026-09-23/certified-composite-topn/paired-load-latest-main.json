@@ -7,11 +7,11 @@
   "binaries": {
     "main": {
       "path": "/home/gopher/gate/rudb-main-latest/target/release/rudb",
-      "sha256": "04818272f2d23261a50ce91bdd89acf5d4856ec1b34fb709a7b63b8981b028e0"
+      "sha256": "2289cef28377dfa7100f943cbb12d4451f072ba6210190eaa40d027ae084c739"
     },
     "patch": {
       "path": "/home/gopher/gate/rudb-anchored-counts/target/release/rudb",
-      "sha256": "58703602e7507635494ccbe5802f862f33ef9b1ecaf491cc259edc41bb750db7"
+      "sha256": "94602cf9207c53af0e2eb5d2edd4d872e13963d477aae6a6aaed38bb969a1b50"
     }
   },
   "runs": [
@@ -19,61 +19,61 @@
       "engine": "main",
       "round": 1,
       "exit_code": 0,
-      "wall_s": 10.54713772,
-      "user_s": 24.184792,
-      "system_s": 3.483332,
-      "peak_rss_bytes": 710311936,
-      "database_bytes": 207447720
+      "wall_s": 10.697671137,
+      "user_s": 23.070527,
+      "system_s": 3.403535,
+      "peak_rss_bytes": 682516480,
+      "database_bytes": 207872494
     },
     {
       "engine": "patch",
       "round": 1,
       "exit_code": 0,
-      "wall_s": 10.270359513,
-      "user_s": 24.135999,
-      "system_s": 3.194924,
-      "peak_rss_bytes": 704028672,
-      "database_bytes": 207568187
+      "wall_s": 10.209479578,
+      "user_s": 21.437147,
+      "system_s": 3.124948,
+      "peak_rss_bytes": 718700544,
+      "database_bytes": 207835834
     },
     {
       "engine": "patch",
       "round": 2,
       "exit_code": 0,
-      "wall_s": 10.394041805,
-      "user_s": 24.799186,
-      "system_s": 3.247512,
-      "peak_rss_bytes": 686624768,
-      "database_bytes": 207538759
+      "wall_s": 10.639951533,
+      "user_s": 22.595058,
+      "system_s": 3.468166,
+      "peak_rss_bytes": 698204160,
+      "database_bytes": 207738720
     },
     {
       "engine": "main",
       "round": 2,
       "exit_code": 0,
-      "wall_s": 10.641191924,
-      "user_s": 23.534593,
-      "system_s": 2.963519,
-      "peak_rss_bytes": 707350528,
-      "database_bytes": 207527104
+      "wall_s": 10.8191006,
+      "user_s": 21.755971,
+      "system_s": 2.774973,
+      "peak_rss_bytes": 680431616,
+      "database_bytes": 207783594
     },
     {
       "engine": "main",
       "round": 3,
       "exit_code": 0,
-      "wall_s": 11.010831638,
-      "user_s": 24.653593,
-      "system_s": 2.767885,
-      "peak_rss_bytes": 691138560,
-      "database_bytes": 207590953
+      "wall_s": 10.619262336,
+      "user_s": 22.287104,
+      "system_s": 3.085763,
+      "peak_rss_bytes": 719499264,
+      "database_bytes": 207793614
     },
     {
       "engine": "patch",
       "round": 3,
       "exit_code": 0,
-      "wall_s": 10.552063806,
-      "user_s": 24.429094,
-      "system_s": 2.671863,
-      "peak_rss_bytes": 717787136,
-      "database_bytes": 207486238
+      "wall_s": 10.43011395,
+      "user_s": 22.127839,
+      "system_s": 3.270101,
+      "peak_rss_bytes": 704675840,
+      "database_bytes": 207847027
     }
   ]
 }

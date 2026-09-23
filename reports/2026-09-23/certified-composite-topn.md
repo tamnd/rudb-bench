@@ -296,14 +296,27 @@ Pair-summary construction previously decoded every dictionary code in a part whe
 
 Packed integer pages invert the FastLanes permutation and read the word or two that hold a selected value. RLE pages walk run lengths, identify requested run indices, and decode only those run values. Other cascade forms retain a full-decode fallback.
 
-Three alternating load runs against the current `7055083b` main used the same 999,975-row Parquet file and SQL. The selected decoder reduced mean load wall time by 3.1 percent. Mean peak RSS was effectively unchanged, with run-to-run variation larger than the difference. Q17 output from the first main and patch files had the same SHA-256.
+Three alternating load runs against `7055083b` used the same 999,975-row Parquet file and SQL. Both CLI binaries were rebuilt from their matching source revisions before measurement. The selected decoder reduced mean load wall time by 2.7 percent. Mean peak RSS rose by 1.9 percent in this sample; the six peaks vary enough that this is not evidence of a stable memory change. Q17 output from the first main and patch files had the same SHA-256.
 
 | Revision | Run 1 wall | Run 2 wall | Run 3 wall | Mean wall | Mean peak RSS |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Main `7055083b` | 10.547 s | 10.641 s | 11.011 s | 10.733 s | 670.37 MiB |
-| Selected decoding `bdaf22df` | 10.270 s | 10.394 s | 10.552 s | 10.405 s | 670.26 MiB |
+| Main `7055083b` | 10.698 s | 10.819 s | 10.619 s | 10.712 s | 661.99 MiB |
+| Selected decoding `bdaf22df` | 10.209 s | 10.640 s | 10.430 s | 10.427 s | 674.43 MiB |
 
-These figures replace the earlier two-run comparison on `e0961c8c`, which showed a larger RSS difference. The later main revision changed the load path. The [paired load records](certified-composite-topn/paired-load-latest-main.json) include every process wall time, CPU time, peak RSS, binary hash, and output file size.
+The first published paired table used stale CLI executables. A library-only build had left the old binaries in place. These corrected numbers and [paired load records](certified-composite-topn/paired-load-latest-main.json) replace that table. The record includes every process wall time, CPU time, peak RSS, binary hash, and output file size. The earlier two-run comparison on `e0961c8c` also used a different load path and is not the current-base result.
+
+One additional load per revision used `rudb_write_metrics()` in the same process. The following stage times are summed across workers; they are diagnostic work totals, not elapsed load time. Writer wait time sums blocked worker time, so it can exceed elapsed time.
+
+| Stage | Main wall sum | Selected decoding wall sum |
+| --- | ---: | ---: |
+| Convert | 935.9 ms | 956.6 ms |
+| Page builder | 5621.6 ms | 5543.4 ms |
+| Dictionary | 4898.2 ms | 4562.1 ms |
+| Write | 49.7 ms | 47.8 ms |
+| Publish | 2105.7 ms | 2055.2 ms |
+| Total elapsed | 10415.0 ms | 10005.9 ms |
+
+The same profiles recorded 122 writer waits, totaling 128.4 worker-seconds on main and 124.4 worker-seconds with selected decoding. That identifies writer queueing as a larger load-side issue than selected code decoding. The dictionary stage is where this change removes work; the single profile sample is not a separate performance claim.
 
 ### Size ladder
 
