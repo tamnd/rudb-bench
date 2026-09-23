@@ -121,6 +121,30 @@ The current RuDB leaders and their fastest-rival comparison are:
 | 33 | 74.210 ms | 160 ms | 109 ms | 0.68x | two-key mixed aggregate |
 | 19 | 69.732 ms | 213 ms | 158 ms | 0.44x | three-key count |
 
+### Rejected query-time Q29 dictionary rewrite
+
+The first Q29 follow-up was deliberately measured before merge. Commit `06070e30` rewrote every
+entry of the stable `Referer` dictionary once per query, deduplicated the derived hosts, and handed
+the aggregate a stable host-code space. A correctness fix required cache reuse to compare the
+source dictionary `Arc` identity, not merely its width: two equal-width dictionaries can assign
+different meanings to the same codes.
+
+All 18 measured outputs, the exact-parent output, the accepted RuDB output, and DuckDB output had
+the same SHA-256 (`10c82c31...072edb`). The nine fresh-process medians nevertheless reject the
+design:
+
+| Q29 path | Median wall | Median peak RSS | Relative wall |
+| --- | ---: | ---: | ---: |
+| exact parent `49ba593a` | 0.31 s | 1,029,328 KiB | 1.00x |
+| query-time stable rewrite `06070e30` | 1.52 s | 1,141,100 KiB | 4.90x slower |
+
+The rewrite serializes the decoding and transformation of about 2.7 million distinct `Referer`
+values behind the prepared call's one-time cell in every fresh process. Reusing the derived codes
+after that work cannot repay a 1.21-second startup deficit in one query. The branch was rebased to
+current main as `a73dcd62` but is intentionally not merged. The accepted engine-v3 direction is a
+versioned source-code-to-host-code map built once at native-file close, stored with its target
+dictionary, and read without decoding the source string payload at query time.
+
 Q17 no longer appears in the fifteen slowest RuDB queries. The remaining concentration is not the
 general composite hash table that explained the first 10M result. It is repeated string work:
 dictionary searches for substring predicates, decoding/fetch around selected strings, per-row
@@ -134,6 +158,7 @@ Raw timing artifacts beside the databases are:
 - `full43-duckdb-timings.tsv` and `full43-duckdb-medians.tsv`
 - `full43-clickhouse-timings.tsv` and `full43-clickhouse-medians.tsv`
 - `full43-comparison.tsv`
+- `q29-stable-regex-ab/ab-times.tsv` and its 18 byte-identical query outputs
 
 ## Complete original-query validation
 
