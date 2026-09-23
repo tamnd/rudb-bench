@@ -277,7 +277,7 @@ fn spent(s: &Spend) -> String {
     format!(
         "{} {} {} {} {} {}",
         s.kind.replace(' ', "-"),
-        micros(s.cpu),
+        micros(s.spent),
         s.rows_in,
         s.rows_out,
         s.operators,
@@ -288,7 +288,7 @@ fn spent(s: &Spend) -> String {
 /// Read that back.
 fn unspend(text: &str) -> Result<Spend, String> {
     let parts: Vec<&str> = text.split_whitespace().collect();
-    let [kind, cpu, rows_in, rows_out, operators, references] = parts[..] else {
+    let [kind, spent, rows_in, rows_out, operators, references] = parts[..] else {
         return Err(format!("a spend line needs six fields and this has `{text}`"));
     };
     let number = |field: &str, what: &str| {
@@ -296,7 +296,7 @@ fn unspend(text: &str) -> Result<Spend, String> {
     };
     Ok(Spend {
         kind: kind.to_owned(),
-        cpu: Duration::from_micros(number(cpu, "a duration")?),
+        spent: Duration::from_micros(number(spent, "a duration")?),
         rows_in: number(rows_in, "a row count")?,
         rows_out: number(rows_out, "a row count")?,
         operators: number(operators, "a count")? as usize,
@@ -844,7 +844,7 @@ mod tests {
             spend: vec![
                 Spend {
                     kind: "FileScan".to_owned(),
-                    cpu: Duration::from_micros(30_000),
+                    spent: Duration::from_micros(30_000),
                     rows_in: 0,
                     rows_out: 1_000,
                     operators: 1,
@@ -852,7 +852,7 @@ mod tests {
                 },
                 Spend {
                     kind: "Filter".to_owned(),
-                    cpu: Duration::from_micros(8_000),
+                    spent: Duration::from_micros(8_000),
                     rows_in: 1_000,
                     rows_out: 12,
                     operators: 2,

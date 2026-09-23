@@ -769,9 +769,9 @@ fn spend(result: &SuiteResult) -> String {
         .map(|s| {
             vec![
                 s.kind.clone(),
-                show(s.cpu),
+                show(s.spent),
                 if total > 0.0 {
-                    format!("{:.1}%", s.cpu.as_secs_f64() / total * 100.0)
+                    format!("{:.1}%", s.spent.as_secs_f64() / total * 100.0)
                 } else {
                     "nothing to share".to_owned()
                 },

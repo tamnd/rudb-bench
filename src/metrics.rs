@@ -127,9 +127,20 @@ pub struct Operator {
     pub rows_in: u64,
     /// Rows it handed on.
     pub rows_out: u64,
-    /// Wall clock inside it.
+    /// Wall clock inside it, added up over every instance that ran it.
+    ///
+    /// A pipeline that ran on six threads charges six threads' worth of calls here, so this is a
+    /// measure of work and not of elapsed time, and it is larger than the query's own wall clock
+    /// whenever anything ran in parallel.
     pub wall: Duration,
-    /// CPU inside it, which is what the cross check adds up.
+    /// CPU inside it, which is what the cross check adds up, and zero for an engine that does not
+    /// charge it.
+    ///
+    /// rudb only reads the thread clock around an operator when the session asked for a profile,
+    /// because that is a system call twice per operator per chunk and on a chunk of a thousand rows
+    /// it costs more than the call it is timing. Every ordinary run therefore has a wall clock per
+    /// operator and a zero here. Read [`Operator::spent`] rather than this field for anything that
+    /// is about where a query went.
     pub cpu: Duration,
     /// Whether it ran the reference implementation of its seam rather than a registered one.
     ///
@@ -137,6 +148,24 @@ pub struct Operator {
     /// where every operator is one is a run measuring the thing the fast paths exist to replace.
     /// Worth carrying into the report rather than reading off a log.
     pub reference_impl: bool,
+}
+
+impl Operator {
+    /// The time this operator charged itself, by whichever clock the engine actually read.
+    ///
+    /// The thread clock when the engine charged one and the wall clock inside the call when it did
+    /// not. Both are summed over instances and both answer the question the breakdown is asked,
+    /// which is which kind of operator the query went into. They are not the same number and the
+    /// difference is time an operator spent inside a call without running, so a run that wants CPU
+    /// specifically has to ask the engine for a profile and read [`Operator::cpu`].
+    ///
+    /// Without this the operator table on a rudb run was every kind at zero, sorted alphabetically
+    /// because the sort key was constant, which is the one column in the report that is supposed to
+    /// say what to work on next.
+    #[must_use]
+    pub fn spent(&self) -> Duration {
+        if self.cpu.is_zero() { self.wall } else { self.cpu }
+    }
 }
 
 /// What one kind of operator cost, with every operator of that kind added together.
@@ -153,8 +182,13 @@ pub struct Operator {
 pub struct Spend {
     /// `FileScan`, `Filter`, `Aggregate` and so on, as the engine names it.
     pub kind: String,
-    /// CPU inside operators of this kind.
-    pub cpu: Duration,
+    /// Time charged inside operators of this kind, by whichever clock the engine read.
+    ///
+    /// [`Operator::spent`] added up, so it is thread CPU for an engine that charges it and wall
+    /// clock inside the call for one that does not, and either way it is summed over every instance
+    /// that ran. Not named `cpu`, because on every ordinary rudb run it is not CPU and a reader who
+    /// believed the old name would have read a parallel scan's six threads as six threads of CPU.
+    pub spent: Duration,
     /// Rows they were handed, added up.
     ///
     /// The denominator of the only rate that means anything here. Two kinds costing the same is not
@@ -169,20 +203,20 @@ pub struct Spend {
 }
 
 impl Spend {
-    /// Nanoseconds of CPU per row handed in, and `None` for a kind that was handed none.
+    /// Nanoseconds charged per row handed in, and `None` for a kind that was handed none.
     ///
     /// A scan is handed nothing and produces everything, so this is `None` for it rather than
     /// infinite, and its cost per row is the row count on the other side. The report prints both
     /// columns for that reason.
     #[must_use]
     pub fn per_row_in(&self) -> Option<f64> {
-        (self.rows_in > 0).then(|| self.cpu.as_nanos() as f64 / self.rows_in as f64)
+        (self.rows_in > 0).then(|| self.spent.as_nanos() as f64 / self.rows_in as f64)
     }
 
-    /// Nanoseconds of CPU per row handed on, and `None` for a kind that handed on none.
+    /// Nanoseconds charged per row handed on, and `None` for a kind that handed on none.
     #[must_use]
     pub fn per_row_out(&self) -> Option<f64> {
-        (self.rows_out > 0).then(|| self.cpu.as_nanos() as f64 / self.rows_out as f64)
+        (self.rows_out > 0).then(|| self.spent.as_nanos() as f64 / self.rows_out as f64)
     }
 }
 
@@ -197,7 +231,7 @@ pub fn folded<'a>(every: impl Iterator<Item = &'a [Spend]>) -> Vec<Spend> {
         for spend in spends {
             match out.iter_mut().find(|held| held.kind == spend.kind) {
                 Some(held) => {
-                    held.cpu += spend.cpu;
+                    held.spent += spend.spent;
                     held.rows_in += spend.rows_in;
                     held.rows_out += spend.rows_out;
                     held.operators += spend.operators;
@@ -207,7 +241,7 @@ pub fn folded<'a>(every: impl Iterator<Item = &'a [Spend]>) -> Vec<Spend> {
             }
         }
     }
-    out.sort_by(|one, other| other.cpu.cmp(&one.cpu).then_with(|| one.kind.cmp(&other.kind)));
+    out.sort_by(|one, other| other.spent.cmp(&one.spent).then_with(|| one.kind.cmp(&other.kind)));
     out
 }
 
@@ -290,9 +324,24 @@ impl Document {
     }
 
     /// The CPU the operators charged themselves, added up.
+    ///
+    /// Real CPU and not [`Self::operator_spent`], because this is a term in the cross check and the
+    /// cross check compares it against CPU the engine measured around the outside. Summed wall
+    /// clock counts every thread separately, so putting it here would read a parallel query as
+    /// having accounted for several times the CPU it spent and would fail the tolerance on exactly
+    /// the queries worth measuring.
     #[must_use]
     pub fn operator_cpu(&self) -> Duration {
         self.operators.iter().map(|o| o.cpu).sum()
+    }
+
+    /// What the operators charged themselves by whichever clock the engine read, added up.
+    ///
+    /// The denominator of the shares in the operator table, and the thing that table's percentages
+    /// have to be out of. See [`Operator::spent`].
+    #[must_use]
+    pub fn operator_spent(&self) -> Duration {
+        self.operators.iter().map(Operator::spent).sum()
     }
 
     /// The CPU the pipelines charged themselves, added up.
@@ -337,7 +386,7 @@ impl Document {
             .map(|o| {
                 vec![Spend {
                     kind: o.kind.clone(),
-                    cpu: o.cpu,
+                    spent: o.spent(),
                     rows_in: o.rows_in,
                     rows_out: o.rows_out,
                     operators: 1,
@@ -1147,22 +1196,53 @@ mod tests {
         // Neither filter on its own is the dearest operator in the query. Together they are the
         // dearest kind, which is the thing worth working on and the thing the fold is for.
         assert_eq!(folded[0].kind, "Filter");
-        assert_eq!(folded[0].cpu, Duration::from_nanos(700));
+        assert_eq!(folded[0].spent, Duration::from_nanos(700));
         assert_eq!(folded[0].operators, 2);
         assert_eq!(folded[0].reference_impls, 1, "one of the two filters was the reference");
         assert_eq!(folded[0].rows_in, 200, "both filters were handed a hundred");
         assert_eq!(folded[1].kind, "Get");
         // What the table divides by has to be what the operators charged, or the shares are of
         // something that is not on the page.
-        let total: Duration = folded.iter().map(|s| s.cpu).sum();
-        assert_eq!(total, document.operator_cpu());
+        let total: Duration = folded.iter().map(|s| s.spent).sum();
+        assert_eq!(total, document.operator_spent());
+    }
+
+    #[test]
+    fn a_run_that_charged_no_operator_cpu_still_folds_by_what_the_operators_took() {
+        // The shape of every ordinary rudb run. The thread clock costs a system call twice per
+        // operator per chunk, so the engine only reads it when the session asked for a profile, and
+        // a suite measures what it would measure without one. Folding on `cpu_ns` read that as every
+        // kind at zero, which sorted the table alphabetically because the sort key was constant, and
+        // it was the scan being most of a TPC-H query that the table failed to say.
+        let charged = |id: u64, kind: &str, wall_ns: u64| {
+            format!(
+                "{{\"id\":{id},\"pipeline\":0,\"kind\":\"{kind}\",\"detail\":null,\"rows_in\":100,\
+                 \"rows_out\":90,\"wall_ns\":{wall_ns},\"cpu_ns\":0,\"bytes_read\":0,\
+                 \"bytes_decoded\":0,\"bytes_spilled\":0,\"memory\":{{\"reserved\":0,\
+                 \"high_water\":0}},\"reference_impl\":false}}"
+            )
+        };
+        let text = one(
+            1000,
+            &format!("{},{}", charged(0, "Project", 2_855), charged(1, "Scan", 585_006_542)),
+        );
+        let document = Document::parse(&text).expect("this is the shape rudb writes");
+        assert_eq!(document.operator_cpu(), Duration::ZERO, "no profile was asked for");
+
+        let folded = document.by_kind();
+        assert_eq!(folded[0].kind, "Scan", "the dearest kind is first and it is not alphabetical");
+        assert_eq!(folded[0].spent, Duration::from_nanos(585_006_542));
+        assert_eq!(folded[1].kind, "Project");
+        let total: Duration = folded.iter().map(|s| s.spent).sum();
+        assert_eq!(total, document.operator_spent());
+        assert!(total > Duration::ZERO, "a folded table of zeroes says nothing at all");
     }
 
     #[test]
     fn a_kind_handed_no_rows_has_no_rate_rather_than_a_division_by_zero() {
         let scan = Spend {
             kind: "FileScan".to_owned(),
-            cpu: Duration::from_nanos(500),
+            spent: Duration::from_nanos(500),
             rows_in: 0,
             rows_out: 100,
             operators: 1,
@@ -1176,9 +1256,9 @@ mod tests {
     fn folding_the_foldings_gives_what_folding_the_operators_gives() {
         // The suite total is this function over the queries and one query is this function over its
         // operators, and the two agreeing is the only reason a share in the report means anything.
-        let one_query = |kind: &str, cpu: u64| Spend {
+        let one_query = |kind: &str, spent: u64| Spend {
             kind: kind.to_owned(),
-            cpu: Duration::from_nanos(cpu),
+            spent: Duration::from_nanos(spent),
             rows_in: 10,
             rows_out: 5,
             operators: 1,
@@ -1189,7 +1269,7 @@ mod tests {
         let folded = folded([first.as_slice(), second.as_slice()].into_iter());
         assert_eq!(folded.len(), 2);
         assert_eq!(folded[0].kind, "Filter");
-        assert_eq!(folded[0].cpu, Duration::from_nanos(120));
+        assert_eq!(folded[0].spent, Duration::from_nanos(120));
         assert_eq!(folded[0].operators, 2);
         assert_eq!(folded[0].rows_in, 20);
         assert_eq!(folded[1].kind, "Get");
