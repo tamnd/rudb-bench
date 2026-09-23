@@ -1,5 +1,11 @@
 # Certified native host groups: 1M and 10M ClickBench gate
 
+**Retracted for the storage-format performance goal.** This experiment evaluated Q29's
+fixed host expression and stored its group aggregates while loading the file. That is a
+materialized query answer. The timings below remain a record of the experiment, but they
+must not be counted as query-engine speedups. The engine now computes these groups when
+the query runs.
+
 23 September 2026. Engine change: [tamnd/rudb#1434](https://github.com/tamnd/rudb/pull/1434),
 merged as `3616be4c`. This is a follow-up to [the bounded-frequency report](certified-composite-topn.md),
 not a replacement for its DuckDB and ClickHouse baseline. All reports remain in `tamnd/rudb-bench`.
