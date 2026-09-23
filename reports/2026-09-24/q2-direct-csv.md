@@ -20,3 +20,18 @@ These wall times were recorded on an eight-CPU shared host with load averages fa
 The answers for Q2 were 6, 62, 6,284, and 202,134; Q3 returned `37,1000,1503.928`, `627,10000,1517.7663`, `74434,999975,1514.0342458561463`, and `3152344,10000000,1508.8046441`. This host's 10m Parquet file has exactly 10,000,000 rows and differs from the earlier 9,999,750-row native file. Results from those two 10m files should not be pooled.
 
 The measured RuDB binary is commit `bee49934`, SHA-256 `c7523a2f82e49ab08da1438ba99be0bb74c2fb4b9b287d3556d67f8142758c6a`; DuckDB is v2.0.0-dev84237, SHA-256 `bb7b276fa5805c257becbb0e7238297d45aa4ea6d33ad933637cc0fa0a7d2531`. The engine branch was rebased on `27faf28b` after these runs. The [raw Q2 and Q3 records](q2-direct-csv/) preserve every process sample. The [Q2 runner](../../scripts/q2-fresh-process.py) and [Q3 runner](../../scripts/q3-fresh-process.py) preserve the measurement method.
+
+## Check after rebase
+
+The rebased engine commit `b1d1a0f6` produced release binary SHA-256 `86df52f51e61f1b5fb4edf84172c11b8335b22eb8b7a9a6ac4273cc432d0c05f`. It ran against the same native files and DuckDB binary. Each table row below is another 51 alternating fresh-process pairs with complete output checks. Q3 was repeated at the two sizes where process memory is the tightest; its 1m and 10m answers were checked once on the rebased binary.
+
+| Query | Rows | RuDB wall | DuckDB wall | RuDB peak RSS | DuckDB peak RSS | DuckDB / RuDB RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Q2 | 1k | 15.703 ms | 477.260 ms | 3.88 MiB | 35.28 MiB | 9.10x |
+| Q2 | 10k | 18.099 ms | 552.466 ms | 3.88 MiB | 35.35 MiB | 9.12x |
+| Q2 | 1m | 29.670 ms | 925.485 ms | 3.75 MiB | 38.28 MiB | 10.21x |
+| Q2 | 10m | 39.148 ms | 961.417 ms | 3.75 MiB | 57.68 MiB | 15.38x |
+| Q3 | 1k | 16.636 ms | 494.004 ms | 3.75 MiB | 35.91 MiB | 9.58x |
+| Q3 | 10k | 46.977 ms | 657.282 ms | 3.62 MiB | 35.40 MiB | 9.77x |
+
+Host contention remained high and varied between runs, so this table does not establish a quiet-host wall-time speedup. The rebased result confirms the Q2 memory gap at 1k and 10k and clears 10x peak RSS at 1m and 10m. Its [raw records](q2-direct-csv/rebased/) contain all 612 process measurements.
