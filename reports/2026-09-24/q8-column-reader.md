@@ -1,0 +1,18 @@
+# Q8 opens one native integer column
+
+The encoded Q8 fold still opened the full native table directory and built page caches for every column. A 10m Callgrind run attributed 28,776,688 of 77,606,011 process instructions to `Catalog::table`. The new path checks the committed directory, walks its stripe metadata, and reads only the selected integer column's index sections and encoded parts. Sparse parts are counted from their row encoding; nullable or other integer parts decode only that part. It computes counts as the SQL runs and stores no grouped answer in the file. The native writer and file bytes are unchanged.
+
+The table shows medians from 11 alternating fresh-process trials per size. Each engine opened its native file, ran the same Q8 SQL, wrote complete CSV output, and exited. The runner checked every key and count against DuckDB and required descending count order. SQL leaves tied-group order unspecified, so either tie order is accepted. Both native files came from the same Parquet rows. The 1m and 10m database pairs were moved together to a temporary memory filesystem when the shared server's build disk became full. The 1k and 10k pairs stayed on disk.
+
+| Rows | Earlier RuDB wall | Column reader wall | DuckDB wall | DuckDB / reader wall | Reader CPU | DuckDB CPU | Earlier RuDB RSS | Reader RSS | DuckDB RSS | DuckDB / reader RSS |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1k | 32.147 ms | 10.054 ms | 277.331 ms | 27.58x | 4.649 ms | 200.866 ms | 5.25 MiB | 4.62 MiB | 37.88 MiB | 8.19x |
+| 10k | 98.287 ms | 16.225 ms | 351.763 ms | 21.68x | 6.715 ms | 200.278 ms | 5.62 MiB | 4.62 MiB | 37.77 MiB | 8.17x |
+| 1m | 58.287 ms | 17.683 ms | 344.558 ms | 19.49x | 6.569 ms | 191.598 ms | 7.00 MiB | 4.75 MiB | 40.91 MiB | 8.61x |
+| 10m | 86.930 ms | 89.792 ms | 532.280 ms | 5.93x | 49.673 ms | 272.616 ms | 7.88 MiB | 5.25 MiB | 60.19 MiB | 11.46x |
+
+The short 10m run was noisy enough to reverse the wall-time comparison with the earlier RuDB path. In 51 alternating 10m trials, the earlier RuDB path measured 90.371 ms wall, 25.179 ms CPU, and 7.88 MiB peak RSS. The column reader measured 76.049 ms, 20.092 ms, and 5.25 MiB. DuckDB measured 548.719 ms, 289.310 ms, and 60.30 MiB. The column reader was 1.19x faster than the earlier RuDB path in wall time and used 1.50x less peak RSS. Against DuckDB it was 7.22x faster in wall time and used 11.49x less peak RSS. This reaches the 10x memory target for Q8 at 10m rows, but the 10x wall-time target remains open. The 1k, 10k, and 1m cases exceed 10x wall time but remain below 10x peak-memory improvement.
+
+The first column-reader prototype stopped when it found one non-cascade or nullable part, reopened the full table, and made the 10m result worse. The measured version decodes such parts through the selected column's page without building a table reader. A 30-process `perf` profile of the final 10m path assigned 18.86% of sampled cycles to `Catalog::integer_tally`, 8.85% to vector unpacking, and 6.39% to B-tree insertion inside the integer codec tally. These are the next query CPU costs to examine. The server was shared and contended; paired medians do not establish quiet-host latency.
+
+The [runner](../../scripts/q8-fresh-process.py) and [raw samples](q8-column-reader/) reproduce the comparison. The earlier RuDB binary had SHA-256 `e07cd066d99b7c5fcafe9e6518c5bae309b813f934f1f5138de56a38b8884738`. The column-reader binary was built from RuDB `334a3243` and had SHA-256 `9d35ab0f541cd040301d3f1b9ed8e8bf9b84de00b2a034c87070eff01a0d9b3d`. DuckDB v2.0.0-dev84237 had SHA-256 `bb7b276fa5805c257becbb0e7238297d45aa4ea6d33ad933637cc0fa0a7d2531`. The 1m source has 999,975 rows; the 10m source has 10,000,000.
