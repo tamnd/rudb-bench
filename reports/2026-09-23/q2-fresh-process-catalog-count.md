@@ -1,35 +1,48 @@
 # ClickBench Q2 in a fresh process
 
-`SELECT COUNT(*) FROM hits WHERE AdvEngineID <> 0` used one SQL statement per new CLI process. The answer was checked on every run. This report compares the native files, not Parquet. Both CLIs received `-readonly`, `-noheader`, `-csv`, and `-c` with the same SQL. Wall time includes process startup, database open, SQL execution, output, and exit. Child CPU time and peak RSS came from `wait4`. File contents remained in the operating system page cache between runs; this is fresh process, not cold disk.
+`SELECT COUNT(*) FROM hits WHERE AdvEngineID <> 0` runs once per new CLI process. Every result is checked against the expected count. Both engines receive the same SQL and the same `-readonly`, `-noheader`, `-csv`, and `-c` flags. Native files are used on both sides. The operating system page cache is not flushed between processes.
 
-The Q2 count is 63,365 at 10 million rows. The server used DuckDB v2.0.0-dev84237 (`cc7e7bac7f`) and rudb based on `14aeb85e` with the native catalog certificate change. Each pair alternated execution order over 51 trials. The rudb file was a copy of the previous native file with `Writer::certify_counts` applied once. New files written by this version carry the same certificate at load time. The DuckDB file was the existing DuckDB native file.
+**Measurement correction:** The first version of this report launched SQL directly from Python and used `wait4` in the Python parent. A forked child can inherit the parent's resident high-water mark before `exec`, which inflated rudb's reported RSS. It also included Python's spawn overhead in wall time. The results below were remeasured with the repository's small C `measure-child` helper. That helper calls `posix_spawnp`, times only the SQL child, and reads that child's `wait4` usage. The earlier raw files were removed. A direct GNU `time -v` check found 5,484 KiB for rudb and 65,620 KiB for DuckDB on the 10m query, consistent with the helper's RSS measurements.
+
+The server ran DuckDB v2.0.0-dev84237 (`cc7e7bac7f`) and rudb release code from PR #1495, rebased on `14aeb85e`. The rudb file was copied from the existing 10m native file, then updated once with `Writer::certify_counts`. A new file written by this rudb version gets the same catalog certificate during load. Each 51-trial run alternated execution order. Wall time covers the child process from spawn through exit, including SQL parsing, file open, answer rendering, and cleanup. Child CPU time is user plus system time. Peak RSS is the child's maximum resident set, not allocated bytes or a memory delta.
 
 | 10m native file, 51 paired trials | Median wall | Median child CPU | Median peak RSS |
 | --- | ---: | ---: | ---: |
-| DuckDB | 42.866 ms | 76.800 ms | 66.32 MiB |
-| rudb with catalog certificate | 3.613 ms | 3.470 ms | 13.64 MiB |
-| DuckDB / rudb | 11.86x | 22.13x | 4.86x |
+| DuckDB | 31.943 ms | 47.882 ms | 64.83 MiB |
+| rudb with catalog certificate | 2.046 ms | 2.018 ms | 5.39 MiB |
+| DuckDB / rudb | 15.61x | 23.73x | 12.03x |
 
-An independent four-way run alternated the unchanged rudb main binary, the changed binary on the original file, the changed binary on the certified file, and DuckDB for 51 trials. It isolates the two changes under one ordering:
+A second 51-trial pair returned 31.589 ms and 64.90 MiB for DuckDB against 2.048 ms and 5.39 MiB for rudb. The resulting wall and RSS ratios were 15.42x and 12.04x. Both fresh-process targets are met at 10 million rows in these two runs.
 
-| 10m native file, 51 alternating trials | Median wall | Median child CPU | Median peak RSS |
+The certified format was also checked across the size ladder, with 51 alternating pairs at each size:
+
+| Rows | Answer | DuckDB wall | rudb wall | Wall ratio | DuckDB RSS | rudb RSS | RSS ratio |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 6 | 22.229 ms | 1.219 ms | 18.24x | 40.07 MiB | 5.39 MiB | 7.44x |
+| 10,000 | 62 | 22.552 ms | 1.567 ms | 14.39x | 40.05 MiB | 5.39 MiB | 7.43x |
+| 1,000,000 | 6,284 | 23.940 ms | 1.166 ms | 20.54x | 41.33 MiB | 5.39 MiB | 7.67x |
+| 10,000,000 | 63,365 | 31.943 ms | 2.046 ms | 15.61x | 64.83 MiB | 5.39 MiB | 12.03x |
+
+The time target is met at each measured size. The 10x RSS target is met at 10m but remains open at 1k, 10k, and 1m. The 5.39 MiB rudb Q2 process footprint sets a practical floor for those smaller DuckDB peaks. An empty `SELECT 1` follows the full engine path and peaks around 7.70 MiB, so it is not a suitable proxy for Q2's narrow certified path.
+
+A separate 51-trial four-way run isolates the work on the 10m file:
+
+| 10m native file | Median wall | Median child CPU | Median peak RSS |
 | --- | ---: | ---: | ---: |
-| DuckDB | 46.788 ms | 80.511 ms | 66.29 MiB |
-| rudb main | 34.728 ms | 34.530 ms | 36.61 MiB |
-| rudb, original directory | 9.971 ms | 9.813 ms | 13.76 MiB |
-| rudb, catalog certificate | 3.565 ms | 3.412 ms | 13.76 MiB |
+| DuckDB | 31.725 ms | 52.503 ms | 65.07 MiB |
+| rudb main before PR #1495 | 24.347 ms | 24.292 ms | 36.58 MiB |
+| rudb PR #1495 on the older file | 7.505 ms | 7.461 ms | 5.70 MiB |
+| rudb PR #1495 on the certified file | 2.067 ms | 2.044 ms | 5.39 MiB |
 
-The full table directory is 11,458,990 bytes. The unchanged engine checks its checksum, decodes all stripes and zone maps, and builds a reader before Q2 consumes a roughly 417-byte frequency synopsis. Profiling placed about 20 ms in directory decode and about 2 ms in reader construction. The first change checks the directory but skims only stripe null counts and the needed frequency synopsis. The second change writes an exact non-null, nonzero count for integer columns into the small checksummed catalog. It still verifies the directory checksum before answering. On the 10m file, the certified native count lookup itself took about 1.5 ms.
+The old fresh-process path decoded the entire 11,458,990-byte table directory and built all stripe readers before Q2 used one small frequency synopsis. Profiling placed about 20 ms in directory decoding and about 2 ms in reader construction. The new reader can skim the older directory for the needed null counts and synopsis. Newly written or certified files put the exact non-null, nonzero count in the small checksummed catalog. The query still verifies the table directory checksum before using that count. One-time certification of an older file is not included in query time.
 
-The same certified format was checked from 1,000 to 10 million rows. This 21-trial mixed-size run alternated process order and verified each count:
+The [fresh-process script](../../scripts/q2-fresh-process.py) uses the existing [resource helper](../../scripts/measure-child.c). Raw records are available for [1k](q2-fresh-1k.json), [10k](q2-fresh-10k.json), [1m](q2-fresh-1m.json), the [10m pair](q2-fresh-10m.json), its [repeat](q2-fresh-10m-repeat.json), and the [10m four-way run](q2-fresh-10m-four-way.json).
 
-| Rows | Answer | DuckDB wall | rudb wall | DuckDB / rudb | DuckDB RSS | rudb RSS |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1,000 | 6 | 34.773 ms | 2.372 ms | 14.66x | 40.07 MiB | 13.95 MiB |
-| 10,000 | 62 | 33.875 ms | 2.836 ms | 11.94x | 40.07 MiB | 13.95 MiB |
-| 1,000,000 | 6,284 | 38.410 ms | 2.295 ms | 16.74x | 41.51 MiB | 13.95 MiB |
-| 10,000,000 | 63,365 | 47.059 ms | 3.937 ms | 11.95x | 66.38 MiB | 13.95 MiB |
+Build the helper on Linux before running the script:
 
-The server became busy with unrelated compilation and query work during these runs. DuckDB's 10m median moved from 31.817 ms in an earlier quiet 21-trial baseline to 42.866 ms in the final paired run. The table above records what happened under the paired order, but it does not establish a stable 10x wall-time advantage across host conditions. A quiet-server rerun is needed for that claim. Peak RSS does not meet the 10x goal: the rudb CLI alone peaks near 14 MiB even for `SELECT 1`, so the current executable cannot reach one tenth of DuckDB's 10m 66 MiB peak. Changing the allocator from mimalloc to glibc left the rudb peak at 13.69 MiB in a separate alternating run.
-
-The reusable two-engine measurement script is [`scripts/q2-fresh-process.py`](../../scripts/q2-fresh-process.py). Raw 51-trial paired results are in [`q2-fresh-process-pair.json`](q2-fresh-process-pair.json), four-way results in [`q2-fresh-process-four-way.json`](q2-fresh-process-four-way.json), and mixed-size results in [`q2-fresh-process-sizes.json`](q2-fresh-process-sizes.json). The native certificate changes the file catalog only, so it adds no row scan at query time. Certification of an older file is an explicit one-time metadata update; it is not included in the query time.
+```sh
+cc -O2 -Wall -Wextra scripts/measure-child.c -o scripts/measure-child
+python3 scripts/q2-fresh-process.py --rudb /path/to/rudb --duckdb /path/to/duckdb \
+  --rudb-db /path/to/hits.rudb --duckdb-db /path/to/hits.duckdb \
+  --expected 63365 --rounds 51 --json /path/to/q2-results.json
+```
