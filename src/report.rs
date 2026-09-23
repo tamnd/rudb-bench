@@ -623,7 +623,7 @@ impl SuiteResult {
     /// What every operator charged, added up, which is the denominator of a share.
     #[must_use]
     pub fn spent(&self) -> Duration {
-        self.queries.iter().flat_map(|q| q.spend.iter()).map(|s| s.cpu).sum()
+        self.queries.iter().flat_map(|q| q.spend.iter()).map(|s| s.spent).sum()
     }
 
     /// The queries where one kind of operator cost the most, worst first.
@@ -638,7 +638,7 @@ impl SuiteResult {
             .iter()
             .filter_map(|q| {
                 let spend = q.spend.iter().find(|s| s.kind == kind)?;
-                Some((q.name.clone(), spend.cpu))
+                Some((q.name.clone(), spend.spent))
             })
             .collect();
         out.sort_by_key(|one| std::cmp::Reverse(one.1));
@@ -1658,14 +1658,14 @@ pub fn comparison(compared: &Comparison) -> String {
         let total = result.spent().as_secs_f64();
         line(&mut out, &format!("where {} spent it, by kind of operator", result.engine));
         for spend in folded.iter().take(5) {
-            let share = if total > 0.0 { spend.cpu.as_secs_f64() / total * 100.0 } else { 0.0 };
+            let share = if total > 0.0 { spend.spent.as_secs_f64() / total * 100.0 } else { 0.0 };
             let rate = spend
                 .per_row_in()
                 .or_else(|| spend.per_row_out())
                 .map_or_else(|| "no rows".to_owned(), |ns| format!("{ns:.1}ns a row"));
             line(
                 &mut out,
-                &format!("  {:<12} {:>10} {:>6.1}%  {rate}", spend.kind, show(spend.cpu), share),
+                &format!("  {:<12} {:>10} {:>6.1}%  {rate}", spend.kind, show(spend.spent), share),
             );
         }
         if let Some(worst) = folded.first() {
