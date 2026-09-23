@@ -1,6 +1,6 @@
 # Q2 direct CSV from complete native frequencies
 
-Q2 now adds nonzero entries from a complete numeric column frequency table when the statement runs and prints the count directly. The native file stores no filtered count. A file without a complete table, or SQL outside the simple filtered-count shape, uses the regular execution path. The change removes the general one-row result from this fresh-process CSV case.
+[RuDB PR #1622](https://github.com/tamnd/rudb/pull/1622) adds nonzero entries from a complete numeric column frequency table when Q2 runs and prints the count directly. The native file stores no filtered count. A file without a complete table, or SQL outside the simple filtered-count shape, uses the regular execution path. The change removes the general one-row result from this fresh-process CSV case.
 
 The 51 alternating fresh-process pairs at each size used the same SQL, `SELECT COUNT(*) FROM hits WHERE AdvEngineID <> 0`, against native files loaded from the same Parquet source with the same `CREATE TABLE`, `INSERT`, and `CHECKPOINT` SQL. Every complete CSV answer matched DuckDB. Q3 ran as a control because both statements share the CLI binary. The helper measures the SQL child's wall time and peak RSS with `wait4`; the operating system page cache was not cleared.
 
