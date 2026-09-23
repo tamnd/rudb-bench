@@ -1,5 +1,11 @@
 # Certified composite TopN at ten million rows
 
+**Retracted for the storage-format performance goal.** This experiment stored the leading
+`(UserID, SearchPhrase)` groups and their counts while loading the file. Those are a
+materialized answer to Q17, not general column statistics. The timings below describe the
+old implementation and must not be counted as query-engine speedups. The engine now computes
+the groups when the query runs.
+
 RuDB now answers ClickBench Q17 from certified native metadata in a median **2.600 ms** over
 9,999,750 rows. On the same `gamingpc-wsl` host and source rows, fresh-process medians were
 101 ms for ClickHouse and 161 ms for DuckDB. RuDB is therefore **38.9x faster than ClickHouse**
