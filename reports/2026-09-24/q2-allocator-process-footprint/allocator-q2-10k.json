@@ -1,0 +1,233 @@
+[
+  {
+    "engine": "mimalloc",
+    "trial": 0,
+    "wall_ns": 8390262,
+    "cpu_s": 0.008195,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "system",
+    "trial": 0,
+    "wall_ns": 5021372,
+    "cpu_s": 0.004799,
+    "peak_rss_bytes": 3801088
+  },
+  {
+    "engine": "duckdb",
+    "trial": 0,
+    "wall_ns": 131242768,
+    "cpu_s": 0.122055,
+    "peak_rss_bytes": 37113856
+  },
+  {
+    "engine": "system",
+    "trial": 1,
+    "wall_ns": 3487121,
+    "cpu_s": 0.003177,
+    "peak_rss_bytes": 3801088
+  },
+  {
+    "engine": "duckdb",
+    "trial": 1,
+    "wall_ns": 379481399,
+    "cpu_s": 0.25905,
+    "peak_rss_bytes": 36978688
+  },
+  {
+    "engine": "mimalloc",
+    "trial": 1,
+    "wall_ns": 7145250,
+    "cpu_s": 0.006975,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "duckdb",
+    "trial": 2,
+    "wall_ns": 179748791,
+    "cpu_s": 0.119563,
+    "peak_rss_bytes": 36855808
+  },
+  {
+    "engine": "mimalloc",
+    "trial": 2,
+    "wall_ns": 3671826,
+    "cpu_s": 0.003475,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "system",
+    "trial": 2,
+    "wall_ns": 44932330,
+    "cpu_s": 0.031714,
+    "peak_rss_bytes": 3801088
+  },
+  {
+    "engine": "mimalloc",
+    "trial": 3,
+    "wall_ns": 4216040,
+    "cpu_s": 0.004,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "system",
+    "trial": 3,
+    "wall_ns": 3601023,
+    "cpu_s": 0.003457,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "duckdb",
+    "trial": 3,
+    "wall_ns": 223511139,
+    "cpu_s": 0.155673,
+    "peak_rss_bytes": 36982784
+  },
+  {
+    "engine": "system",
+    "trial": 4,
+    "wall_ns": 3639767,
+    "cpu_s": 0.003403,
+    "peak_rss_bytes": 3801088
+  },
+  {
+    "engine": "duckdb",
+    "trial": 4,
+    "wall_ns": 172825604,
+    "cpu_s": 0.159478,
+    "peak_rss_bytes": 37113856
+  },
+  {
+    "engine": "mimalloc",
+    "trial": 4,
+    "wall_ns": 5125575,
+    "cpu_s": 0.00486,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "duckdb",
+    "trial": 5,
+    "wall_ns": 208252582,
+    "cpu_s": 0.12162300000000001,
+    "peak_rss_bytes": 36855808
+  },
+  {
+    "engine": "mimalloc",
+    "trial": 5,
+    "wall_ns": 4723207,
+    "cpu_s": 0.004552,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "system",
+    "trial": 5,
+    "wall_ns": 3699097,
+    "cpu_s": 0.0034980000000000002,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "mimalloc",
+    "trial": 6,
+    "wall_ns": 4653706,
+    "cpu_s": 0.003654,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "system",
+    "trial": 6,
+    "wall_ns": 4496272,
+    "cpu_s": 0.0030419999999999996,
+    "peak_rss_bytes": 3801088
+  },
+  {
+    "engine": "duckdb",
+    "trial": 6,
+    "wall_ns": 207866943,
+    "cpu_s": 0.173778,
+    "peak_rss_bytes": 36982784
+  },
+  {
+    "engine": "system",
+    "trial": 7,
+    "wall_ns": 4231378,
+    "cpu_s": 0.003905,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "duckdb",
+    "trial": 7,
+    "wall_ns": 252311643,
+    "cpu_s": 0.209314,
+    "peak_rss_bytes": 36982784
+  },
+  {
+    "engine": "mimalloc",
+    "trial": 7,
+    "wall_ns": 8900995,
+    "cpu_s": 0.007573,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "duckdb",
+    "trial": 8,
+    "wall_ns": 195749431,
+    "cpu_s": 0.131788,
+    "peak_rss_bytes": 36716544
+  },
+  {
+    "engine": "mimalloc",
+    "trial": 8,
+    "wall_ns": 3753417,
+    "cpu_s": 0.003492,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "system",
+    "trial": 8,
+    "wall_ns": 19035048,
+    "cpu_s": 0.018739,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "mimalloc",
+    "trial": 9,
+    "wall_ns": 3681062,
+    "cpu_s": 0.003469,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "system",
+    "trial": 9,
+    "wall_ns": 3709035,
+    "cpu_s": 0.003474,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "duckdb",
+    "trial": 9,
+    "wall_ns": 136344242,
+    "cpu_s": 0.103247,
+    "peak_rss_bytes": 36851712
+  },
+  {
+    "engine": "system",
+    "trial": 10,
+    "wall_ns": 3572571,
+    "cpu_s": 0.003409,
+    "peak_rss_bytes": 3932160
+  },
+  {
+    "engine": "duckdb",
+    "trial": 10,
+    "wall_ns": 184474793,
+    "cpu_s": 0.17111500000000002,
+    "peak_rss_bytes": 37249024
+  },
+  {
+    "engine": "mimalloc",
+    "trial": 10,
+    "wall_ns": 4729247,
+    "cpu_s": 0.004481,
+    "peak_rss_bytes": 3932160
+  }
+]
