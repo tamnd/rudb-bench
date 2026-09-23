@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare two RuDB allocator builds with DuckDB in fresh processes."""
+"""Compare two named RuDB builds with DuckDB in fresh processes."""
 
 import argparse
 import json
@@ -13,8 +13,10 @@ import tempfile
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mimalloc', required=True)
-    parser.add_argument('--system', required=True)
+    parser.add_argument('--mimalloc', '--first', dest='first', required=True)
+    parser.add_argument('--system', '--second', dest='second', required=True)
+    parser.add_argument('--first-label', default='mimalloc')
+    parser.add_argument('--second-label', default='system')
     parser.add_argument('--duckdb', required=True)
     parser.add_argument('--rudb-db', required=True)
     parser.add_argument('--duckdb-db', required=True)
@@ -27,14 +29,16 @@ def main():
     args = parser.parse_args()
     if args.rounds < 1:
         parser.error('--rounds must be positive')
+    if len({args.first_label, args.second_label, 'duckdb'}) != 3:
+        parser.error('the three engine labels must be distinct')
     if sys.platform != 'linux':
         parser.error('the resource helper requires Linux wait4')
     if not args.helper.is_file():
         parser.error('compile scripts/measure-child.c first')
 
     cases = [
-        ('mimalloc', args.mimalloc, args.rudb_db),
-        ('system', args.system, args.rudb_db),
+        (args.first_label, args.first, args.rudb_db),
+        (args.second_label, args.second, args.rudb_db),
         ('duckdb', args.duckdb, args.duckdb_db),
     ]
     records = []
