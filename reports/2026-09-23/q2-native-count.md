@@ -26,6 +26,8 @@ At 10m rows, shorter batches show how startup and catalog open affect the ratio:
 | 1,000 | 1,440.84 ms | 165.65 ms | 68.77 ms | 21.0x | 82.29 MiB | 36.00 MiB |
 | 3,000 | 2,890.64 ms | 342.19 ms | 161.10 ms | 17.9x | 83.41 MiB | 35.86 MiB |
 
+The cold gap has a different cause from the repeated-statement gap. A separate `strace -f -e trace=openat,statx,pread64` of one 10m rudb Q2 process showed that opening the table read its 11,458,990-byte directory twice: a checksum pass followed by a decode pass. The two passes made 350 `pread64` calls and read 22,925,480 bytes, including a small overlap in the decode windows. Q2 then read a 417-byte summary section. The trace was used to count file operations, not as a timing sample. Its full-directory work explains why the cold 10m result is only 1.37x faster even though the aggregate scans no rows. A small, separately validated synopsis index would let summary-backed counts avoid decoding every stripe and page descriptor.
+
 ## Cause and ablation
 
 The 10m profiler reported a stored-summary aggregate with `rows_in=0`: the execution path was already constant in table size. Parse, bind, optimize, and physical-plan construction dominated its first statement. The Q1 cache did not admit a filter, so Q2 repeated those phases on every call. The new cache only admits a direct native-table `COUNT(*)` with a written `column <> numeric literal` filter. It still checks catalog generation and setting revision, and every call executes the plan.
