@@ -29,7 +29,7 @@ The pre-rebase one-thread 1M Callgrind count fell from 1,645,172,533 to 1,355,17
 That is 17.6% and 15.8% fewer diagnostic instructions, not production latency.
 The final rebase includes the parent's dictionary-block cache change and a checked-subtraction fallback for an inherited extreme-integer count test failure.
 The final build passed 154 native, 288 kernel, and 478 executor tests, strict Clippy, formatting, and all 43 original queries at both sizes.
-Some untied result renderings differ only in tied order; the earlier deterministic secondary-order check made Q22 and Q23 byte-identical.
+Some original queries have ties with unspecified order, and their final A/B stdout differs; the earlier deterministic secondary-order check made Q22 and Q23 byte-identical.
 
 ## Exact-parent A/B
 
