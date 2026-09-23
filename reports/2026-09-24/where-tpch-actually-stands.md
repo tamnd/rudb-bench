@@ -1,5 +1,7 @@
 # Where TPC-H actually stands against DuckDB
 
+**The 0.85x table below is superseded and the q12 2.25x in it should not be quoted.** The same protocol on a machine that was not busy gives 0.93x and 0.98x, and q12 comes out at 1.25x rather than 2.25x, which moves it from the worst query in the suite to the fourth worst. See `reports/2026-09-24/tpch-per-core-on-a-quiet-machine.md`. The two structural findings here still hold: every query finishes and every answer agrees with DuckDB. The rest is left as it was written because it is a correct record of what a loaded box produced.
+
 **Not a publishable number.** Every measurement here was taken on server3 while its one minute load average sat between 14 and 52 on 8 hardware threads, because no quiet machine was available at any point. The harness refused to publish all four of its runs for that reason and it was right to. What follows is worth writing down anyway, because the previous report on this comparison is wrong in a way that matters and the correction does not depend on the load.
 
 ## The number this project was measuring itself against is stale
