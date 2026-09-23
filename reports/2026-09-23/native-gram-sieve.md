@@ -180,3 +180,23 @@ The Q21 and Q22 Callgrind files are in `gram-sieve-cli-verified` with the same b
 The pre-correction `gram-sieve-latest-main` and `gram-sieve-duck155-rebased` timing files are retained but withdrawn from claims made here.
 The next profile should quantify which signature-positive dictionary blocks really contain a match and how much time remains in FSST decode, payload copying, and aggregation.
 A new metadata field needs a measured 1M and 10M query benefit and a verified repeated load-cost check.
+
+## Q22 follow-up after the correction
+
+The original Q22 plan reads `URL` and `SearchPhrase` together before filtering, while Q21 reads only `URL`.
+Q22 then groups the surviving rows and computes `MIN(URL)`.
+A separate diagnostic run used nine fresh processes per variant on the verified candidate executable and the same 10M native file.
+The variants were run in forward order on odd repetitions and reverse order on even repetitions.
+These medians are not substituted for the full-suite benchmark because host load varied during this diagnostic.
+
+| Variant | Added work after URL LIKE | SQL median | Process wall median | Peak RSS median |
+| --- | --- | ---: | ---: | ---: |
+| URL count | None | 107.711 ms | 131.809 ms | 229.1 MiB |
+| Phrase count | `SearchPhrase <> ''` | 110.511 ms | 128.692 ms | 545.6 MiB |
+| Group count | Group by `SearchPhrase` and count | 120.997 ms | 167.939 ms | 552.3 MiB |
+| Group minimum | Add `MIN(URL)` | 139.211 ms | 191.756 ms | 567.6 MiB |
+
+The `SearchPhrase` predicate alone added about 316 MiB of median resident memory in this run, even though it left only 114 rows after the URL predicate.
+The first full-suite Q22 metrics record attributes 118.305 ms of worker-summed operator wall to aggregation, versus 1.375 ms for Q21; worker-summed times overlap and are not query wall times.
+The next engine experiment should keep `SearchPhrase` out of the initial scan and fetch it only for rows surviving URL filtering, then compare complete 1M and 10M suites and the DuckDB gap.
+The raw variant files are in `gram-sieve-q22-breakdown` under the same `gpc` audit directory.
