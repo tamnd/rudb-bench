@@ -4,6 +4,8 @@ The Q8 correction made the query count encoded rows at runtime, but a new native
 
 Q2 now uses row count, null count, and an exact leading zero frequency when zero is retained. If zero is omitted, it uses the regular SQL path. Q3 and Q4 still use scalar sums and non-null counts, Q5 and Q6 use distinct counts, and Q7 uses extrema. Q8 reads encoded row values and counts groups when the SQL runs. The writer does not save a complete multi-value numeric grouped result in new files. Existing files can still contain complete synopses, but Q8 does not use them.
 
+This is a boundary on stored lists and query execution, not a claim that scalar statistics make every grouped answer impossible to infer. For a two-value numeric column, row count, sum, and extrema can sometimes determine both frequencies. Q8 still reads encoded rows rather than deriving groups from those statistics.
+
 Both engines loaded the same Parquet source with the same `CREATE TABLE`, `INSERT`, and `CHECKPOINT` SQL. These are one fresh-process load each, including startup and exit, on a shared host. The 1m and 10m database pairs were on the same temporary memory filesystem. Peak RSS is the whole child process, measured by `wait4`.
 
 | Rows | RuDB load wall | DuckDB load wall | RuDB load CPU | DuckDB load CPU | RuDB peak RSS | DuckDB peak RSS | RuDB file | DuckDB file |
