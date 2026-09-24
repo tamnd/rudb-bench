@@ -1,8 +1,23 @@
 # Native frequency spans and Q9 startup
 
+**Correction:** The first Q9 table below used RuDB’s one-statement native CSV route. That route recognizes this SQL shape and computes grouped distinct counts directly from a row-preserving projection, bypassing the normal parser, planner, and executor. The file does not store the grouped answer, but this path is specific to this query shape. The original comparison must not be used as evidence that the regular SQL engine is 8x to 15x faster than DuckDB. The regular-engine measurements follow immediately below.
+
 Opening a native table used to decode every column's frequency synopsis to find where the next one began. Q9 does not ask for those statistics, but on a 10k file the directory walk was a large part of its fresh-process cost. [RuDB #1786](https://github.com/tamnd/rudb/pull/1786) writes a checked byte length and entry count before each synopsis. A table open can skip unused payloads; a request for that column decodes and validates its complete payload. This works for any table and any query. It stores reusable column facts, not a SQL result or grouped answer. The reader still opens older files with the previous directory walk.
 
 The query comparison used binaries built from the same RuDB 0.4.30 commit, one with the span change and one without it. Both loaded the same Parquet export using the same `CREATE TABLE`, `INSERT`, and `CHECKPOINT` SQL, then built the existing row-preserving Q9 run projection. The source export came from the corresponding DuckDB native table and was not timed. The 1m label contains 999,975 rows; the other labels contain 1,000, 10,000, and 10,000,000 rows. Every Q9 trial started a new process, alternated order, and checked the complete answer against DuckDB. `wait4` recorded wall time, user plus system CPU time, and whole-process peak RSS. The OS page cache was warm and not cleared. This was a busy shared six-CPU host, so wall medians are observations under contention, not quiet-host guarantees.
+
+For the corrected run, both RuDB binaries received `--set threads=6`. This equals the six-CPU host's default thread count and prevents the CLI one-statement route; DuckDB reported its default `threads` setting as 6. The **SQL statement was identical** in all three cases. Each of the following values is the median of 21 fresh processes. The same native files, DuckDB files, expected answers, warm page cache, process resource collector, and alternating order were used. All 252 answers matched DuckDB in full and were sorted by descending count.
+
+| Rows | Old RuDB engine wall | Span RuDB engine wall | DuckDB wall | DuckDB / span wall | Span RuDB CPU | DuckDB CPU | Span RuDB RSS | DuckDB RSS |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1k | 40.868 ms | 41.505 ms | 273.853 ms | 6.60x | 10.769 ms | 87.995 ms | 10.50 MiB | 36.99 MiB |
+| 10k | 118.386 ms | 52.813 ms | 262.720 ms | 4.97x | 14.185 ms | 91.624 ms | 11.25 MiB | 37.86 MiB |
+| 1m | 229.191 ms | 195.245 ms | 462.907 ms | 2.37x | 131.621 ms | 289.726 ms | 56.00 MiB | 80.75 MiB |
+| 10m | 320.855 ms | 328.837 ms | 807.515 ms | 2.46x | 311.674 ms | 746.362 ms | 73.12 MiB | 135.50 MiB |
+
+The span file beat the old file on wall time in 12/21, 21/21, 13/21, and 9/21 paired trials at 1k, 10k, 1m, and 10m rows. Only the 10k gain is stable. At 10m the candidate's median wall time and CPU time were slightly worse than the old format. RuDB's normal SQL path remains far short of the 10x speed and 10x RSS targets against DuckDB. The shared host was heavily contended: total CPU time is less sensitive to scheduling than wall time, but it still includes runtime overhead. The [corrected raw trials](q9-frequency-spans/) retain all per-process wall, CPU, RSS, and I/O records.
+
+The earlier one-statement CSV measurements remain below as a record of the file-open experiment. They exercise a shape-specific CLI optimization and are **not** the regular-engine comparison.
 
 | Rows | Trials | RuDB old wall | RuDB spans wall | DuckDB wall | DuckDB / spans wall | RuDB spans RSS | DuckDB RSS | DuckDB / spans RSS |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -18,7 +33,7 @@ The query comparison used binaries built from the same RuDB 0.4.30 commit, one w
 | 1m | 32.965 ms | 28.578 ms | 294.063 ms | -3.533 ms | -3.891 ms | 13/21 |
 | 10m | 79.847 ms | 75.267 ms | 743.125 ms | -1.674 ms | -2.328 ms | 29/51 |
 
-The 10k gain is strong across all paired runs. The 10m wall gain is small and does not meet the 10x DuckDB target. The 1k, 10k, and 1m RSS ratios also remain below 10x. The new 10k native file is 1,680 bytes larger than the old file, which is the added span headers. The 1m and 10m files differ slightly in size because parallel loads can place rows differently; those results should not be read as byte-for-byte format-only comparisons. Native sizes include the Q9 projection; DuckDB sizes are native tables loaded from the same Parquet rows.
+For the direct CLI route, the 10k gain was strong across all paired runs. The 10m wall gain was small and did not meet the 10x DuckDB target. The 1k, 10k, and 1m RSS ratios also remain below 10x. The new 10k native file is 1,680 bytes larger than the old file, which is the added span headers. The 1m and 10m files differ slightly in size because parallel loads can place rows differently; those results should not be read as byte-for-byte format-only comparisons. Native sizes include the Q9 projection; DuckDB sizes are native tables loaded from the same Parquet rows.
 
 | Rows | Old RuDB file | Span RuDB file | DuckDB file |
 | ---: | ---: | ---: | ---: |
