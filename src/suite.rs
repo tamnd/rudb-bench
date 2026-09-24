@@ -331,10 +331,10 @@ pub const SUITES: &[Suite] = &[
     Suite {
         name: "job",
         queries: 113,
-        tables: &[],
+        tables: JOB_TABLES,
         corpus: "job",
-        size: Size::Unsettled,
-        needs: "the IMDb dataset",
+        size: Size::Fixed(74_190_187),
+        needs: "the IMDb snapshot of May 2013 that the JOB paper used, 21 tables and 74,190,187 rows",
         comparable: true,
         note: "Where Robust Predicate Transfer either works or does not. Reported with the \
                maximum per query ratio prominently and not only the mean, because the failure mode \
@@ -1953,6 +1953,172 @@ pub fn divergence(suite: &str, query: &str) -> Option<&'static str> {
     CLICKBENCH_DIVERGENCES.iter().find(|(name, _)| *name == query).map(|(_, why)| *why)
 }
 
+/// The 21 IMDb tables JOB reads, in the order its `schema.sql` creates them.
+pub const JOB_TABLES: &[&str] = &[
+    "aka_name",
+    "aka_title",
+    "cast_info",
+    "char_name",
+    "comp_cast_type",
+    "company_name",
+    "company_type",
+    "complete_cast",
+    "info_type",
+    "keyword",
+    "kind_type",
+    "link_type",
+    "movie_companies",
+    "movie_info",
+    "movie_info_idx",
+    "movie_keyword",
+    "movie_link",
+    "name",
+    "person_info",
+    "role_type",
+    "title",
+];
+
+/// JOB's own `schema.sql`, unchanged. The loader runs it as it is on every engine, so no engine
+/// gets a table shaped for it.
+pub const JOB_SCHEMA: &str = include_str!("../queries/job/schema.sql");
+
+/// JOB's `fkindexes.sql`, which only the indexed configuration runs.
+pub const JOB_INDEXES: &str = include_str!("../queries/job/fkindexes.sql");
+
+/// One JOB query, read from its file under `queries/job`.
+macro_rules! job {
+    ($name:literal, $shape:literal) => {
+        Query {
+            name: $name,
+            sql: include_str!(concat!("../queries/job/", $name, ".sql")),
+            shape: $shape,
+            dialects: &[],
+        }
+    };
+}
+
+/// The 113 queries of the Join Order Benchmark, from gregrahn/join-order-benchmark at a396036.
+///
+/// The text is the upstream text with the trailing semicolon taken off, because the engines here
+/// are handed one statement at a time. Nothing else is changed, and no engine gets its own text.
+/// The shape is how many relations the query joins and how many classes of equal columns those
+/// joins make, which is what decides how hard it is to plan.
+pub const JOB: &[Query] = &[
+    job!("1a", "5 relations, 3 join classes"),
+    job!("1b", "5 relations, 3 join classes"),
+    job!("1c", "5 relations, 3 join classes"),
+    job!("1d", "5 relations, 3 join classes"),
+    job!("2a", "5 relations, 3 join classes"),
+    job!("2b", "5 relations, 3 join classes"),
+    job!("2c", "5 relations, 3 join classes"),
+    job!("2d", "5 relations, 3 join classes"),
+    job!("3a", "4 relations, 2 join classes"),
+    job!("3b", "4 relations, 2 join classes"),
+    job!("3c", "4 relations, 2 join classes"),
+    job!("4a", "5 relations, 3 join classes"),
+    job!("4b", "5 relations, 3 join classes"),
+    job!("4c", "5 relations, 3 join classes"),
+    job!("5a", "5 relations, 3 join classes"),
+    job!("5b", "5 relations, 3 join classes"),
+    job!("5c", "5 relations, 3 join classes"),
+    job!("6a", "5 relations, 3 join classes"),
+    job!("6b", "5 relations, 3 join classes"),
+    job!("6c", "5 relations, 3 join classes"),
+    job!("6d", "5 relations, 3 join classes"),
+    job!("6e", "5 relations, 3 join classes"),
+    job!("6f", "5 relations, 3 join classes"),
+    job!("7a", "8 relations, 4 join classes"),
+    job!("7b", "8 relations, 4 join classes"),
+    job!("7c", "8 relations, 4 join classes"),
+    job!("8a", "7 relations, 4 join classes"),
+    job!("8b", "7 relations, 4 join classes"),
+    job!("8c", "7 relations, 4 join classes"),
+    job!("8d", "7 relations, 4 join classes"),
+    job!("9a", "8 relations, 5 join classes"),
+    job!("9b", "8 relations, 5 join classes"),
+    job!("9c", "8 relations, 5 join classes"),
+    job!("9d", "8 relations, 5 join classes"),
+    job!("10a", "7 relations, 5 join classes"),
+    job!("10b", "7 relations, 5 join classes"),
+    job!("10c", "7 relations, 5 join classes"),
+    job!("11a", "8 relations, 5 join classes"),
+    job!("11b", "8 relations, 5 join classes"),
+    job!("11c", "8 relations, 5 join classes"),
+    job!("11d", "8 relations, 5 join classes"),
+    job!("12a", "8 relations, 5 join classes"),
+    job!("12b", "8 relations, 5 join classes"),
+    job!("12c", "8 relations, 5 join classes"),
+    job!("13a", "9 relations, 6 join classes"),
+    job!("13b", "9 relations, 6 join classes"),
+    job!("13c", "9 relations, 6 join classes"),
+    job!("13d", "9 relations, 6 join classes"),
+    job!("14a", "8 relations, 5 join classes"),
+    job!("14b", "8 relations, 5 join classes"),
+    job!("14c", "8 relations, 5 join classes"),
+    job!("15a", "9 relations, 5 join classes"),
+    job!("15b", "9 relations, 5 join classes"),
+    job!("15c", "9 relations, 5 join classes"),
+    job!("15d", "9 relations, 5 join classes"),
+    job!("16a", "8 relations, 4 join classes"),
+    job!("16b", "8 relations, 4 join classes"),
+    job!("16c", "8 relations, 4 join classes"),
+    job!("16d", "8 relations, 4 join classes"),
+    job!("17a", "7 relations, 4 join classes"),
+    job!("17b", "7 relations, 4 join classes"),
+    job!("17c", "7 relations, 4 join classes"),
+    job!("17d", "7 relations, 4 join classes"),
+    job!("17e", "7 relations, 4 join classes"),
+    job!("17f", "7 relations, 4 join classes"),
+    job!("18a", "7 relations, 4 join classes"),
+    job!("18b", "7 relations, 4 join classes"),
+    job!("18c", "7 relations, 4 join classes"),
+    job!("19a", "10 relations, 6 join classes"),
+    job!("19b", "10 relations, 6 join classes"),
+    job!("19c", "10 relations, 6 join classes"),
+    job!("19d", "10 relations, 6 join classes"),
+    job!("20a", "10 relations, 7 join classes"),
+    job!("20b", "10 relations, 7 join classes"),
+    job!("20c", "10 relations, 7 join classes"),
+    job!("21a", "9 relations, 5 join classes"),
+    job!("21b", "9 relations, 5 join classes"),
+    job!("21c", "9 relations, 5 join classes"),
+    job!("22a", "11 relations, 7 join classes"),
+    job!("22b", "11 relations, 7 join classes"),
+    job!("22c", "11 relations, 7 join classes"),
+    job!("22d", "11 relations, 7 join classes"),
+    job!("23a", "11 relations, 7 join classes"),
+    job!("23b", "11 relations, 7 join classes"),
+    job!("23c", "11 relations, 7 join classes"),
+    job!("24a", "12 relations, 7 join classes"),
+    job!("24b", "12 relations, 7 join classes"),
+    job!("25a", "9 relations, 5 join classes"),
+    job!("25b", "9 relations, 5 join classes"),
+    job!("25c", "9 relations, 5 join classes"),
+    job!("26a", "12 relations, 8 join classes"),
+    job!("26b", "12 relations, 8 join classes"),
+    job!("26c", "12 relations, 8 join classes"),
+    job!("27a", "12 relations, 7 join classes"),
+    job!("27b", "12 relations, 7 join classes"),
+    job!("27c", "12 relations, 7 join classes"),
+    job!("28a", "14 relations, 9 join classes"),
+    job!("28b", "14 relations, 9 join classes"),
+    job!("28c", "14 relations, 9 join classes"),
+    job!("29a", "17 relations, 10 join classes"),
+    job!("29b", "17 relations, 10 join classes"),
+    job!("29c", "17 relations, 10 join classes"),
+    job!("30a", "12 relations, 7 join classes"),
+    job!("30b", "12 relations, 7 join classes"),
+    job!("30c", "12 relations, 7 join classes"),
+    job!("31a", "11 relations, 6 join classes"),
+    job!("31b", "11 relations, 6 join classes"),
+    job!("31c", "11 relations, 6 join classes"),
+    job!("32a", "6 relations, 4 join classes"),
+    job!("32b", "6 relations, 4 join classes"),
+    job!("33a", "14 relations, 9 join classes"),
+    job!("33b", "14 relations, 9 join classes"),
+    job!("33c", "14 relations, 9 join classes"),
+];
+
 /// The queries of a suite, where this harness has them.
 #[must_use]
 pub fn queries(name: &str) -> Option<&'static [Query]> {
@@ -1960,6 +2126,7 @@ pub fn queries(name: &str) -> Option<&'static [Query]> {
         "smoke" => Some(SMOKE),
         "clickbench" => Some(CLICKBENCH),
         "tpch" => Some(TPCH),
+        "job" => Some(JOB),
         _ => None,
     }
 }
@@ -1967,8 +2134,8 @@ pub fn queries(name: &str) -> Option<&'static [Query]> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CLICKBENCH, DUCKDB_HITS, Fixup, HITS, SMOKE, SUITES, Size, TPCH, find, loading, queries,
-        sorting_key,
+        CLICKBENCH, DUCKDB_HITS, Fixup, HITS, JOB, JOB_INDEXES, JOB_SCHEMA, JOB_TABLES, SMOKE,
+        SUITES, Size, TPCH, find, loading, queries, sorting_key,
     };
 
     /// The limit moves with the data, because a minute is generous over a hundred thousand rows
@@ -2044,7 +2211,7 @@ mod tests {
         assert_eq!(smoke.rows(None), Some(10_000_000));
         assert_eq!(smoke.default_scale(), None);
         let job = find("job").expect("job is a suite");
-        assert_eq!(job.rows(None), None, "nobody has written its counts down yet");
+        assert_eq!(job.rows(None), Some(74_190_187), "the 21 tables of the IMDb snapshot");
         assert_eq!(job.directory(None), "job");
     }
 
@@ -2072,6 +2239,54 @@ mod tests {
         assert_eq!(tpch.scale("sf1"), None, "the sf goes on in the directory and not in the flag");
         assert_eq!(tpch.scale_labels(), "0.01, 1, 10, 100, 1000");
         assert_eq!(tpch.default_scale().map(|scale| scale.named()), Some("SF100".to_owned()));
+    }
+
+    #[test]
+    fn every_job_query_is_one_ungrouped_select_of_minimums() {
+        assert_eq!(JOB.len(), 113);
+        for query in JOB {
+            assert!(
+                query.sql.starts_with("SELECT MIN("),
+                "{} does not start with a MIN",
+                query.name
+            );
+            assert!(!query.sql.contains("GROUP BY"), "{} groups", query.name);
+            assert!(!query.sql.contains(';'), "{} still has its semicolon", query.name);
+        }
+    }
+
+    #[test]
+    fn the_job_names_run_from_1a_to_33c_with_none_twice() {
+        let names: Vec<&str> = JOB.iter().map(|q| q.name).collect();
+        assert_eq!(names.first(), Some(&"1a"));
+        assert_eq!(names.last(), Some(&"33c"));
+        let mut sorted = names.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), names.len());
+    }
+
+    #[test]
+    fn the_job_schema_creates_exactly_the_tables_the_suite_declares() {
+        let created: Vec<&str> = JOB_SCHEMA
+            .lines()
+            .filter_map(|line| line.strip_prefix("CREATE TABLE "))
+            .map(|rest| rest.trim_end_matches(" ("))
+            .collect();
+        assert_eq!(created, JOB_TABLES);
+        for query in JOB {
+            let from = query.sql.split("FROM").nth(1).expect("every JOB query has a FROM");
+            let from = from.split("WHERE").next().unwrap_or(from);
+            let words: Vec<&str> = from.split_whitespace().collect();
+            for pair in words.windows(2).filter(|pair| pair[1] == "AS") {
+                assert!(JOB_TABLES.contains(&pair[0]), "{} reads {}", query.name, pair[0]);
+            }
+        }
+        for line in JOB_INDEXES.lines().filter(|line| !line.is_empty()) {
+            let table = line.split(" on ").nth(1).and_then(|rest| rest.split('(').next());
+            let table = table.expect("every index line names a table").trim();
+            assert!(JOB_TABLES.contains(&table), "an index on {table}");
+        }
     }
 
     #[test]
