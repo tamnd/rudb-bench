@@ -19,6 +19,8 @@ def main():
     parser.add_argument('--duckdb-db', required=True)
     parser.add_argument('--rudb-main', help='Optional current-main binary for a three-way run')
     parser.add_argument('--rudb-main-db', help='Native file readable by the current-main binary')
+    parser.add_argument('--rudb-set', action='append', default=[],
+                        help='RuDB session setting, for example threads=6; disables one-shot CLI paths')
     parser.add_argument('--expected-file', type=pathlib.Path, required=True, help='Expected CSV output')
     parser.add_argument('--rounds', type=int, default=51)
     parser.add_argument('--json', type=pathlib.Path, required=True)
@@ -47,6 +49,9 @@ def main():
             offset = trial % len(cases)
             for engine, binary, database in cases[offset:] + cases[:offset]:
                 command = [binary, '-readonly', database, '-noheader', '-csv', '-c', sql]
+                if engine.startswith('rudb'):
+                    for setting in args.rudb_set:
+                        command[1:1] = ['--set', setting]
                 with stdout_path.open('wb') as stdout, stderr_path.open('wb') as stderr:
                     resource_path.unlink(missing_ok=True)
                     process = subprocess.run(
