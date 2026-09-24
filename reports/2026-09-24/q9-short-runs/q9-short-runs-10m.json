@@ -1,0 +1,1073 @@
+[
+  {
+    "engine": "rudb-main",
+    "trial": 0,
+    "wall_ns": 205292649,
+    "cpu_s": 0.177789,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "rudb",
+    "trial": 0,
+    "wall_ns": 90608307,
+    "cpu_s": 0.072079,
+    "peak_rss_bytes": 11403264
+  },
+  {
+    "engine": "duckdb",
+    "trial": 0,
+    "wall_ns": 1411473054,
+    "cpu_s": 0.938086,
+    "peak_rss_bytes": 141328384
+  },
+  {
+    "engine": "rudb",
+    "trial": 1,
+    "wall_ns": 65953031,
+    "cpu_s": 0.074246,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 1,
+    "wall_ns": 1106459054,
+    "cpu_s": 0.79593,
+    "peak_rss_bytes": 144211968
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 1,
+    "wall_ns": 102671477,
+    "cpu_s": 0.099035,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 2,
+    "wall_ns": 789967729,
+    "cpu_s": 0.696681,
+    "peak_rss_bytes": 143290368
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 2,
+    "wall_ns": 68907175,
+    "cpu_s": 0.066113,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb",
+    "trial": 2,
+    "wall_ns": 68077266,
+    "cpu_s": 0.071703,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 3,
+    "wall_ns": 76446190,
+    "cpu_s": 0.070666,
+    "peak_rss_bytes": 10616832
+  },
+  {
+    "engine": "rudb",
+    "trial": 3,
+    "wall_ns": 75312042,
+    "cpu_s": 0.102038,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "duckdb",
+    "trial": 3,
+    "wall_ns": 639765722,
+    "cpu_s": 0.68193,
+    "peak_rss_bytes": 139096064
+  },
+  {
+    "engine": "rudb",
+    "trial": 4,
+    "wall_ns": 56848525,
+    "cpu_s": 0.068973,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 4,
+    "wall_ns": 711464638,
+    "cpu_s": 0.7118450000000001,
+    "peak_rss_bytes": 139227136
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 4,
+    "wall_ns": 79805971,
+    "cpu_s": 0.078625,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "duckdb",
+    "trial": 5,
+    "wall_ns": 785669816,
+    "cpu_s": 0.712881,
+    "peak_rss_bytes": 138838016
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 5,
+    "wall_ns": 84176099,
+    "cpu_s": 0.073606,
+    "peak_rss_bytes": 10354688
+  },
+  {
+    "engine": "rudb",
+    "trial": 5,
+    "wall_ns": 72467663,
+    "cpu_s": 0.067288,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 6,
+    "wall_ns": 94973086,
+    "cpu_s": 0.074111,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "rudb",
+    "trial": 6,
+    "wall_ns": 91534166,
+    "cpu_s": 0.068612,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 6,
+    "wall_ns": 732495940,
+    "cpu_s": 0.676868,
+    "peak_rss_bytes": 143421440
+  },
+  {
+    "engine": "rudb",
+    "trial": 7,
+    "wall_ns": 102476352,
+    "cpu_s": 0.077398,
+    "peak_rss_bytes": 11403264
+  },
+  {
+    "engine": "duckdb",
+    "trial": 7,
+    "wall_ns": 876390291,
+    "cpu_s": 0.7039340000000001,
+    "peak_rss_bytes": 144396288
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 7,
+    "wall_ns": 85226370,
+    "cpu_s": 0.074738,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "duckdb",
+    "trial": 8,
+    "wall_ns": 704063442,
+    "cpu_s": 0.703323,
+    "peak_rss_bytes": 142761984
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 8,
+    "wall_ns": 66829197,
+    "cpu_s": 0.075252,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "rudb",
+    "trial": 8,
+    "wall_ns": 54861384,
+    "cpu_s": 0.06689500000000001,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 9,
+    "wall_ns": 99220845,
+    "cpu_s": 0.071703,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "rudb",
+    "trial": 9,
+    "wall_ns": 74256912,
+    "cpu_s": 0.070181,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 9,
+    "wall_ns": 757897499,
+    "cpu_s": 0.684595,
+    "peak_rss_bytes": 144334848
+  },
+  {
+    "engine": "rudb",
+    "trial": 10,
+    "wall_ns": 87841742,
+    "cpu_s": 0.07471,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 10,
+    "wall_ns": 660339619,
+    "cpu_s": 0.6864509999999999,
+    "peak_rss_bytes": 138309632
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 10,
+    "wall_ns": 76979746,
+    "cpu_s": 0.08241799999999999,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "duckdb",
+    "trial": 11,
+    "wall_ns": 1034564349,
+    "cpu_s": 0.691572,
+    "peak_rss_bytes": 143159296
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 11,
+    "wall_ns": 85926137,
+    "cpu_s": 0.07567499999999999,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "rudb",
+    "trial": 11,
+    "wall_ns": 63038310,
+    "cpu_s": 0.067641,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 12,
+    "wall_ns": 55675044,
+    "cpu_s": 0.069993,
+    "peak_rss_bytes": 11534336
+  },
+  {
+    "engine": "rudb",
+    "trial": 12,
+    "wall_ns": 72860556,
+    "cpu_s": 0.070534,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "duckdb",
+    "trial": 12,
+    "wall_ns": 742879353,
+    "cpu_s": 0.6727110000000001,
+    "peak_rss_bytes": 138465280
+  },
+  {
+    "engine": "rudb",
+    "trial": 13,
+    "wall_ns": 60809448,
+    "cpu_s": 0.06389,
+    "peak_rss_bytes": 11534336
+  },
+  {
+    "engine": "duckdb",
+    "trial": 13,
+    "wall_ns": 674830961,
+    "cpu_s": 0.6789750000000001,
+    "peak_rss_bytes": 144601088
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 13,
+    "wall_ns": 100907373,
+    "cpu_s": 0.074708,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "duckdb",
+    "trial": 14,
+    "wall_ns": 634710253,
+    "cpu_s": 0.674195,
+    "peak_rss_bytes": 144203776
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 14,
+    "wall_ns": 67095003,
+    "cpu_s": 0.06751399999999999,
+    "peak_rss_bytes": 11403264
+  },
+  {
+    "engine": "rudb",
+    "trial": 14,
+    "wall_ns": 76120461,
+    "cpu_s": 0.068226,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 15,
+    "wall_ns": 67893182,
+    "cpu_s": 0.06967,
+    "peak_rss_bytes": 11534336
+  },
+  {
+    "engine": "rudb",
+    "trial": 15,
+    "wall_ns": 82100354,
+    "cpu_s": 0.069461,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "duckdb",
+    "trial": 15,
+    "wall_ns": 665510922,
+    "cpu_s": 0.675704,
+    "peak_rss_bytes": 142368768
+  },
+  {
+    "engine": "rudb",
+    "trial": 16,
+    "wall_ns": 68816575,
+    "cpu_s": 0.07055700000000001,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "duckdb",
+    "trial": 16,
+    "wall_ns": 878760032,
+    "cpu_s": 0.661616,
+    "peak_rss_bytes": 138567680
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 16,
+    "wall_ns": 97859663,
+    "cpu_s": 0.071233,
+    "peak_rss_bytes": 11272192
+  },
+  {
+    "engine": "duckdb",
+    "trial": 17,
+    "wall_ns": 790010356,
+    "cpu_s": 0.708726,
+    "peak_rss_bytes": 143155200
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 17,
+    "wall_ns": 82814708,
+    "cpu_s": 0.073016,
+    "peak_rss_bytes": 11403264
+  },
+  {
+    "engine": "rudb",
+    "trial": 17,
+    "wall_ns": 82556286,
+    "cpu_s": 0.072934,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 18,
+    "wall_ns": 72782009,
+    "cpu_s": 0.072993,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "rudb",
+    "trial": 18,
+    "wall_ns": 103811935,
+    "cpu_s": 0.067335,
+    "peak_rss_bytes": 11272192
+  },
+  {
+    "engine": "duckdb",
+    "trial": 18,
+    "wall_ns": 676160792,
+    "cpu_s": 0.630575,
+    "peak_rss_bytes": 142368768
+  },
+  {
+    "engine": "rudb",
+    "trial": 19,
+    "wall_ns": 69254804,
+    "cpu_s": 0.06808,
+    "peak_rss_bytes": 12189696
+  },
+  {
+    "engine": "duckdb",
+    "trial": 19,
+    "wall_ns": 1022344775,
+    "cpu_s": 0.675346,
+    "peak_rss_bytes": 142237696
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 19,
+    "wall_ns": 87339825,
+    "cpu_s": 0.075066,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "duckdb",
+    "trial": 20,
+    "wall_ns": 650320734,
+    "cpu_s": 0.68782,
+    "peak_rss_bytes": 140009472
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 20,
+    "wall_ns": 71005882,
+    "cpu_s": 0.07607,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb",
+    "trial": 20,
+    "wall_ns": 122036657,
+    "cpu_s": 0.070868,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 21,
+    "wall_ns": 64550061,
+    "cpu_s": 0.069857,
+    "peak_rss_bytes": 11403264
+  },
+  {
+    "engine": "rudb",
+    "trial": 21,
+    "wall_ns": 57012341,
+    "cpu_s": 0.071065,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 21,
+    "wall_ns": 495632533,
+    "cpu_s": 0.6897760000000001,
+    "peak_rss_bytes": 139091968
+  },
+  {
+    "engine": "rudb",
+    "trial": 22,
+    "wall_ns": 75500934,
+    "cpu_s": 0.075376,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "duckdb",
+    "trial": 22,
+    "wall_ns": 806631423,
+    "cpu_s": 0.7234029999999999,
+    "peak_rss_bytes": 137256960
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 22,
+    "wall_ns": 70793366,
+    "cpu_s": 0.070968,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 23,
+    "wall_ns": 706989923,
+    "cpu_s": 0.6912280000000001,
+    "peak_rss_bytes": 136077312
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 23,
+    "wall_ns": 84820762,
+    "cpu_s": 0.073291,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "rudb",
+    "trial": 23,
+    "wall_ns": 78599750,
+    "cpu_s": 0.072215,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 24,
+    "wall_ns": 83623217,
+    "cpu_s": 0.070676,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "rudb",
+    "trial": 24,
+    "wall_ns": 99612145,
+    "cpu_s": 0.07339799999999999,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "duckdb",
+    "trial": 24,
+    "wall_ns": 725842607,
+    "cpu_s": 0.6966049999999999,
+    "peak_rss_bytes": 139489280
+  },
+  {
+    "engine": "rudb",
+    "trial": 25,
+    "wall_ns": 77730276,
+    "cpu_s": 0.067217,
+    "peak_rss_bytes": 11403264
+  },
+  {
+    "engine": "duckdb",
+    "trial": 25,
+    "wall_ns": 716522949,
+    "cpu_s": 0.6710430000000001,
+    "peak_rss_bytes": 138833920
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 25,
+    "wall_ns": 60548571,
+    "cpu_s": 0.069598,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 26,
+    "wall_ns": 650573074,
+    "cpu_s": 0.688058,
+    "peak_rss_bytes": 140017664
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 26,
+    "wall_ns": 83774700,
+    "cpu_s": 0.070603,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "rudb",
+    "trial": 26,
+    "wall_ns": 100383034,
+    "cpu_s": 0.085021,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 27,
+    "wall_ns": 76536799,
+    "cpu_s": 0.08533099999999999,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "rudb",
+    "trial": 27,
+    "wall_ns": 57211953,
+    "cpu_s": 0.073447,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 27,
+    "wall_ns": 710585534,
+    "cpu_s": 0.704413,
+    "peak_rss_bytes": 137650176
+  },
+  {
+    "engine": "rudb",
+    "trial": 28,
+    "wall_ns": 86176583,
+    "cpu_s": 0.06781200000000001,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 28,
+    "wall_ns": 612351882,
+    "cpu_s": 0.714758,
+    "peak_rss_bytes": 144072704
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 28,
+    "wall_ns": 76330623,
+    "cpu_s": 0.073853,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 29,
+    "wall_ns": 567235158,
+    "cpu_s": 0.672869,
+    "peak_rss_bytes": 142503936
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 29,
+    "wall_ns": 70388971,
+    "cpu_s": 0.07069,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "rudb",
+    "trial": 29,
+    "wall_ns": 77224101,
+    "cpu_s": 0.065641,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 30,
+    "wall_ns": 57608663,
+    "cpu_s": 0.06826499999999999,
+    "peak_rss_bytes": 11272192
+  },
+  {
+    "engine": "rudb",
+    "trial": 30,
+    "wall_ns": 55529202,
+    "cpu_s": 0.06357399999999999,
+    "peak_rss_bytes": 11403264
+  },
+  {
+    "engine": "duckdb",
+    "trial": 30,
+    "wall_ns": 701795615,
+    "cpu_s": 0.685512,
+    "peak_rss_bytes": 139481088
+  },
+  {
+    "engine": "rudb",
+    "trial": 31,
+    "wall_ns": 60223545,
+    "cpu_s": 0.066113,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "duckdb",
+    "trial": 31,
+    "wall_ns": 585701833,
+    "cpu_s": 0.667578,
+    "peak_rss_bytes": 142364672
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 31,
+    "wall_ns": 92718326,
+    "cpu_s": 0.07780300000000001,
+    "peak_rss_bytes": 11141120
+  },
+  {
+    "engine": "duckdb",
+    "trial": 32,
+    "wall_ns": 836478880,
+    "cpu_s": 0.729129,
+    "peak_rss_bytes": 138174464
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 32,
+    "wall_ns": 68736146,
+    "cpu_s": 0.077838,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "rudb",
+    "trial": 32,
+    "wall_ns": 66669968,
+    "cpu_s": 0.07259499999999999,
+    "peak_rss_bytes": 12189696
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 33,
+    "wall_ns": 75605278,
+    "cpu_s": 0.079199,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "rudb",
+    "trial": 33,
+    "wall_ns": 56281936,
+    "cpu_s": 0.073968,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "duckdb",
+    "trial": 33,
+    "wall_ns": 801855364,
+    "cpu_s": 0.8090999999999999,
+    "peak_rss_bytes": 142917632
+  },
+  {
+    "engine": "rudb",
+    "trial": 34,
+    "wall_ns": 79994624,
+    "cpu_s": 0.072949,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 34,
+    "wall_ns": 937883901,
+    "cpu_s": 0.754212,
+    "peak_rss_bytes": 139747328
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 34,
+    "wall_ns": 82166478,
+    "cpu_s": 0.074236,
+    "peak_rss_bytes": 10354688
+  },
+  {
+    "engine": "duckdb",
+    "trial": 35,
+    "wall_ns": 967108267,
+    "cpu_s": 0.7710520000000001,
+    "peak_rss_bytes": 143286272
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 35,
+    "wall_ns": 101359326,
+    "cpu_s": 0.077673,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "rudb",
+    "trial": 35,
+    "wall_ns": 91414151,
+    "cpu_s": 0.07607900000000001,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 36,
+    "wall_ns": 103294589,
+    "cpu_s": 0.09003399999999999,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "rudb",
+    "trial": 36,
+    "wall_ns": 78894169,
+    "cpu_s": 0.071396,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 36,
+    "wall_ns": 861438453,
+    "cpu_s": 0.872865,
+    "peak_rss_bytes": 140664832
+  },
+  {
+    "engine": "rudb",
+    "trial": 37,
+    "wall_ns": 61884615,
+    "cpu_s": 0.07564,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "duckdb",
+    "trial": 37,
+    "wall_ns": 859515083,
+    "cpu_s": 0.8506699999999999,
+    "peak_rss_bytes": 143290368
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 37,
+    "wall_ns": 93057469,
+    "cpu_s": 0.078788,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "duckdb",
+    "trial": 38,
+    "wall_ns": 552526590,
+    "cpu_s": 0.70902,
+    "peak_rss_bytes": 136208384
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 38,
+    "wall_ns": 105920671,
+    "cpu_s": 0.091825,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "rudb",
+    "trial": 38,
+    "wall_ns": 83635650,
+    "cpu_s": 0.07962,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 39,
+    "wall_ns": 102799385,
+    "cpu_s": 0.078948,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb",
+    "trial": 39,
+    "wall_ns": 76859931,
+    "cpu_s": 0.06762,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 39,
+    "wall_ns": 729305479,
+    "cpu_s": 0.73224,
+    "peak_rss_bytes": 135856128
+  },
+  {
+    "engine": "rudb",
+    "trial": 40,
+    "wall_ns": 74870757,
+    "cpu_s": 0.072725,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "duckdb",
+    "trial": 40,
+    "wall_ns": 649283734,
+    "cpu_s": 0.70703,
+    "peak_rss_bytes": 137777152
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 40,
+    "wall_ns": 81291805,
+    "cpu_s": 0.091917,
+    "peak_rss_bytes": 11403264
+  },
+  {
+    "engine": "duckdb",
+    "trial": 41,
+    "wall_ns": 834317934,
+    "cpu_s": 0.729981,
+    "peak_rss_bytes": 141848576
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 41,
+    "wall_ns": 94002743,
+    "cpu_s": 0.092994,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb",
+    "trial": 41,
+    "wall_ns": 146053099,
+    "cpu_s": 0.088794,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 42,
+    "wall_ns": 85487497,
+    "cpu_s": 0.079074,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb",
+    "trial": 42,
+    "wall_ns": 82078372,
+    "cpu_s": 0.072575,
+    "peak_rss_bytes": 11403264
+  },
+  {
+    "engine": "duckdb",
+    "trial": 42,
+    "wall_ns": 677337294,
+    "cpu_s": 0.794675,
+    "peak_rss_bytes": 143683584
+  },
+  {
+    "engine": "rudb",
+    "trial": 43,
+    "wall_ns": 83189207,
+    "cpu_s": 0.075181,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "duckdb",
+    "trial": 43,
+    "wall_ns": 864622114,
+    "cpu_s": 0.789567,
+    "peak_rss_bytes": 145121280
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 43,
+    "wall_ns": 74171593,
+    "cpu_s": 0.079211,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "duckdb",
+    "trial": 44,
+    "wall_ns": 820664215,
+    "cpu_s": 0.809566,
+    "peak_rss_bytes": 139616256
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 44,
+    "wall_ns": 146475318,
+    "cpu_s": 0.134602,
+    "peak_rss_bytes": 11403264
+  },
+  {
+    "engine": "rudb",
+    "trial": 44,
+    "wall_ns": 87014007,
+    "cpu_s": 0.080078,
+    "peak_rss_bytes": 11272192
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 45,
+    "wall_ns": 79614553,
+    "cpu_s": 0.068788,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "rudb",
+    "trial": 45,
+    "wall_ns": 101904654,
+    "cpu_s": 0.073346,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 45,
+    "wall_ns": 816469062,
+    "cpu_s": 0.7693289999999999,
+    "peak_rss_bytes": 144338944
+  },
+  {
+    "engine": "rudb",
+    "trial": 46,
+    "wall_ns": 69939322,
+    "cpu_s": 0.072795,
+    "peak_rss_bytes": 11534336
+  },
+  {
+    "engine": "duckdb",
+    "trial": 46,
+    "wall_ns": 796041929,
+    "cpu_s": 0.750888,
+    "peak_rss_bytes": 142241792
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 46,
+    "wall_ns": 74693056,
+    "cpu_s": 0.06701599999999999,
+    "peak_rss_bytes": 11665408
+  },
+  {
+    "engine": "duckdb",
+    "trial": 47,
+    "wall_ns": 837110866,
+    "cpu_s": 0.8084129999999999,
+    "peak_rss_bytes": 143683584
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 47,
+    "wall_ns": 74558345,
+    "cpu_s": 0.069507,
+    "peak_rss_bytes": 10616832
+  },
+  {
+    "engine": "rudb",
+    "trial": 47,
+    "wall_ns": 77202049,
+    "cpu_s": 0.06887,
+    "peak_rss_bytes": 12058624
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 48,
+    "wall_ns": 82435189,
+    "cpu_s": 0.076203,
+    "peak_rss_bytes": 11403264
+  },
+  {
+    "engine": "rudb",
+    "trial": 48,
+    "wall_ns": 69360310,
+    "cpu_s": 0.072522,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 48,
+    "wall_ns": 1095228306,
+    "cpu_s": 0.7395579999999999,
+    "peak_rss_bytes": 144207872
+  },
+  {
+    "engine": "rudb",
+    "trial": 49,
+    "wall_ns": 130258464,
+    "cpu_s": 0.09315,
+    "peak_rss_bytes": 11796480
+  },
+  {
+    "engine": "duckdb",
+    "trial": 49,
+    "wall_ns": 839325641,
+    "cpu_s": 0.7710319999999999,
+    "peak_rss_bytes": 142364672
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 49,
+    "wall_ns": 64560231,
+    "cpu_s": 0.07256,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "duckdb",
+    "trial": 50,
+    "wall_ns": 804667241,
+    "cpu_s": 0.7256370000000001,
+    "peak_rss_bytes": 144203776
+  },
+  {
+    "engine": "rudb-main",
+    "trial": 50,
+    "wall_ns": 75383374,
+    "cpu_s": 0.07752,
+    "peak_rss_bytes": 11927552
+  },
+  {
+    "engine": "rudb",
+    "trial": 50,
+    "wall_ns": 90542964,
+    "cpu_s": 0.071475,
+    "peak_rss_bytes": 11534336
+  }
+]
