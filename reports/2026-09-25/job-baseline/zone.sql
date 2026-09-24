@@ -1,0 +1,12 @@
+.mode tabs
+SET threads=2;
+SELECT 'cast_info','movie_id',count(*),avg((mx-mn+1)/2528312.0),median((mx-mn+1)/2528312.0) FROM (SELECT min(movie_id) mn, max(movie_id) mx FROM (SELECT movie_id, (row_number() OVER (ORDER BY rowid)-1)//122880 g FROM cast_info) GROUP BY g);
+SELECT 'cast_info','person_id',count(*),avg((mx-mn+1)/4167491.0),median((mx-mn+1)/4167491.0) FROM (SELECT min(person_id) mn, max(person_id) mx FROM (SELECT person_id, (row_number() OVER (ORDER BY rowid)-1)//122880 g FROM cast_info) GROUP BY g);
+SELECT 'cast_info','person_role_id',count(*),avg((mx-mn+1)/3140339.0),median((mx-mn+1)/3140339.0) FROM (SELECT min(person_role_id) mn, max(person_role_id) mx FROM (SELECT person_role_id, (row_number() OVER (ORDER BY rowid)-1)//122880 g FROM cast_info) GROUP BY g);
+SELECT 'movie_info','movie_id',count(*),avg((mx-mn+1)/2528312.0),median((mx-mn+1)/2528312.0) FROM (SELECT min(movie_id) mn, max(movie_id) mx FROM (SELECT movie_id, (row_number() OVER (ORDER BY rowid)-1)//122880 g FROM movie_info) GROUP BY g);
+SELECT 'movie_companies','movie_id',count(*),avg((mx-mn+1)/2528312.0),median((mx-mn+1)/2528312.0) FROM (SELECT min(movie_id) mn, max(movie_id) mx FROM (SELECT movie_id, (row_number() OVER (ORDER BY rowid)-1)//122880 g FROM movie_companies) GROUP BY g);
+SELECT 'movie_keyword','movie_id',count(*),avg((mx-mn+1)/2528312.0),median((mx-mn+1)/2528312.0) FROM (SELECT min(movie_id) mn, max(movie_id) mx FROM (SELECT movie_id, (row_number() OVER (ORDER BY rowid)-1)//122880 g FROM movie_keyword) GROUP BY g);
+SELECT 'movie_info_idx','movie_id',count(*),avg((mx-mn+1)/2528312.0),median((mx-mn+1)/2528312.0) FROM (SELECT min(movie_id) mn, max(movie_id) mx FROM (SELECT movie_id, (row_number() OVER (ORDER BY rowid)-1)//122880 g FROM movie_info_idx) GROUP BY g);
+SELECT 'person_info','person_id',count(*),avg((mx-mn+1)/4167491.0),median((mx-mn+1)/4167491.0) FROM (SELECT min(person_id) mn, max(person_id) mx FROM (SELECT person_id, (row_number() OVER (ORDER BY rowid)-1)//122880 g FROM person_info) GROUP BY g);
+SELECT 'aka_name','person_id',count(*),avg((mx-mn+1)/4167491.0),median((mx-mn+1)/4167491.0) FROM (SELECT min(person_id) mn, max(person_id) mx FROM (SELECT person_id, (row_number() OVER (ORDER BY rowid)-1)//122880 g FROM aka_name) GROUP BY g);
+SELECT 'complete_cast','movie_id',count(*),avg((mx-mn+1)/2528312.0),median((mx-mn+1)/2528312.0) FROM (SELECT min(movie_id) mn, max(movie_id) mx FROM (SELECT movie_id, (row_number() OVER (ORDER BY rowid)-1)//122880 g FROM complete_cast) GROUP BY g);

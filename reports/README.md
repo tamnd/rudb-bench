@@ -4,6 +4,7 @@ Reports are grouped by the UTC date when the measurement was taken or the analys
 
 | Date | Reports |
 | --- | --- |
+| 2026-09-25 | [JOB, the J0 baseline](2026-09-25/job-baseline.md) |
 | 2026-09-24 | [JOB, the reduced SQL on DuckDB](2026-09-24/job-reduced-prototype.md) |
 | 2026-09-23 | [certified composite TopN](2026-09-23/certified-composite-topn.md), [threaded LIKE profile and 1M/10M DuckDB comparison](2026-09-23/threaded-like-profile.md), [native gram signatures and updated 1M/10M comparison](2026-09-23/native-gram-sieve.md), [Q22 late phrase fetch and updated 1M/10M comparison](2026-09-23/q22-late-phrase-fetch.md) |
 | 2026-09-18 | [the URL queries were reading a gigabyte of dictionary in sixty four kilobyte pieces](2026-09-18/dictionary-extents.md), [the cold column was eight workers reading the same page](2026-09-18/stripe-page-sharing.md), [rudb on the full file](2026-09-18/the-full-file.md), [the full file under the official driver](2026-09-18/official-driver-full-file.md), [ten million rows under the official driver](2026-09-18/ten-million-under-the-official-driver.md) |
