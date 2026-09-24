@@ -269,12 +269,22 @@ pub fn prepare(
 
 /// The command that writes the corpus a run just failed to find, when there is one.
 ///
-/// Empty for a suite whose data is downloaded, because pointing somebody at a generator that cannot
-/// make their data wastes more of their time than saying nothing. A message that ends in the exact
-/// line to type is the difference between a missing corpus costing a minute and costing an hour of
-/// reading the readme, and the scale factor has to be in it: the common failure is a run at one
-/// scale over a machine that only has another.
+/// Empty for a suite whose data is downloaded by hand, because pointing somebody at a generator
+/// that cannot make their data wastes more of their time than saying nothing. A message that ends in
+/// the exact line to type is the difference between a missing corpus costing a minute and costing an
+/// hour of reading the readme, and the scale factor has to be in it: the common failure is a run at
+/// one scale over a machine that only has another.
+///
+/// JOB is downloaded too, but `generate` knows how to fetch and unpack it, so it gets the command
+/// and no scale factor, because it has none.
 fn makes(suite: &'static Suite, scale: Option<&'static Scale>) -> String {
+    if crate::corpus::archive(suite).is_some() {
+        return format!(
+            ". This corpus is unpacked from a download, so the command that makes it is \
+             `rudb-bench generate {}`",
+            suite.name
+        );
+    }
     if !matches!(suite.size, crate::suite::Size::Generated { .. }) {
         return String::new();
     }
@@ -788,6 +798,7 @@ mod tests {
             converter: "duckdb v1.5.5".to_owned(),
             hashed_by: "shasum -a 256".to_owned(),
             written: "2026-09-18".to_owned(),
+            source: None,
             tables: Vec::new(),
             properties: Vec::new(),
         };
@@ -828,6 +839,13 @@ mod tests {
         if let Some(hits) = hits {
             assert_eq!(makes(hits, None), "");
         }
+
+        // JOB is a download as well, but one `generate` can fetch, so it gets the command, and no
+        // --scale in it because it has one size.
+        let job = crate::suite::find("job").expect("job is a suite");
+        let said = makes(job, None);
+        assert!(said.ends_with("`rudb-bench generate job`"), "{said}");
+        assert!(!said.contains("--scale"), "{said}");
     }
 
     #[test]
