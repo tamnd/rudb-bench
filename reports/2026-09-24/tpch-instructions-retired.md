@@ -93,4 +93,16 @@ That is one thread to pull and the unpacking is another. Both are in rudb #1633.
 
 ## Reproducing
 
-`perf stat -x, -e instructions,task-clock` around each engine in a fresh process, single threaded, three repeats, median, with a `SELECT 1` baseline subtracted. The script is not in the harness. Folding it in is worth more than folding in the paired wall clock script the last report asked for, because this one does not need a quiet machine and that one does.
+`perf stat -x, -e instructions,task-clock` around each engine in a fresh process, single threaded, three repeats, median, with a `SELECT 1` baseline subtracted.
+
+The script is in the harness now, as `scripts/tpch-instructions-ab.py`. It takes two binaries and measures the instruction count of each query on both, and `--before-engine` and `--after-engine` decide how each side is invoked, so rudb against DuckDB and rudb against an older rudb are the same command with different arguments. The query file it reads comes from `cargo run --example export_queries -- tpch rudb <file>`, which writes out the same text `src/suite.rs` holds so that nothing here is a second copy of the queries. The command behind the table above is:
+
+```
+cargo run --example export_queries -- tpch duckdb /tmp/tpch.sql
+scripts/tpch-instructions-ab.py \
+  --before /path/to/duckdb --before-engine duckdb --database /path/to/tpch.duckdb \
+  --after /path/to/rudb --after-engine rudb --after-database /path/to/tpch.rdb \
+  --queries /tmp/tpch.sql --rounds 3 --skip-answers
+```
+
+`--skip-answers` is needed for that one and only that one. Two different engines format a result set differently, so the comparison the script does by default cannot pass across engines and the harness proper is what checks the answers agree. Two rudb binaries are compared with it left on, and a query whose output moved stops the run.
