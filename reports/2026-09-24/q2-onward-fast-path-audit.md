@@ -1,5 +1,7 @@
 # Q2 onward: native statistics and fast CSV paths
 
+Correction: this report measured Q8 when a complete numeric frequency table supplied its grouped counts. The [grouped-count correction](q2-onward-grouped-count-correction.md) changed Q8 to read rows, and the [partial-frequency review](q2-q8-partial-numeric-frequencies.md) removes complete multi-value numeric frequencies from newly written files. The Q8 measurements below are historical metadata-path measurements.
+
 The native writer must store reusable facts about columns and rows, not a saved answer for a ClickBench statement. I checked the Q2 through Q8 read paths and the writer that produces their metadata. [RuDB #1627](https://github.com/tamnd/rudb/pull/1627) removes the remaining literal ClickBench statement and column-name checks from the Q3 and Q8 fast CSV paths.
 
 | Query | Native facts read | Work done when SQL runs |

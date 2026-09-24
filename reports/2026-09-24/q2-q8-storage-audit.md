@@ -1,5 +1,7 @@
 # Native storage audit from Q2 through Q8
 
+Correction: a complete low-cardinality numeric frequency table contains the full grouped count for Q8, even if the table is not stored in output order. The [grouped-count correction](q2-onward-grouped-count-correction.md) made Q8 read rows at query time, and the [partial-frequency review](q2-q8-partial-numeric-frequencies.md) removes complete multi-value numeric frequencies from newly written files. The Q8 classification below records the earlier design.
+
 Correction: the Q8 classification below was too permissive. Its complete frequency list contained every group key and exact count, which made the stored synopsis equivalent to Q8's grouped answer. The [runtime aggregation correction](q2-onward-grouped-count-correction.md) removes the grouped-result shortcuts and remeasures Q8.
 
 The native file should hold facts about a table or column that another query can reuse. It should not hold a saved result for one ClickBench statement. A query may recognize a narrow SQL shape and use those facts, provided it still derives the result at runtime and falls back when the facts do not prove the answer.
