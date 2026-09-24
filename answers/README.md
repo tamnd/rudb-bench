@@ -31,6 +31,12 @@ The honest fix, for whoever wants it, is to retype the appendix or to take the a
 
 Q2, Q3, Q10, Q18 and Q21 order by keys that do not totally order the rows and then cut with a `LIMIT`. The published answer is one correct choice of rows at that cut, and an engine that kept a different set of tied rows is not wrong. Settling that needs the query run again without its `LIMIT`, which is `answer::boundary` and issue #148 is the plumbing for it. Until then a difference in one of those five is reported with that sentence next to it rather than called a wrong answer.
 
+## `job/`
+
+The answer of each of the 113 JOB queries on the IMDb snapshot of May 2013, one file per query, named as `src/suite.rs` names the query. Each file is CSV with the column names on the first line and one row, because every JOB query is an ungrouped `MIN`. `NULL` is spelled out, which is what the five queries that are empty on this snapshot return in every column.
+
+They were written by the pinned DuckDB v2.0.0-dev84237 with `-csv` over a database loaded from the snapshot with JOB's own `schema.sql`, on server2 on 24 September 2026. The reduced form of every query, which runs no join, returns the same 113 answers on the same database, which is the check described in `reports/2026-09-24/job-reduced-prototype.md`. That is a second derivation of each answer through different operators, though not through a different engine.
+
 ## Adding a set
 
 Put the files under `answers/<suite>-<scale>/`, one per query, named for the query as `src/suite.rs` names it, with the column names on the first line. Then add the directory to `ANSWERS` in `src/qualified.rs` and say in the module doc where the numbers came from, because a reference whose provenance is not written down is a reference nobody can weigh.

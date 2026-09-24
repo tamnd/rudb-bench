@@ -1,0 +1,114 @@
+query	cold_ms	hot_median_ms	hot_iqr_ms	samples_ms	answer
+1a	199.0	62.0	22.5	199,77,55,62,50,73	(A Warner Bros.-First National Picture) (presents)|A Clockwork Orange|1934
+1b	110.0	26.0	5.5	110,26,26,21,21,27	(Set Decoration Rentals) (uncredited)|Disaster Movie|2008
+1c	99.0	27.0	10.5	99,26,34,27,27,40	(co-production)|Intouchables|2011
+1d	102.0	23.0	8.5	102,30,22,30,21,23	(Set Decoration Rentals) (uncredited)|Disaster Movie|2004
+2a	270.0	104.0	19.0	270,109,104,87,91,107	'Doc'
+2b	245.0	93.0	9.5	245,95,87,91,93,102	'Doc'
+2c	132.0	35.0	6.5	132,41,35,35,31,32	NULL
+2d	370.0	266.0	106.0	370,218,279,372,266,221	& Teller
+3a	1561.0	738.0	44.5	1561,738,757,682,750,736	2 Days in New York
+3b	2012.0	643.0	170.0	2012,537,647,678,643,448	300: Rise of an Empire
+3c	2224.0	1017.0	128.5	2224,938,1017,1102,1108,1015	& Teller 2
+4a	711.0	450.0	94.0	711,450,490,474,389,387	5.1|& Teller 2
+4b	366.0	126.0	17.0	366,141,132,126,114,125	9.1|Batman: Arkham City
+4c	651.0	368.0	122.5	651,454,449,329,329,368	2.1|& Teller 2
+5a	255.0	86.0	28.0	255,111,110,85,80,86	NULL
+5b	2802.0	645.0	369.0	2802,811,931,645,535,469	NULL
+5c	1446.0	710.0	170.5	1446,649,620,710,746,864	11,830,420
+6a	1234.0	403.0	85.5	1234,421,403,391,496,355	marvel-cinematic-universe|Downey Jr., Robert|Iron Man 3
+6b	562.0	278.0	79.0	562,319,278,264,246,349	based-on-comic|Downey Jr., Robert|The Avengers 2
+6c	725.0	273.0	42.5	725,286,247,279,273,233	marvel-cinematic-universe|Downey Jr., Robert|The Avengers 2
+6d	827.0	491.0	21.5	827,465,491,497,492,481	based-on-comic|Downey Jr., Robert|2008 MTV Movie Awards
+6e	1113.0	285.0	71.5	1113,390,282,287,252,285	marvel-cinematic-universe|Downey Jr., Robert|Iron Man 3
+6f	1455.0	799.0	380.5	1455,799,1037,1209,758,727	based-on-comic|"Steff", Stefanie Oxmann Mcgaha|& Teller 2
+7a	354.0	119.0	27.0	354,126,119,100,130,102	Antonioni, Michelangelo|Dressed to Kill
+7b	246.0	91.0	9.5	246,92,77,93,89,91	De Palma, Brian|Dressed to Kill
+7c	889.0	404.0	72.5	889,417,353,352,404,433	50 Cent|"Boo" Arnold was born Earl Arnold in Hattiesburg, Mississippi in 1966. His father gave him the nickname 'Boo' early in life and it stuck through grade school, high school, and college. He is still known as "Boo" to family and friends.  Raised in central Texas, Arnold played baseball at Texas Tech University where he graduated with a BA in Advertising and Marketing. While at Texas Tech he was also a member of the Texas Epsilon chapter of Phi Delta Theta fraternity. After college he worked with Young Life, an outreach to high school students, in San Antonio, Texas.  While with Young Life Arnold began taking extension courses through Fuller Theological Seminary and ultimately went full-time to Gordon-Conwell Theological Seminary in Boston, Massachusetts. At Gordon-Conwell he completed a Master's Degree in Divinity studying Theology, Philosophy, Church History, Biblical Languages (Hebrew & Greek), and Exegetical Methods. Following seminary he was involved with reconciliation efforts in the former Yugoslavia shortly after the war ended there in1995.  Arnold started acting in his early thirties in Texas. After an encouraging visit to Los Angeles where he spent time with childhood friend George Eads (of CSI Las Vegas) he decided to move to Los Angeles in 2001 to pursue acting full-time. While in Los Angeles he has studied acting with Judith Weston at Judith Weston Studio for Actors and Directors.  Arnold's acting career has been one of steady development, booking co-star and guest-star roles in nighttime television. He guest-starred opposite of Jane Seymour on the night time television drama Justice. He played the lead, Michael Hollister, in the film The Seer, written and directed by Patrick Masset (Friday Night Lights).  He was nominated Best Actor in the168 Film Festival for the role of Phil Stevens in the short-film Useless. In Useless he played a US Marshal who must choose between mercy and justice as he confronts the man who murdered his father. Arnold's performance in Useless confirmed his ability to carry lead roles, and he continues to work toward solidifying himself as a male lead in film and television.  Arnold married fellow Texan Stacy Rudd of San Antonio in 2003 and they are now raising their three children in the Los Angeles area.
+8a	355.0	143.0	26.0	355,160,151,143,123,136	Chambers, Linda|.hack//Quantum
+8b	319.0	134.0	39.0	319,120,179,134,140,121	Chambers, Linda|Dragon Ball Z: Shin Budokai
+8c	1075.0	737.0	68.5	1075,697,687,754,767,737	"A.J."|#1 Cheerleader Camp
+8d	487.0	293.0	20.0	487,280,311,295,293,286	"Jenny from the Block"|#1 Cheerleader Camp
+9a	633.0	304.0	42.0	633,343,304,299,320,280	AJ|Airport Announcer|Blue Harvest
+9b	488.0	223.0	39.5	488,250,265,223,220,216	AJ|Airport Announcer|Bassett, Angela|Blue Harvest
+9c	674.0	396.0	105.5	674,396,411,462,369,293	'Annette'|2nd Balladeer|Alborg, Ana Esther|(1975-01-20)
+9d	805.0	416.0	41.0	805,420,463,398,403,416	!!!, Toy|"Cockamamie's" Salesgirl|Aaron, Caroline|$15,000.00 Error
+10a	363.0	102.0	9.5	363,102,104,104,101,88	Actor|12 Rounds
+10b	295.0	120.0	30.0	295,120,118,117,133,162	NULL|NULL
+10c	684.0	329.0	11.5	684,329,344,336,329,328	Himself|Evil Eyes: Behind the Scenes
+11a	119.0	48.0	7.0	119,55,48,50,44,47	Churchill Films|followed by|Batman Beyond
+11b	108.0	42.0	7.0	108,46,44,42,40,36	Filmlance International AB|follows|The Money Man
+11c	136.0	68.0	17.5	136,68,87,73,66,59	20th Century Fox Home Entertainment|(1997-2002) (worldwide) (all media)|24
+11d	187.0	99.0	19.0	187,103,104,99,82,87	13th Street|(1954) (UK) (TV)|...denn sie wissen nicht, was sie tun
+12a	255.0	99.0	8.5	255,108,100,95,96,99	10th Grade Reunion Films|8.1|3:20
+12b	282.0	149.0	19.0	282,143,156,128,153,149	$10,000|Birdemic: Shock and Terror
+12c	291.0	127.0	33.0	291,128,127,126,114,178	"Oh That Gus!"|7.1|$1.11
+13a	265.0	107.0	24.0	265,107,115,111,93,85	Afghanistan:24 June 2012|1.0|&Me
+13b	272.0	161.0	18.5	272,172,154,146,161,165	501audio|1.8|5 Time Champion
+13c	248.0	141.0	17.5	248,152,141,148,128,137	DL Sites|1.8|Champion
+13d	337.0	221.0	18.0	337,234,231,217,212,221	"O" Films|1.0|#54 Meets #47
+14a	388.0	159.0	86.0	388,237,242,159,152,155	1.0|$lowdown
+14b	207.0	94.0	18.5	207,99,109,94,82,89	6.4|Of Dolls and Murder
+14c	402.0	168.0	50.0	402,170,135,214,168,149	1.0|$lowdown
+16a	628.0	154.0	30.0	628,168,175,140,143,154	Adams, Stan|Carol Burnett vs. Anthony Perkins
+16b	1625.0	822.0	55.5	1625,818,822,853,800,876	!!!, Toy|& Teller
+16c	635.0	255.0	108.5	635,241,230,255,302,386	"Brooklyn" Tony Danza|(#1.5)
+16d	589.0	215.0	30.0	589,244,214,208,215,238	"Brooklyn" Tony Danza|(#1.5)
+17a	767.0	360.0	34.5	767,338,349,360,377,379	B, Khaz|B, Khaz
+17b	1042.0	534.0	46.0	1042,534,508,575,512,537	Z'Dar, Robert|Z'Dar, Robert
+17c	1036.0	525.0	95.5	1036,525,556,628,490,503	X'Volaitis, John|X'Volaitis, John
+17d	1008.0	579.0	148.0	1008,523,577,579,690,706	Abrahamsson, Bertil
+17e	1032.0	469.0	36.0	1032,469,465,467,469,535	$hort, Too
+17f	1651.0	1153.0	304.0	1651,1021,1471,1153,1035,1193	'El Galgo PornoStar', Blanquito
+18a	1371.0	391.0	53.0	1371,424,366,382,391,430	$1,000|10|40 Days and 40 Nights
+18b	687.0	199.0	25.0	687,194,199,197,222,219	Horror|8.1|Agorable
+18c	892.0	317.0	30.0	892,344,317,324,304,304	Action|10|#PostModem
+19a	873.0	456.0	47.5	873,418,456,426,462,477	Angeline, Moriah|Blue Harvest
+19b	642.0	263.0	72.0	642,344,285,244,241,263	Jolie, Angelina|Kung Fu Panda
+19c	1239.0	602.0	66.5	1239,667,621,563,602,592	Alborg, Ana Esther|.hack//Akusei heni vol. 2
+19d	1670.0	604.0	81.0	1670,696,593,571,604,630	Aaron, Caroline|$9.99
+20a	1081.0	393.0	79.5	1081,446,389,393,453,351	Disaster Movie
+20b	1242.0	538.0	127.0	1242,582,538,656,482,502	Iron Man
+20c	1257.0	525.0	74.0	1257,603,541,498,525,498	Abell, Alistair|...And Then I...
+21a	268.0	102.0	13.0	268,103,109,86,100,102	Det Danske Filminstitut|followed by|Der Serienkiller - Klinge des Todes
+21b	211.0	74.0	18.0	211,89,74,72,70,89	Filmlance International AB|followed by|Hämndens pris
+21c	287.0	108.0	24.5	287,127,119,108,105,92	Churchill Films|followed by|Batman Beyond
+22a	599.0	244.0	54.5	599,281,228,293,244,237	01 Distribution|2.1|12 Rounds
+22b	530.0	212.0	135.0	530,412,269,212,208,203	Boll Kino Beteiligungs GmbH & Co. KG|3.0|A Small Act
+22c	836.0	401.0	82.0	836,495,391,376,436,401	01 Distribution|1.9|(#1.1)
+22d	1202.0	799.0	111.5	1202,898,776,799,725,826	01 Distribution|1.6|(#1.1)
+23a	462.0	254.0	179.0	462,319,477,254,204,234	movie|The Analysts
+23b	295.0	151.0	62.5	295,151,112,180,178,121	movie|The Big Mope
+23c	448.0	281.0	77.0	448,332,281,243,282,217	movie|Dirt Merchant
+24a	735.0	387.0	76.0	735,397,427,353,319,387	Additional Voices|Baker, Andrea|Baiohazâdo 6
+24b	779.0	189.0	51.0	779,202,236,189,186,150	Tigress|Jolie, Angelina|Kung Fu Panda 2
+25a	929.0	320.0	54.0	929,298,293,332,320,367	Horror|10|Abdallah, Damon|-- And Now the Screaming Starts!
+25b	598.0	148.0	40.0	598,148,143,220,145,148	Horror|138|Campbell, Jeremiah|Vampire Boys
+25c	1330.0	374.0	99.5	1330,457,447,366,339,374	Action|10|Aakeson, Kim Fupz|$
+26a	1228.0	350.0	55.0	1228,347,394,349,412,350	'Agua' Man|7.1|Acereda, Hermie|3:10 to Yuma
+26b	685.0	177.0	17.0	685,164,169,182,177,185	Bank Manager|8.2|Inception
+26c	891.0	415.0	36.0	891,415,390,446,415,431	'Agua' Man|1.9|12 Rounds
+27a	207.0	70.0	15.5	207,72,70,61,81,61	Det Danske Filminstitut|followed by|Spår i mörker
+27b	186.0	69.0	8.0	186,76,69,67,70,63	Filmlance International AB|followed by|Vita nätter
+27c	215.0	78.0	8.0	215,78,75,89,80,78	Det Danske Filminstitut|followed by|Spår i mörker
+28a	1378.0	501.0	57.5	1378,545,501,525,456,499	01 Distribuzione|2.9|(#1.1)
+28b	953.0	335.0	90.0	953,351,397,335,270,298	20th Century Fox|6.6|(#1.1)
+28c	1392.0	511.0	56.0	1392,513,511,570,472,499	01 Distribuzione|1.9|(#1.1)
+29a	1019.0	257.0	89.5	1019,256,382,299,257,246	Queen|Andrews, Julie|Shrek 2
+29b	1166.0	268.0	85.5	1166,306,268,353,244,244	Queen|Andrews, Julie|Shrek 2
+29c	1127.0	365.0	42.5	1127,365,393,355,402,355	Lola|Andrews, Julie|Hoodwinked!
+30a	832.0	288.0	71.0	832,354,350,280,288,282	Horror|100356|Abrams, J.J.|16 Blocks
+30b	1069.0	248.0	52.0	1069,322,244,246,248,272	Horror|194782|Shannon, Damian|Freddy vs. Jason
+30c	1161.0	414.0	41.5	1161,414,436,442,390,405	Action|100356|Abernathy, Lewis|$
+31a	999.0	327.0	47.0	999,363,319,351,301,327	Horror|1040|Agnew, Jim|2001 Maniacs
+31b	939.0	259.0	21.0	939,254,234,259,261,269	Horror|129755|Bousman, Darren Lynn|Saw
+31c	1386.0	443.0	187.0	1386,649,508,443,382,401	Action|1008|Abraham, Brad|11:14
+32a	66.0	24.0	4.0	66,22,26,24,20,24	NULL|NULL|NULL
+32b	199.0	83.0	3.0	199,83,81,83,83,79	alternate language version of|12 oz. Mouse|'Angel': Season 2 Overview
+33a	168.0	60.0	10.5	168,64,60,53,63,53	495 Productions|495 Productions|3.3|2.7|A Double Shot at Love|A Shot at Love with Tila Tequila
+33b	375.0	107.0	33.0	375,143,125,97,105,107	MTV Netherlands|495 Productions|3.3|2.7|A Double Shot at Love|A Shot at Love with Tila Tequila
+33c	227.0	80.0	10.0	227,77,80,86,88,77	2BE|495 Productions|1.3|1.0|A Double Shot at Love|A Double Shot at Love
+15a	767.0	345.0	161.5	767,557,306,362,290,345	USA:1 June 2007|Battlestar Galactica: The Resistance
+15b	863.0	293.0	562.5	863,660,293,948,251,232	USA:27 April 2007|RoboCop vs Terminator
+15c	1095.0	825.0	99.0	1095,926,825,782,778,832	USA:1 April 2003|24: Day Six - Debrief
+15d	1212.0	625.0	147.0	1212,714,576,684,528,625	(Not So) Instant Photo|06/05

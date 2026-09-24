@@ -1,0 +1,14 @@
+WITH cn_0 AS MATERIALIZED (SELECT id FROM company_name AS cn WHERE (cn.country_code ='[sm]')),
+k_0 AS MATERIALIZED (SELECT id FROM keyword AS k WHERE (k.keyword ='character-name-in-title')),
+mc_0 AS MATERIALIZED (SELECT company_id, movie_id FROM movie_companies AS mc),
+mk_0 AS MATERIALIZED (SELECT keyword_id, movie_id FROM movie_keyword AS mk),
+t_0 AS MATERIALIZED (SELECT id, title FROM title AS t),
+mc_1 AS MATERIALIZED (SELECT * FROM mc_0 AS mc_t WHERE EXISTS (SELECT 1 FROM cn_0 AS cn_s WHERE cn_s.id = mc_t.company_id)),
+mk_1 AS MATERIALIZED (SELECT * FROM mk_0 AS mk_t WHERE EXISTS (SELECT 1 FROM k_0 AS k_s WHERE k_s.id = mk_t.keyword_id)),
+mk_2 AS MATERIALIZED (SELECT * FROM mk_1 AS mk_t WHERE EXISTS (SELECT 1 FROM mc_1 AS mc_s WHERE mc_s.movie_id = mk_t.movie_id)),
+t_1 AS MATERIALIZED (SELECT * FROM t_0 AS t_t WHERE EXISTS (SELECT 1 FROM mk_2 AS mk_s WHERE mk_s.movie_id = t_t.id)),
+mk_3 AS MATERIALIZED (SELECT * FROM mk_2 AS mk_t WHERE EXISTS (SELECT 1 FROM t_1 AS t_s WHERE t_s.id = mk_t.movie_id)),
+mc_2 AS MATERIALIZED (SELECT * FROM mc_1 AS mc_t WHERE EXISTS (SELECT 1 FROM mk_3 AS mk_s WHERE mk_s.movie_id = mc_t.movie_id)),
+k_1 AS MATERIALIZED (SELECT * FROM k_0 AS k_t WHERE EXISTS (SELECT 1 FROM mk_3 AS mk_s WHERE mk_s.keyword_id = k_t.id)),
+cn_1 AS MATERIALIZED (SELECT * FROM cn_0 AS cn_t WHERE EXISTS (SELECT 1 FROM mc_2 AS mc_s WHERE mc_s.company_id = cn_t.id))
+SELECT (SELECT MIN(title) FROM t_1) AS movie_title
