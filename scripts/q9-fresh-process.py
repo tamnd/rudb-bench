@@ -70,6 +70,10 @@ def main():
                     'wall_ns': round(resource['wall_s'] * 1e9),
                     'cpu_s': resource['user_s'] + resource['system_s'],
                     'peak_rss_bytes': resource['peak_rss_bytes'],
+                    'minor_faults': resource['minor_faults'],
+                    'major_faults': resource['major_faults'],
+                    'read_bytes': resource['read_bytes'],
+                    'write_bytes': resource['write_bytes'],
                 })
 
     args.json.parent.mkdir(parents=True, exist_ok=True)
