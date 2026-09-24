@@ -20,6 +20,8 @@ def main():
     parser.add_argument('--rudb-main', help='Optional previous rudb binary for a four-way comparison')
     parser.add_argument('--rudb-uncertified-db', help='Previous native file for the four-way comparison')
     parser.add_argument('--expected', required=True, help='Expected count')
+    parser.add_argument('--rudb-set', action='append', default=[],
+                        help='RuDB session setting, for example threads=6')
     parser.add_argument('--rounds', type=int, default=51)
     parser.add_argument('--json', type=pathlib.Path, required=True)
     parser.add_argument('--helper', type=pathlib.Path,
@@ -51,6 +53,9 @@ def main():
             offset = trial % len(cases)
             for engine, binary, database in cases[offset:] + cases[:offset]:
                 command = [binary, '-readonly', database, '-noheader', '-csv', '-c', sql]
+                if engine.startswith('rudb'):
+                    for setting in args.rudb_set:
+                        command[1:1] = ['--set', setting]
                 with stdout_path.open('wb') as stdout, stderr_path.open('wb') as stderr:
                     resource_path.unlink(missing_ok=True)
                     process = subprocess.run(
