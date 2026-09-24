@@ -30,6 +30,7 @@ pub mod corpus;
 pub mod data;
 pub mod engine;
 pub mod fleet;
+pub mod histogram;
 pub mod kernels;
 pub mod ledger;
 pub mod machine;
