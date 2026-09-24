@@ -1,0 +1,17 @@
+WITH k_0 AS MATERIALIZED (SELECT id FROM keyword AS k WHERE (k.keyword ='character-name-in-title')),
+lt_0 AS MATERIALIZED (SELECT id, link FROM link_type AS lt),
+mk_0 AS MATERIALIZED (SELECT keyword_id, movie_id FROM movie_keyword AS mk),
+ml_0 AS MATERIALIZED (SELECT link_type_id, linked_movie_id, movie_id FROM movie_link AS ml),
+t1_0 AS MATERIALIZED (SELECT id, title FROM title AS t1),
+t2_0 AS MATERIALIZED (SELECT id, title FROM title AS t2),
+mk_1 AS MATERIALIZED (SELECT * FROM mk_0 AS mk_t WHERE EXISTS (SELECT 1 FROM k_0 AS k_s WHERE k_s.id = mk_t.keyword_id)),
+ml_1 AS MATERIALIZED (SELECT * FROM ml_0 AS ml_t WHERE EXISTS (SELECT 1 FROM lt_0 AS lt_s WHERE lt_s.id = ml_t.link_type_id)),
+ml_2 AS MATERIALIZED (SELECT * FROM ml_1 AS ml_t WHERE EXISTS (SELECT 1 FROM mk_1 AS mk_s WHERE mk_s.movie_id = ml_t.movie_id)),
+ml_3 AS MATERIALIZED (SELECT * FROM ml_2 AS ml_t WHERE EXISTS (SELECT 1 FROM t1_0 AS t1_s WHERE t1_s.id = ml_t.movie_id)),
+t2_1 AS MATERIALIZED (SELECT * FROM t2_0 AS t2_t WHERE EXISTS (SELECT 1 FROM ml_3 AS ml_s WHERE ml_s.linked_movie_id = t2_t.id)),
+ml_4 AS MATERIALIZED (SELECT * FROM ml_3 AS ml_t WHERE EXISTS (SELECT 1 FROM t2_1 AS t2_s WHERE t2_s.id = ml_t.linked_movie_id)),
+t1_1 AS MATERIALIZED (SELECT * FROM t1_0 AS t1_t WHERE EXISTS (SELECT 1 FROM ml_4 AS ml_s WHERE ml_s.movie_id = t1_t.id)),
+mk_2 AS MATERIALIZED (SELECT * FROM mk_1 AS mk_t WHERE EXISTS (SELECT 1 FROM ml_4 AS ml_s WHERE ml_s.movie_id = mk_t.movie_id)),
+lt_1 AS MATERIALIZED (SELECT * FROM lt_0 AS lt_t WHERE EXISTS (SELECT 1 FROM ml_4 AS ml_s WHERE ml_s.link_type_id = lt_t.id)),
+k_1 AS MATERIALIZED (SELECT * FROM k_0 AS k_t WHERE EXISTS (SELECT 1 FROM mk_2 AS mk_s WHERE mk_s.keyword_id = k_t.id))
+SELECT (SELECT MIN(link) FROM lt_1) AS link_type, (SELECT MIN(title) FROM t1_1) AS first_movie, (SELECT MIN(title) FROM t2_1) AS second_movie
