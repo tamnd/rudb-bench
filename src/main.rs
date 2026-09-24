@@ -1176,7 +1176,7 @@ fn attribute(args: &[String]) -> ExitCode {
     }
 }
 
-/// Make a corpus for a generated suite, and write down what was made.
+/// Make a corpus for a generated suite, or unpack one for JOB, and write down what was made.
 ///
 /// The one subcommand here that writes to the data root rather than to a scratch directory, which
 /// is why it is a command somebody types rather than something a run does on their behalf. A
@@ -1188,8 +1188,12 @@ fn attribute(args: &[String]) -> ExitCode {
 /// writes any of it. `--yes` is how a script says it has read that. The figure printed is rough and
 /// says so; the exact one goes in the manifest, which cannot be written until the files exist.
 ///
-/// What comes out is eight Parquet files and a manifest beside them. The manifest is the part worth
-/// having: see [`rudb_bench::corpus`] for why eight files under a directory are not a corpus.
+/// What comes out is a Parquet file per table and a manifest beside them. The manifest is the part
+/// worth having: see [`rudb_bench::corpus`] for why eight files under a directory are not a corpus.
+///
+/// JOB is the one suite here that is neither generated nor left to somebody to download by hand.
+/// Its corpus is IMDb's 2013 snapshot, which `generate job` fetches, unpacks and converts, and it
+/// has one size, so `--scale` is refused for it rather than ignored.
 fn generate(args: &[String]) -> ExitCode {
     let mut suite_name = None;
     let mut scale_name = None;
@@ -1225,13 +1229,24 @@ fn generate(args: &[String]) -> ExitCode {
         eprintln!("rudb-bench: try `rudb-bench suites`");
         return ExitCode::FAILURE;
     };
+    // Refused rather than ignored, because somebody who typed `--scale 10` for JOB is expecting a
+    // corpus ten times the size, and quietly writing the one that exists would be a surprise they
+    // found out about from a row count.
+    if rudb_bench::corpus::archive(suite).is_some() && scale_name.is_some() {
+        eprintln!(
+            "rudb-bench: the {suite_name} suite is one corpus of one size, the IMDb snapshot the \
+             JOB paper used, so it takes no --scale. Run `rudb-bench generate {suite_name}`"
+        );
+        return ExitCode::FAILURE;
+    }
     let scale = match chosen_scale(&suite_name, scale_name.as_deref()) {
-        Ok(Some(scale)) => scale,
+        Ok(Some(scale)) => Some(scale),
+        Ok(None) if rudb_bench::corpus::archive(suite).is_some() => None,
         // The default rather than a refusal, so that `generate tpch` is the same corpus a plain
         // `run tpch` would look for. A generation that picked a different one from the run would be
         // a directory full of files and a suite that still says nothing is there.
         Ok(None) => match suite.default_scale() {
-            Some(scale) => scale,
+            Some(scale) => Some(scale),
             None => {
                 eprintln!(
                     "rudb-bench: the {suite_name} suite has one corpus of one size, so there is \
@@ -1267,6 +1282,9 @@ fn generate(args: &[String]) -> ExitCode {
             println!();
             println!("{} rows over {} tables", manifest.rows(), manifest.tables.len());
             println!("corpus {}", manifest.digest());
+            if let Some(source) = &manifest.source {
+                println!("unpacked from {}, sha256 {}", source.archive, source.sha256);
+            }
             // A property that did not hold does not stop a generation, for the reason the module
             // gives, and it is the one thing in a manifest somebody has to be told rather than left
             // to find. The graph layer's sizes are built on these.
@@ -1719,10 +1737,12 @@ fn help() {
     );
     println!("  generate <suite> write the corpus a generated suite runs over, and the manifest");
     println!("                that describes it. Needs DuckDB and nothing else. Prints what it");
-    println!("                would write and stops, unless --yes");
+    println!("                would write and stops, unless --yes. `generate job` downloads the");
+    println!("                IMDb archive with curl instead, about 1.2 GB, and unpacks it");
     println!("    --scale n       which scale factor to write, such as 1 or 100, default the");
     println!("                    suite's own. Above SF10 the DuckDB extension is not permitted");
-    println!("                    and this says so rather than writing a corpus nobody can quote");
+    println!("                    and this says so rather than writing a corpus nobody can quote.");
+    println!("                    JOB has one size and refuses it");
     println!("    --yes           actually write it. Without this it is a plan and a disk figure");
     println!("  load          load a suite's data into each engine and time it");
     println!("  report [suite] build the cross engine table out of the saved runs on this");
