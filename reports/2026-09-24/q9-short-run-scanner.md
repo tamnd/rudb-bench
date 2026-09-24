@@ -1,0 +1,18 @@
+# Q9 scanner: count short UserID runs directly
+
+The [row-preserving Q9 projection](q9-row-preserving-run-projection.md) stores every original RegionID code, but its reader checked an epoch mark even for a UserID seen in only one row. In the 10m file, 657,433 of 1,530,334 UserID runs contain one row and 252,657 contain two. A Linux `perf` run over 100 fresh Q9 processes placed 45.8 percent of sampled cycles in the inlined run scanner, 8.1 percent in kernel page copies, and 5.4 percent in checksums.
+
+The new reader increments a runtime count directly for one-row runs. For two-row runs it compares the two original codes and increments each distinct code. Longer runs still use epoch marks. Short runs never write marks, so they do not advance the epoch. The marks are 32-bit values and are cleared when the epoch wraps. The native file format and bytes do not change; duplicate source rows remain present, and no grouped result is stored.
+
+The benchmark uses the same Q9 SQL for RuDB and DuckDB: `SELECT RegionID, COUNT(DISTINCT UserID) AS u FROM hits GROUP BY RegionID ORDER BY u DESC LIMIT 10`. Every invocation starts a new process. The runner compares the complete selected key/count set and descending counts, while allowing either order for ties. `wait4` measures wall time, user plus system CPU, and whole-process peak RSS. Cases rotate order, and the operating-system page cache remains warm. The 10m run has 51 rounds; smaller sizes have 11. Server load was high, with a load average near 15 when checked after these trials, so paired CPU and repeated samples are stronger evidence than a single wall median.
+
+| Rows | RuDB new wall | DuckDB native wall | DuckDB / RuDB wall | RuDB CPU | DuckDB CPU | RuDB peak RSS | DuckDB peak RSS | DuckDB / RuDB RSS |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1k | 18.366 ms | 133.113 ms | 7.25x | 10.736 ms | 84.675 ms | 6.25 MiB | 37.49 MiB | 6.00x |
+| 10k | 45.583 ms | 125.362 ms | 2.75x | 30.987 ms | 90.558 ms | 6.75 MiB | 38.37 MiB | 5.68x |
+| 1m | 46.253 ms | 389.937 ms | 8.43x | 38.369 ms | 319.053 ms | 9.88 MiB | 80.62 MiB | 8.16x |
+| 10m | 51.805 ms | 425.956 ms | 8.22x | 68.866 ms | 677.001 ms | 11.25 MiB | 133.78 MiB | 11.89x |
+
+The 10m new-versus-merged RuDB comparison used the same source file and rotating 51-round process order. The merged reader took 51.251 ms wall and 72.359 ms CPU; the new reader took 51.805 ms wall and 68.866 ms CPU; DuckDB took 425.956 ms wall and 677.001 ms CPU. The paired median saved 3.381 ms CPU. Wall time favored the new reader in 28 of 51 pairs, so this run does not establish a wall improvement. A second 51-round comparison of the new reader with the short-run reader before epoch skipping found 70.588 versus 73.516 ms CPU, with DuckDB at 700.967 ms. Wall medians were 58.460 versus 59.959 ms, but the paired wall median favored the earlier reader. The [raw samples](q9-short-runs/) preserve both trials and the earlier mark-width screen.
+
+The scanner is faster in CPU but remains below the 10x fresh-process wall target at every size. The 10m peak-memory target is met; smaller sizes miss it. The existing build cost of the optional projection still applies. Both binaries read the same byte-identical native file, and all returned the expected Q9 rows. The full native suite passed 194 tests on the rebased source, and strict native Clippy passed. The measured RuDB binary has SHA-256 `fa17c7b8548730f9411bb52c7606c447d669b689518f4da984496a7a3c2087e4`; the merged baseline has `bf623a684a34ef4627db0785b2fb16ff1714d988e2c9c797a60ae954a9f491bc`. DuckDB v2.0.0-dev84237 has SHA-256 `01b6b042bcb8ca60285da2d6e95a5619dfe16149d705794700aa135ebd1416c7`.
