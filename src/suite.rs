@@ -1999,8 +1999,10 @@ macro_rules! job {
 
 /// The 113 queries of the Join Order Benchmark, from gregrahn/join-order-benchmark at a396036.
 ///
-/// The text is the upstream text with the trailing semicolon taken off, because the engines here
-/// are handed one statement at a time. Nothing else is changed, and no engine gets its own text.
+/// The text is the upstream text with two changes. The trailing semicolon is taken off, because the
+/// engines here are handed one statement at a time. And 15a to 15d call `aka_title` by the alias
+/// `at`, which DuckDB 2.0 reserves as a keyword and will not parse, so the alias is quoted as
+/// `"at"` in those four. Every engine gets the same text, quoted, and no engine gets its own.
 /// The shape is how many relations the query joins and how many classes of equal columns those
 /// joins make, which is what decides how hard it is to plan.
 pub const JOB: &[Query] = &[
@@ -2252,6 +2254,8 @@ mod tests {
             );
             assert!(!query.sql.contains("GROUP BY"), "{} groups", query.name);
             assert!(!query.sql.contains(';'), "{} still has its semicolon", query.name);
+            let bare = query.sql.contains(" at.") || query.sql.contains("AS at,");
+            assert!(!bare, "{} uses the alias at unquoted", query.name);
         }
     }
 
