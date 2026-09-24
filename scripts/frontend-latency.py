@@ -9,8 +9,10 @@ document rudb writes with `--metrics`.
 
 The protocol is one query per process, one thread, several rounds, the median of each phase taken
 per query. The suite summary is the median and the max of those per query medians, which is how the
-budget is stated. The physical build and the execute span are printed too so a reader can see how
-the frontend compares with the rest of the statement.
+budget is stated. The fastest round is printed beside the median because these are wall clock
+spans, and on a shared machine the fastest is the one least inflated by somebody else's work. The
+physical build and the execute span are printed too so a reader can see how the frontend compares
+with the rest of the statement.
 
 Usage:
 
@@ -78,8 +80,9 @@ def main():
 
     named = queries(args.queries)
     print(f'{len(named)} queries, {args.rounds} rounds, threads={args.threads}, times in us')
-    print('query  parse  bind  optimize  frontend  physical  execute')
+    print('query  parse  bind  optimize  frontend  fastest  physical  execute')
     frontends = []
+    fastest = []
     worst = 0.0
     with tempfile.TemporaryDirectory() as scratch:
         scratch = pathlib.Path(scratch)
@@ -88,15 +91,18 @@ def main():
                     for _ in range(args.rounds)]
             mid = {phase: statistics.median(run.get(phase, 0) for run in runs) / 1e3
                    for phase in PHASES}
-            front = statistics.median(
-                (run['parse_ns'] + run['bind_ns'] + run['optimize_ns']) / 1e3 for run in runs)
-            worst = max([worst] + [(run['parse_ns'] + run['bind_ns'] + run['optimize_ns']) / 1e3
-                                   for run in runs])
+            spans = [(run['parse_ns'] + run['bind_ns'] + run['optimize_ns']) / 1e3 for run in runs]
+            front = statistics.median(spans)
+            worst = max([worst] + spans)
             frontends.append(front)
+            fastest.append(min(spans))
             print(f'{name}  {mid["parse_ns"]:.1f}  {mid["bind_ns"]:.1f}  {mid["optimize_ns"]:.1f}  '
-                  f'{front:.1f}  {mid["physical_ns"]:.1f}  {mid["execute_ns"]:.1f}', flush=True)
+                  f'{front:.1f}  {min(spans):.1f}  {mid["physical_ns"]:.1f}  {mid["execute_ns"]:.1f}',
+                  flush=True)
     print(f'\nfrontend over the per query medians: median {statistics.median(frontends):.1f}us, '
           f'max {max(frontends):.1f}us')
+    print(f'frontend over the per query fastest rounds: median {statistics.median(fastest):.1f}us, '
+          f'max {max(fastest):.1f}us')
     print(f'frontend slowest single run: {worst:.1f}us')
 
 
