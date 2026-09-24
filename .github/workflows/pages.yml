@@ -1,0 +1,105 @@
+# The site, and the generated half of the README.
+#
+# Runs on every push to main that could change a number: a committed board, a committed report, a
+# moved pin, or a change to the code that renders them. It re-renders, commits whatever moved, and
+# publishes docs/ to GitHub Pages.
+#
+# Nothing here measures anything. It cannot: a timing from a shared virtual machine is not a timing,
+# reporting rule seven in spec/15-rudb-bench.md is machine by machine, and no runner GitHub hands
+# out is a machine this project may publish a number from. Every number this job touches was
+# measured on a box in `rudb-bench fleet` and committed by a person. What this job does is make sure
+# the page and the README say what that person committed, which is a formatting job rather than a
+# measurement one.
+#
+# The commit it makes is skipped by ci with [skip ci], because re-rendering what was just rendered
+# would otherwise trigger this workflow again on its own commit.
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'board/**'
+      - 'reports/**'
+      - 'pins.txt'
+      - 'docs/**'
+      - 'README.md'
+      - 'src/board.rs'
+      - 'src/render.rs'
+      - 'src/pins.rs'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  render:
+    name: render the board
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      moved: ${{ steps.render.outputs.moved }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          # A deep enough checkout to commit on top of, and the token that lets the push happen.
+          persist-credentials: true
+      - uses: Swatinem/rust-cache@v2.9.2
+      - name: render
+        id: render
+        run: |
+          set -euo pipefail
+          cargo run -q --release -- render
+          if git diff --quiet -- README.md docs/data; then
+            echo "moved=no" >> "$GITHUB_OUTPUT"
+            echo "the README and the charts already said what the board says"
+          else
+            echo "moved=yes" >> "$GITHUB_OUTPUT"
+            git diff --stat -- README.md docs/data
+          fi
+      - name: commit what moved
+        if: steps.render.outputs.moved == 'yes'
+        run: |
+          set -euo pipefail
+          git config user.name "rudb-bench"
+          git config user.email "noreply@github.com"
+          git add README.md docs/data
+          git commit -m "Render the board into the README and the charts [skip ci]" \
+                     -m "Written by \`rudb-bench render\` from what is in board/. Nothing here was measured on a runner."
+          git push
+      - name: keep the rendered site
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: docs
+          path: docs
+          retention-days: 7
+
+  deploy:
+    name: publish to pages
+    needs: render
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: docs
+          path: docs
+      - uses: actions/configure-pages@v6.0.0
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: docs
+      - id: deploy
+        uses: actions/deploy-pages@v5.0.1

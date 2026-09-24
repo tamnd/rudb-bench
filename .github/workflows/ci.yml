@@ -33,9 +33,6 @@ env:
   CARGO_INCREMENTAL: 0
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
-  # The newest released DuckDB. Written down rather than resolved to latest, because a comparison
-  # whose other side moved on its own is not a measurement.
-  DUCKDB_VERSION: v1.5.5
 
 jobs:
   quick:
@@ -60,10 +57,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: Swatinem/rust-cache@v2.9.2
-      - name: install duckdb
+      # The version comes out of pins.txt rather than out of this file. A comparison whose other
+      # side moved on its own is not a measurement, so it is written down, and it is written down
+      # once: a DuckDB pinned here and a different DuckDB pinned in pins.txt would be two answers to
+      # the question the README claims to answer.
+      - name: install the pinned duckdb
         shell: bash
         run: |
           set -euo pipefail
+          DUCKDB_VERSION=$(awk '$1 == "name" && $2 == "duckdb" { found = 1; next }
+                                found && $1 == "version" { print $2; exit }' pins.txt)
+          test -n "$DUCKDB_VERSION" || { echo "no duckdb pinned in pins.txt" >&2; exit 1; }
+          echo "duckdb is pinned to $DUCKDB_VERSION"
           case "${{ runner.os }}" in
             Linux) asset=duckdb_cli-linux-amd64.zip ;;
             macOS) asset=duckdb_cli-osx-universal.zip ;;
@@ -168,6 +173,25 @@ jobs:
           cargo run -q -- plans --ablate statistics
           cargo run -q -- plans --ablate graph_sections
 
+  # The generated half of the README and the JSON the site reads, checked rather than trusted.
+  #
+  # Nothing is measured here and nothing could be. What this job answers is whether the tables, the
+  # ASCII charts and docs/data/board.json say what board/ says, which is the failure a generated
+  # README actually has: somebody commits a run, forgets to render, and the page keeps last month's
+  # ratio next to this month's version pin. On a pull request that is a red check with the names of
+  # the blocks that moved. On main it is fixed rather than reported, by the pages workflow.
+  render:
+    name: the README and the charts say what the board says
+    needs: quick
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: Swatinem/rust-cache@v2.9.2
+      - name: the board still parses
+        run: cargo run -q -- pins
+      - name: nothing generated is out of date
+        run: cargo run -q -- render --check
+
   docs:
     name: documentation
     needs: quick
@@ -180,7 +204,7 @@ jobs:
   ci:
     name: ci
     if: always()
-    needs: [quick, test, plans, docs]
+    needs: [quick, test, plans, render, docs]
     runs-on: ubuntu-24.04
     steps:
       - name: fail if anything upstream failed

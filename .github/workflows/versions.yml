@@ -1,0 +1,123 @@
+# The daily question: has anything we measure against shipped a new version?
+#
+# Reads pins.txt, asks GitHub, crates.io and PyPI what the newest version of each is, and opens a
+# pull request when one has moved. The pull request bumps the pin and carries the command that
+# re-measures the ladder, for a person to run on a box in `rudb-bench fleet`.
+#
+# It does not measure anything, and that is not a limitation to be worked around later. Reporting
+# rule seven in spec/15-rudb-bench.md is machine by machine: a number from one machine is never
+# compared against a number from another, and the hardware under a shared GitHub runner changes
+# between runs of the same job. A ratio produced here would be a ratio between two virtual machines
+# somebody else was also using. The measurement happens on a named box and is committed by a person;
+# what this job does is notice that it is due.
+#
+# So the pull request this opens is deliberately not green-and-merge. Merging it changes the
+# versions the README claims without changing the numbers under them, and `rudb-bench render`
+# notices exactly that: the pins block says which engines the board has not caught up with, so a
+# merged bump with no re-run says so on the front page until somebody runs the ladder.
+
+name: versions
+
+on:
+  schedule:
+    # Just after midnight UTC. Nothing here is urgent and nothing here is timed, so the hour is
+    # chosen to be a quiet one rather than for any property of the run.
+    - cron: '17 0 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: versions
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  check:
+    name: what has been released
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: Swatinem/rust-cache@v2.9.2
+      - name: ask each project what its newest version is
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          sh scripts/check-versions --bump > moved.txt 2>&1
+          code=$?
+          cat moved.txt
+          case "$code" in
+            0) echo "moved=no" >> "$GITHUB_OUTPUT" ;;
+            9) echo "moved=yes" >> "$GITHUB_OUTPUT" ;;
+            *) echo "the check itself failed" >&2; exit "$code" ;;
+          esac
+          {
+            echo 'what<<PINS'
+            cat moved.txt
+            echo PINS
+          } >> "$GITHUB_OUTPUT"
+      - name: open the pull request
+        if: steps.check.outputs.moved == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="versions/$(date -u +%Y-%m-%d)"
+          git config user.name "rudb-bench"
+          git config user.email "noreply@github.com"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "$branch already exists, so today's bump is already open"
+            exit 0
+          fi
+          git switch -c "$branch"
+          git add pins.txt
+          git commit -m "Bump the pinned versions to what has been released"
+          git push -u origin "$branch"
+          cat > body.md <<'BODY'
+          Something we measure against has shipped a new version. This bumps `pins.txt` and nothing
+          else: **no number in this repository has been re-measured**, and merging this on its own
+          leaves the README claiming a version the board was not measured with. `rudb-bench render`
+          says so on the front page until somebody re-runs the ladder, which is the point.
+
+          ```
+          BODY
+          cat moved.txt >> body.md
+          cat >> body.md <<'BODY'
+          ```
+
+          ## To re-measure
+
+          On a box in `rudb-bench fleet` that has every engine installed, with the new versions on
+          the path:
+
+          ```sh
+          engines=duckdb,duckdb-pinned,clickhouse-local,datafusion,polars,rudb
+          for sf in 0.01 0.1 1 10; do
+            rudb-bench run tpch --scale $sf --engines $engines --runs 5 --timeout 1800 --report --board
+          done
+          for rows in 1k 10k 100k 1m 10m; do
+            rudb-bench run clickbench --rows $rows --engines $engines --runs 5 --timeout 1800 --report --board
+          done
+          rudb-bench render
+          ```
+
+          Then commit `board/`, `reports/`, `README.md` and `docs/data/`, and push onto this branch.
+          The `render` check in ci is what fails if any of those is left behind.
+          BODY
+          gh pr create \
+            --title "Bump the pinned versions" \
+            --body-file body.md \
+            --base main \
+            --head "$branch"
+      - name: say when nothing moved
+        if: steps.check.outputs.moved == 'no'
+        run: echo "every pin is still the newest release"

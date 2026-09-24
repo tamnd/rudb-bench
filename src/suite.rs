@@ -240,12 +240,15 @@ impl TableRows {
 
 /// The scales TPC-H is run at, smallest first.
 ///
-/// Five rather than the three `SUITES` used to name. SF1 is the qualification scale, because the
+/// Six rather than the three `SUITES` used to name. SF1 is the qualification scale, because the
 /// specification's validation output is defined there and it is the one correctness reference in
 /// this harness that does not come from DuckDB. SF0.01 is the one the correctness suite can run on
-/// every commit, and it is already what every engine was asked the query text against.
+/// every commit, and it is already what every engine was asked the query text against. SF0.1 sits
+/// between the two because the ladder wants a step there: SF0.01 is 87 MB and SF1 is 1.1 GB, and a
+/// ratio that moves between them has nothing in the middle to say where it started moving.
 const TPCH_SCALES: &[Scale] = &[
     Scale { label: "0.01", hundredths: 1 },
+    Scale { label: "0.1", hundredths: 10 },
     Scale { label: "1", hundredths: 100 },
     Scale { label: "10", hundredths: 1_000 },
     Scale { label: "100", hundredths: 10_000 },
@@ -2239,7 +2242,7 @@ mod tests {
         let tpch = find("tpch").expect("tpch is a suite");
         assert_eq!(tpch.scale("50"), None);
         assert_eq!(tpch.scale("sf1"), None, "the sf goes on in the directory and not in the flag");
-        assert_eq!(tpch.scale_labels(), "0.01, 1, 10, 100, 1000");
+        assert_eq!(tpch.scale_labels(), "0.01, 0.1, 1, 10, 100, 1000");
         assert_eq!(tpch.default_scale().map(|scale| scale.named()), Some("SF100".to_owned()));
     }
 

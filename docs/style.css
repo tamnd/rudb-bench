@@ -1,0 +1,159 @@
+/* One stylesheet, no framework, no font to fetch. A benchmark page that spends a second of the
+   reader's time loading a web font before it shows a number is making an argument against itself. */
+
+:root {
+  --ink: #16191d;
+  --dim: #5d6772;
+  --line: #dfe3e8;
+  --paper: #ffffff;
+  --panel: #f7f8fa;
+  --accent: #1f6feb;
+  --warn: #8a5a00;
+  --warn-bg: #fff8e5;
+  --rudb: #1f6feb;
+  --duckdb: #d29922;
+  --duckdb-pinned: #a87a1a;
+  --clickhouse: #db4437;
+  --datafusion: #7c4dff;
+  --polars: #00897b;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e6edf3;
+    --dim: #9aa4af;
+    --line: #2a3038;
+    --paper: #0f1115;
+    --panel: #161a20;
+    --warn: #e3b341;
+    --warn-bg: #2a2313;
+    --rudb: #58a6ff;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0 auto;
+  padding: 2rem 1.25rem 4rem;
+  max-width: 62rem;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+h1 { font-size: 2rem; margin: 0 0 .5rem; letter-spacing: -.02em; }
+h2 { font-size: 1.25rem; margin: 2.5rem 0 .5rem; letter-spacing: -.01em; }
+
+a { color: var(--accent); }
+
+code {
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: .05em .35em;
+}
+
+.lede { font-size: 1.05rem; color: var(--ink); margin: 0 0 1rem; max-width: 48rem; }
+.note { color: var(--dim); font-size: .92rem; margin: .25rem 0 1rem; max-width: 48rem; }
+
+.warning {
+  background: var(--warn-bg);
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  color: var(--warn);
+  font-size: .9rem;
+  padding: .6rem .8rem;
+  margin: 0 0 1.5rem;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: .75rem 1rem;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--dim);
+}
+
+.controls label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: .4rem;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: .9rem;
+}
+
+select {
+  font: inherit;
+  font-size: .95rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: .3rem .5rem;
+}
+
+.legend { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1rem 0 .5rem; }
+
+.legend button {
+  font: inherit;
+  font-size: .85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink);
+  padding: .2rem .7rem .2rem .5rem;
+  cursor: pointer;
+}
+
+.legend button[aria-pressed="false"] { opacity: .4; }
+.legend .swatch { width: .7rem; height: .7rem; border-radius: 2px; display: inline-block; }
+
+.chart { overflow-x: auto; }
+.chart svg { display: block; width: 100%; height: auto; min-width: 34rem; }
+
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .axis { fill: var(--dim); font-size: 11px; }
+.chart .value { fill: var(--ink); font-size: 10px; }
+.chart .rung { fill: var(--ink); font-size: 12px; }
+.chart .missing { fill: var(--dim); font-size: 10px; font-style: italic; }
+.chart .one { stroke: var(--dim); stroke-dasharray: 3 3; }
+
+.scroll { overflow-x: auto; }
+
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { text-align: right; padding: .35rem .6rem; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+thead th { color: var(--dim); font-weight: 600; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+tbody tr:hover { background: var(--panel); }
+td.best { font-weight: 700; }
+td.rudb { color: var(--rudb); }
+.parquet::after { content: " ¶"; color: var(--dim); }
+
+.method p { max-width: 48rem; }
+
+footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+  font-size: .85rem;
+}
