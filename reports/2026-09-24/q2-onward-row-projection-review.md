@@ -19,22 +19,22 @@ Q9 is `SELECT RegionID, COUNT(DISTINCT UserID) AS u FROM hits GROUP BY RegionID 
 
 | Rows | RuDB unindexed wall | RuDB indexed wall | DuckDB native wall | DuckDB / indexed wall | Indexed CPU | DuckDB CPU | Indexed peak RSS | DuckDB peak RSS | DuckDB / indexed RSS |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1k | 24.089 ms | 13.050 ms | 118.306 ms | 9.07x | 8.532 ms | 86.415 ms | 5.50 MiB | 38.33 MiB | 6.97x |
-| 10k | 83.843 ms | 50.870 ms | 128.685 ms | 2.53x | 30.816 ms | 93.871 ms | 6.00 MiB | 39.21 MiB | 6.54x |
-| 1m | 128.880 ms | 41.039 ms | 261.949 ms | 6.38x | 25.234 ms | 255.569 ms | 8.25 MiB | 81.71 MiB | 9.90x |
-| 10m | 140.014 ms | 60.417 ms | 368.027 ms | 6.09x | 100.305 ms | 656.268 ms | 11.50 MiB | 134.02 MiB | 11.65x |
+| 1k | 15.172 ms | 8.661 ms | 73.699 ms | 8.51x | 8.390 ms | 79.139 ms | 5.50 MiB | 39.34 MiB | 7.15x |
+| 10k | 53.563 ms | 28.117 ms | 76.696 ms | 2.73x | 27.890 ms | 86.683 ms | 6.00 MiB | 39.71 MiB | 6.62x |
+| 1m | 68.019 ms | 25.019 ms | 138.975 ms | 5.55x | 24.834 ms | 243.707 ms | 8.12 MiB | 82.33 MiB | 10.14x |
+| 10m | 121.020 ms | 47.692 ms | 275.071 ms | 5.77x | 96.047 ms | 634.184 ms | 11.50 MiB | 133.48 MiB | 11.61x |
 
-The optional projection improved the same RuDB binary's 10m wall median by 2.32x and reduced its peak RSS from 76.88 MiB to 11.50 MiB. It still misses the 10x wall target at every size and the 10x memory target below 10m. The server had six available CPUs and load averages above six during some runs, so wall time is subject to scheduling noise. The 51-round alternating run is the stronger 10m estimate; it is not a quiet-host latency claim. The complete [raw clean-process records](q9-row-projection/q9-final-clean-10m.json) preserve every sample, with the [other sizes in the same directory](q9-row-projection/). The [runner](../../scripts/q9-fresh-process.py) rejects wrong output.
+The optional projection improved the same RuDB binary's 10m wall median by 2.54x and reduced its peak RSS from 76.88 MiB to 11.50 MiB. It still misses the 10x wall target at every size and the 10x memory target at 1k and 10k. The server had six available CPUs and load averages above six during some runs, so wall time is subject to scheduling noise. The 51-round alternating run is the stronger 10m estimate; it is not a quiet-host latency claim. The complete [raw clean-process records](q9-row-projection/q9-rebased-clean-10m.json) preserve every sample, with the [other sizes in the same directory](q9-row-projection/). The [pre-rebase records](q9-row-projection/pre-rebase/) are kept separately because they measured a different binary. The [runner](../../scripts/q9-fresh-process.py) rejects wrong output.
 
 The projection build is a separate fresh process after the native load. This table shows the measured extra cost and final file size. It must be included when comparing full load workflows. The existing paired Parquet-to-native load measurement in the [Q2 through Q8 report](q2-q8-partial-numeric-frequencies.md) ran on another host and another file revision, so adding those times to this table would not be a valid paired load comparison.
 
 | Rows | Projection build wall | Build peak RSS | Unindexed native file | Indexed native file | Added bytes |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1k | 0.049 s | 5.38 MiB | 1,325,569 B | 2,080,389 B | 754,820 B |
-| 10k | 0.089 s | 15.12 MiB | 5,533,695 B | 8,303,199 B | 2,769,504 B |
-| 1m | 0.446 s | 34.40 MiB | 219,201,943 B | 230,673,534 B | 11,471,591 B |
-| 10m | 3.407 s | 254.97 MiB | 1,177,015,790 B | 1,278,586,609 B | 101,570,819 B |
+| 1k | 0.025 s | 5.38 MiB | 1,325,569 B | 2,080,389 B | 754,820 B |
+| 10k | 0.065 s | 15.12 MiB | 5,533,695 B | 8,303,199 B | 2,769,504 B |
+| 1m | 0.431 s | 34.40 MiB | 219,201,943 B | 230,673,534 B | 11,471,591 B |
+| 10m | 2.817 s | 255.23 MiB | 1,177,015,790 B | 1,278,586,609 B | 101,570,819 B |
 
-The 10m native source in this Q9 comparison predates the partial-frequency writer correction and contains legacy synopses. Q9 reads its row projection or the ordinary input rows; it does not consume those synopses. A full same-host Parquet load comparison with projection construction remains to be measured. The [raw build records](q9-row-projection/projection-build-v2-10m.json) give every measured process resource, and the [expected CSV files](q9-row-projection/) preserve correctness output.
+The 10m native source in this Q9 comparison predates the partial-frequency writer correction and contains legacy synopses. Q9 reads its row projection or the ordinary input rows; it does not consume those synopses. A full same-host Parquet load comparison with projection construction remains to be measured. The rebased builder produced byte-identical indexed files at all four sizes. The [raw build records](q9-row-projection/projection-build-rebased-10m.json) give every measured process resource, and the [expected CSV files](q9-row-projection/) preserve correctness output.
 
-The release candidate is based on RuDB main `dacbb603`, with binary SHA-256 `51bd4c2f0800081c4f62d2baf553685ef67f92501e425d96296398912934951d`. DuckDB v2.0.0-dev84237 has SHA-256 `bb7b276fa5805c257becbb0e7238297d45aa4ea6d33ad933637cc0fa0a7d2531`. The native, database, and CLI library suites passed 188, 410, and 30 tests. Strict Clippy passed for the changed crates. The Q9 parallel scan was profiled on the 10m projection; row deduplication, extent copies, and checksums were the largest sampled costs. A per-user region bit-mask experiment was slower than epoch marks in the [paired trial](q9-row-projection/q9-bitmask-10m.json) and was removed.
+The measured release candidate is based on RuDB main `d9bce9db` and has SHA-256 `3062f41767bbc791229e5a9186e0a34f6e972cfebb0134044497e1c0b594b1ff`. DuckDB v2.0.0-dev84237 has SHA-256 `bb7b276fa5805c257becbb0e7238297d45aa4ea6d33ad933637cc0fa0a7d2531`. The native, database, and CLI library suites passed 188, 411, and 30 tests, and strict Clippy passed for the changed crates. The Q9 parallel scan was profiled on the 10m projection; row deduplication, extent copies, and checksums were the largest sampled costs. A per-user region bit-mask experiment was slower than epoch marks in the [paired trial](q9-row-projection/q9-bitmask-10m.json) and was removed.
