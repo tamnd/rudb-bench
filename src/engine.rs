@@ -514,6 +514,36 @@ pub trait Engine {
         let _ = sql;
         Err(format!("{} does not print a plan this harness can read", self.name()))
     }
+
+    /// Make the next run a cold one, the way the upstream ClickBench scripts do for this engine.
+    ///
+    /// `drop` empties the page cache. The default only calls it, which is all a fresh process per
+    /// query needs. An engine with a resident server stops it first and starts it again after, so
+    /// that its own caches are gone as well as the kernel's.
+    ///
+    /// # Errors
+    ///
+    /// When the cache could not be dropped or the engine would not come back.
+    fn cold_cycle(
+        &mut self,
+        drop: &mut dyn FnMut() -> Result<(), String>,
+    ) -> Result<(), BenchError> {
+        drop().map_err(|why| BenchError::new(format!("could not drop the page cache: {why}")))
+    }
+
+    /// Give the machine back between this engine's turns, when the engine holds on to it.
+    ///
+    /// Nothing for an engine that is a process per query. The server stops, so it is not holding
+    /// memory or threads while another engine is being timed.
+    fn rest(&mut self) {}
+}
+
+/// The memory budget as the `SET memory_limit` statement DuckDB and rudb both take.
+///
+/// In MiB, which both engines parse and which loses nothing that matters at these sizes.
+#[must_use]
+pub fn memory_limit_statement() -> Option<String> {
+    crate::machine::memory_budget().map(|b| format!("SET memory_limit = '{}MiB'", b >> 20))
 }
 
 /// Read what `duckdb_optimizers()` answered into the list `SET disabled_optimizers` takes.
@@ -832,20 +862,33 @@ impl Duckdb {
 
     /// Run statements against the database, under the timer.
     fn exec(&self, statements: &[&str], limit: Option<Duration>) -> Result<Ran, BenchError> {
+        self.exec_opening(&[], statements, limit)
+    }
+
+    /// The same, with options for the shell before the database is named.
+    fn exec_opening(
+        &self,
+        opening: &[&str],
+        statements: &[&str],
+        limit: Option<Duration>,
+    ) -> Result<Ran, BenchError> {
         let mut command = self.runner.command(&self.binary);
         // CSV with no header, which is what three of the four engines here are asked for so that
         // their answers can be compared without a parser each. The comparison itself reads numbers
         // out of whatever text comes back, which is what lets the fourth one print a bordered table
         // for a reason of its own. See [`crate::answer`] and the note on the datafusion run.
-        command.arg("-batch").arg("-csv").arg("-noheader").arg(&self.database);
+        command.arg("-batch").arg("-csv").arg("-noheader").args(opening).arg(&self.database);
         // The engine's own clock, which is the number the ClickBench board publishes and is the one
         // thing here that does not include starting this process. It prints a line per statement on
         // stdout and `Reported::RunTime` takes those lines back out of the answer.
         command.arg("-c").arg(".timer on");
         // In front of everything, so the timer line it prints is never the last one and the run
         // time still reads off the query. See [`duckdb_memory`] for why this is not the default.
+        // The shared budget otherwise, so DuckDB gets the same number the other engines get.
         if let Some(limit) = duckdb_memory() {
             command.arg("-c").arg(format!("SET memory_limit = '{limit}'"));
+        } else if let Some(statement) = memory_limit_statement() {
+            command.arg("-c").arg(statement);
         }
         for statement in statements {
             command.arg("-c").arg(statement);
@@ -903,7 +946,10 @@ impl Engine for Duckdb {
         let refs: Vec<&str> = statements.iter().map(String::as_str).collect();
 
         let start = Instant::now();
-        let build = self.exec(&refs, None)?;
+        // `-storage_version latest` the way the upstream load script creates the file. Without it
+        // DuckDB writes the oldest format it can still read, which leaves out the newer
+        // compression and is not the database the board measures.
+        let build = self.exec_opening(&["-storage_version", "latest"], &refs, None)?;
         let spent = self.runner.spent();
         // CHECKPOINT before the clock stops, because a load that left the write ahead log to be
         // replayed later is a load whose cost has been moved into the first query. Rule five puts
@@ -1023,9 +1069,13 @@ impl ClickhouseLocal {
             .arg("--format")
             .arg("CSV")
             // Its own clock, on stderr, where it stays out of the answer by itself.
-            .arg("--time")
-            .arg("--query")
-            .arg(sql);
+            .arg("--time");
+        // The shared budget, so this row is capped the way the others are rather than at a share
+        // of whatever memory was free when it started.
+        if let Some(budget) = crate::machine::memory_budget() {
+            command.arg(format!("--max_memory_usage={budget}"));
+        }
+        command.arg("--query").arg(sql);
         self.runner.go(command, "clickhouse local", limit)
     }
 }
@@ -1219,7 +1269,8 @@ impl ClickhouseServer {
             &CONFIG
                 .replace("{dir}", &self.dir.display().to_string())
                 .replace("{users}", &users.display().to_string())
-                .replace("{port}", &self.port.to_string()),
+                .replace("{port}", &self.port.to_string())
+                .replace("{memory}", &server_memory()),
         )?;
 
         let child = Command::new(&self.binary)
@@ -1259,6 +1310,27 @@ impl ClickhouseServer {
                 )));
             }
             std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    /// Stop the server the way `clickhouse stop` does, with SIGTERM, and wait for it to go.
+    ///
+    /// A SIGKILL would work too and would skip the shutdown the upstream cold cycle goes through,
+    /// so this asks first and only kills a server that has not gone after a minute.
+    fn stop(&mut self) {
+        let Some(mut child) = self.server.take() else { return };
+        let _ = Command::new("kill").arg("-TERM").arg(child.id().to_string()).status();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            if let Ok(Some(_)) = child.try_wait() {
+                return;
+            }
+            if Instant::now() > deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
 
@@ -1409,15 +1481,45 @@ impl Engine for ClickhouseServer {
                 };
             let key = sorting_key(self.suite, &table.name);
             keys.push(format!("{} by {key}", table.name));
-            self.exec(&format!(
-                "CREATE TABLE {} ({columns}) ENGINE = MergeTree ORDER BY {key}",
-                table.name
-            ))?;
+            let upstream = (self.suite, table.name.as_str()) == ("clickbench", "hits");
+            if upstream {
+                // The upstream create.sql, word for word: the key as a PRIMARY KEY inside the
+                // column list, and the two settings it sets.
+                self.exec(&format!(
+                    "CREATE TABLE {} ({columns}, PRIMARY KEY {key}) ENGINE = MergeTree SETTINGS \
+                     fsync_after_insert = 1, auto_statistics_types = ''",
+                    table.name
+                ))?;
+            } else {
+                self.exec(&format!(
+                    "CREATE TABLE {} ({columns}) ENGINE = MergeTree ORDER BY {key}",
+                    table.name
+                ))?;
+            }
 
-            // Through the client from a file on stdin, which is how the official ClickBench load
-            // works and is also the only way that does not depend on where the file happens to be.
-            // `file()` on a server only reads inside `user_files_path`, and a harness that moved
-            // the corpus to satisfy that would be timing a copy of a seventy gigabyte file.
+            if upstream {
+                // The upstream load: `file()` over a link in user_files, with a quarter of the
+                // threads inserting, and no OPTIMIZE after it. The board measures the parts that
+                // insert leaves, so merging them here would be measuring a different table.
+                let files = self.dir.join("user_files");
+                make(&files)?;
+                let link = files.join(format!("{}.parquet", table.name));
+                let _ = std::fs::remove_file(&link);
+                std::os::unix::fs::symlink(&table.path, &link).map_err(|e| {
+                    BenchError::new(format!("cannot link {} into user_files: {e}", table.path.display()))
+                })?;
+                let threads = (crate::machine::threads_here() / 4).max(1);
+                self.exec(&format!(
+                    "INSERT INTO {0} SELECT * FROM file('{0}.parquet') SETTINGS \
+                     max_insert_threads = {threads}",
+                    table.name
+                ))?;
+                let _ = Command::new("sync").status();
+                continue;
+            }
+
+            // Through the client from a file on stdin, which works wherever the file happens to
+            // be. `file()` on a server only reads inside `user_files_path`.
             let handle = std::fs::File::open(&table.path).map_err(|e| {
                 BenchError::new(format!("cannot open {}: {e}", table.path.display()))
             })?;
@@ -1431,8 +1533,7 @@ impl Engine for ClickhouseServer {
             // Merge to one part before the clock stops, for the same reason DuckDB checkpoints
             // before its clock stops. An insert that left twenty parts to be merged in the
             // background has moved part of the load cost into whichever query runs while the merge
-            // is still going, and rule five puts load time next to the runtime precisely so that
-            // trade is visible rather than hidden in a query.
+            // is still going.
             self.exec(&format!("OPTIMIZE TABLE {} FINAL", table.name))?;
         }
         let took = start.elapsed();
@@ -1496,9 +1597,24 @@ impl Engine for ClickhouseServer {
         }
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+
+    /// Stop, drop the caches, start, and wait until it answers, which is the upstream cycle
+    /// before every query's first try.
+    fn cold_cycle(
+        &mut self,
+        drop: &mut dyn FnMut() -> Result<(), String>,
+    ) -> Result<(), BenchError> {
+        self.stop();
+        drop().map_err(|why| BenchError::new(format!("could not drop the page cache: {why}")))?;
+        self.start()
+    }
+
+    fn rest(&mut self) {
+        self.stop();
+    }
 }
 
-/// The server configuration, with the three things that vary substituted in.
+/// The server configuration, with the four things that vary substituted in.
 ///
 /// Written per run rather than taken from `/etc`, because the ClickHouse on the fleet is a
 /// standalone binary somebody downloaded and there is no `/etc` for it, and because a run that
@@ -1509,6 +1625,10 @@ impl Engine for ClickhouseServer {
 /// size is read from, so leaving them on would put tens of megabytes of the server watching itself
 /// into a column that is supposed to be the size of the data. `clickhouse local` does not write
 /// them either, so switching them off is also what makes the two ClickHouse rows comparable.
+///
+/// The memory cap and the three eager load settings come from the upstream install script. The
+/// cap is the shared budget every engine gets, and the eager load settings make a freshly started
+/// server read its primary keys and column sizes at startup rather than inside the first query.
 const CONFIG: &str = r#"<clickhouse>
     <logger>
         <level>warning</level>
@@ -1547,8 +1667,24 @@ const CONFIG: &str = r#"<clickhouse>
     <opentelemetry_span_log remove="1"/>
     <s3queue_log remove="1"/>
     <asynchronous_insert_log remove="1"/>
+    {memory}
+    <async_load_databases>false</async_load_databases>
+    <merge_tree>
+        <primary_key_lazy_load>0</primary_key_lazy_load>
+        <columns_and_secondary_indices_sizes_lazy_calculation>0</columns_and_secondary_indices_sizes_lazy_calculation>
+    </merge_tree>
 </clickhouse>
 "#;
+
+/// The server's memory cap, as the config element, from the shared budget.
+///
+/// Empty when there is no budget, which leaves ClickHouse on its own default of a share of the
+/// machine's memory.
+fn server_memory() -> String {
+    crate::machine::memory_budget().map_or_else(String::new, |b| {
+        format!("<max_server_memory_usage>{b}</max_server_memory_usage>")
+    })
+}
 
 /// One user with no password on the loopback interface, which is the whole access story this needs.
 ///
@@ -2047,6 +2183,9 @@ impl Rudb {
             command.arg("--metrics").arg(path);
         }
         command.arg(database);
+        if let Some(statement) = memory_limit_statement() {
+            command.arg("-c").arg(statement);
+        }
         for statement in self.statements(tables) {
             command.arg("-c").arg(statement);
         }
@@ -2137,6 +2276,10 @@ impl Engine for Rudb {
         // replayed below when it did not.
         if let Some(database) = self.database.as_ref().filter(|_| self.loaded) {
             command.arg(database);
+        }
+        // Before the timer, so the budget's own statement prints no timing line.
+        if let Some(statement) = memory_limit_statement() {
+            command.arg("-c").arg(statement);
         }
         // `.timer on` and the same `Run Time (s):` line DuckDB prints, because rudb's shell is
         // DuckDB's shell. One more place the drop in claim is tested rather than asserted.

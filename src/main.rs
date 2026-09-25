@@ -308,6 +308,14 @@ struct Plan {
     /// has run before produce a table on the first attempt, with a cell per query saying which of
     /// them finished, instead of one engine's first hang standing in for the whole run.
     timeout: Option<Duration>,
+    /// Whether to run the way the upstream ClickBench driver does: three tries per query after a
+    /// cache drop, the best of the last two, and the engines taking turns query by query.
+    ///
+    /// The default for ClickBench, and `--protocol median` gets the older median of hot runs with
+    /// one engine's whole suite after another's.
+    upstream: bool,
+    /// A sample file to run over instead of cutting one out of the full file, with `--rows`.
+    sample_file: Option<std::path::PathBuf>,
 }
 
 /// Every engine this harness knows how to drive, in the order [`discover`] builds them.
@@ -340,6 +348,8 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     let mut report = false;
     let mut save = false;
     let mut timeout = None;
+    let mut protocol: Option<bool> = None;
+    let mut sample_file = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let wanted = match arg.as_str() {
@@ -405,6 +415,24 @@ fn plan(args: &[String]) -> Result<Plan, String> {
                 report = true;
                 continue;
             }
+            "--protocol" => {
+                let given = rest.next().ok_or("--protocol wants `upstream` or `median`")?;
+                protocol = Some(match given.as_str() {
+                    "upstream" => true,
+                    "median" => false,
+                    other => {
+                        return Err(format!(
+                            "--protocol {other} is not one there is, try upstream or median"
+                        ));
+                    }
+                });
+                continue;
+            }
+            "--sample-file" => {
+                let given = rest.next().ok_or("--sample-file wants a path after it")?;
+                sample_file = Some(std::path::PathBuf::from(given));
+                continue;
+            }
             "--save" => {
                 save = true;
                 continue;
@@ -465,6 +493,23 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     }
     let suite = suite.unwrap_or_else(|| "smoke".to_owned());
     let scale = chosen_scale(&suite, scale.as_deref())?;
+    let upstream = protocol.unwrap_or(suite == "clickbench");
+    if sample_file.is_some() && rows.is_none() {
+        return Err("--sample-file names the sample --rows would have made, so it needs --rows \
+                    beside it"
+            .to_owned());
+    }
+    // The committed history is all medians, and a best of two next to it would be a different
+    // number under the same name.
+    if upstream && (gate != Gate::Nothing || store.is_some() || save) {
+        return Err("--check, --check-drift, --record, --store and --save keep medians, so they \
+                    go with --protocol median"
+            .to_owned());
+    }
+    if upstream && runs.is_some_and(|n| n < 2) {
+        return Err("the upstream protocol needs at least two tries, a cold one and a hot one"
+            .to_owned());
+    }
     // Worked out here rather than in the initializer, because the suite's own default needs the
     // suite and the suite has been moved into the plan by the time the field comes round.
     let timeout = match timeout {
@@ -475,7 +520,7 @@ fn plan(args: &[String]) -> Result<Plan, String> {
     Ok(Plan {
         suite,
         gate,
-        runs: runs.unwrap_or_else(|| gate.runs()),
+        runs: runs.unwrap_or_else(|| if upstream { 3 } else { gate.runs() }),
         store,
         engines,
         rows,
@@ -483,6 +528,8 @@ fn plan(args: &[String]) -> Result<Plan, String> {
         report,
         save,
         timeout,
+        upstream,
+        sample_file,
     })
 }
 
@@ -566,7 +613,11 @@ fn run(plan: &Plan) -> ExitCode {
 
     // The data before the engines, because every engine gets the same files and the first thing a
     // reader of a result asks is which files those were.
-    let dataset = match rudb_bench::data::prepare(suite, &scratch, plan.rows.as_ref(), plan.scale) {
+    let prepared = match (&plan.sample_file, plan.rows.as_ref()) {
+        (Some(file), Some(rows)) => rudb_bench::data::prepare_given(suite, &scratch, file, rows),
+        _ => rudb_bench::data::prepare(suite, &scratch, plan.rows.as_ref(), plan.scale),
+    };
+    let dataset = match prepared {
         Ok(dataset) => dataset,
         Err(e) => {
             eprintln!("rudb-bench: {e}");
@@ -579,14 +630,57 @@ fn run(plan: &Plan) -> ExitCode {
     }
     println!();
 
-    let mut compared = rudb_bench::report::compare(
-        &mut engines,
-        suite,
-        queries,
-        &dataset,
-        plan.runs,
-        plan.timeout,
-    );
+    let mut compared = if plan.upstream {
+        // The manifest first, so the file the numbers are about is pinned down before anything
+        // reads it.
+        let mut data = Vec::with_capacity(dataset.tables.len());
+        for file in &dataset.tables {
+            let rows = if dataset.tables.len() == 1 { dataset.rows } else { None };
+            match rudb_bench::data::Fingerprint::of(&file.path, rows) {
+                Ok(print) => {
+                    match print.write_beside() {
+                        Ok(at) => println!("manifest    {}", at.display()),
+                        Err(e) => eprintln!("rudb-bench: {e}"),
+                    }
+                    println!("sha256      {}", print.sha256);
+                    data.push(print);
+                }
+                Err(e) => {
+                    eprintln!("rudb-bench: {e}");
+                    let _ = std::fs::remove_dir_all(&scratch);
+                    return ExitCode::FAILURE;
+                }
+            }
+        }
+        match rudb_bench::report::interleave(
+            &mut engines,
+            suite,
+            queries,
+            &dataset,
+            plan.runs,
+            plan.timeout,
+            data,
+        ) {
+            Ok(compared) => compared,
+            Err(e) => {
+                eprintln!("rudb-bench: {e}");
+                for engine in &mut engines {
+                    engine.unload();
+                }
+                let _ = std::fs::remove_dir_all(&scratch);
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        rudb_bench::report::compare(
+            &mut engines,
+            suite,
+            queries,
+            &dataset,
+            plan.runs,
+            plan.timeout,
+        )
+    };
     compared.skipped.extend(missing);
 
     for result in &compared.results {
@@ -614,7 +708,18 @@ fn run(plan: &Plan) -> ExitCode {
         let facts = machine::probe(&scratch);
         let here = machine::name_here();
         match rudb_bench::markdown::write(&compared, &facts, &here) {
-            Ok(at) => println!("\nwrote {}", at.display()),
+            Ok(at) => {
+                println!("\nwrote {}", at.display());
+                // The data manifest beside the report too, so it is committed with it.
+                if let Some(protocol) = &compared.protocol {
+                    let text: String = protocol.data.iter().map(|d| d.text()).collect();
+                    let beside = at.with_extension("manifest.txt");
+                    match std::fs::write(&beside, text) {
+                        Ok(()) => println!("wrote {}", beside.display()),
+                        Err(e) => eprintln!("rudb-bench: could not write {}: {e}", beside.display()),
+                    }
+                }
+            }
             // A report that could not be written is worth saying and is not worth failing a run
             // over. The numbers are already on the terminal and the alternative is an hour of
             // ClickBench thrown away because a directory was read only.
@@ -1696,6 +1801,17 @@ fn help() {
     println!("                    row in the table saying so and the rest of the suite carries");
     println!("                    on, and it is left out of the ratio. 0 waits as long as it");
     println!("                    takes, which is what a query being debugged wants");
+    println!("    --protocol p    upstream or median. upstream is the default for clickbench:");
+    println!("                    every engine loads, then each query gets a turn per engine in");
+    println!("                    a rotating order, behind a load gate, with the page cache");
+    println!("                    dropped and --runs tries (default 3), the best of the tries");
+    println!("                    after the first as the hot figure. Needs root for the drop.");
+    println!("                    The gate waits for the load average to be under the thread");
+    println!("                    count, RUDB_BENCH_LOAD_WAIT seconds at most (default 1800).");
+    println!("                    RUDB_BENCH_MEMORY sets the one memory budget every engine");
+    println!("                    gets, default 80% of RAM");
+    println!("    --sample-file f with --rows, run over this sample file instead of cutting one");
+    println!("                    out of the full table, which then does not need to be here");
     println!("    --save          add what each engine measured to reports/saved-<suite>-");
     println!("                    <machine>.txt, so that engines run on separate days end up");
     println!("                    in one table. Re-running an engine replaces its block");

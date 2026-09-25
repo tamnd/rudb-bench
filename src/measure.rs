@@ -164,18 +164,23 @@ impl Distribution {
         if median <= 0.0 { None } else { Some(self.iqr().as_secs_f64() / median) }
     }
 
-    /// Whether a number out of this is allowed to be published as a median.
+    /// Whether a number out of this is allowed to be published under its own convention.
     ///
-    /// Five runs is the floor in rule two. A ClickBench-convention number is never publishable
-    /// under this name, because it is a best of three and calling it a median would be a lie about
-    /// the method rather than about the number.
+    /// Five runs is the floor in rule two for a median. A ClickBench-convention number is the best
+    /// of the tries after the first, the way the upstream driver takes it, so it needs at least the
+    /// two tries upstream keeps and it is labelled as a best of wherever it appears. It is never
+    /// passed off as a median.
     ///
     /// A run that hit the limit is refused on the same terms and for the same reason. The limit is
     /// a number about the harness, so a median with one in it is partly a measurement of how long
     /// somebody was willing to wait, and it would read as a query that took exactly that long.
     #[must_use]
     pub fn publishable(&self) -> bool {
-        self.convention == Convention::Median && self.samples.len() >= 5 && self.timeouts == 0
+        let enough = match self.convention {
+            Convention::Median => 5,
+            Convention::Clickbench => 2,
+        };
+        self.samples.len() >= enough && self.timeouts == 0
     }
 
     /// The sample at the nearest rank to a percentile.
@@ -230,6 +235,31 @@ impl Runs {
             samples.push(start.elapsed());
         }
         Ok(Self { cold, hot: Distribution::median(samples) })
+    }
+
+    /// Time `once` the way the upstream ClickBench driver does: `tries` runs in a row, the first
+    /// one kept apart as the cold figure and the best of the rest as the hot one.
+    ///
+    /// The caller drops the caches before calling this, and nothing in here touches them, so the
+    /// first try is the only one that reads from the device.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the closure returns, at the first try that fails.
+    ///
+    /// # Panics
+    ///
+    /// When asked for fewer than two tries, which would leave no hot figure.
+    pub fn tries<E>(tries: usize, mut once: impl FnMut() -> Result<(), E>) -> Result<Self, E> {
+        assert!(tries >= 2, "the upstream protocol needs a cold try and at least one hot one");
+        let mut all = Vec::with_capacity(tries);
+        for _ in 0..tries {
+            let start = std::time::Instant::now();
+            once()?;
+            all.push(start.elapsed());
+        }
+        let cold = all.remove(0);
+        Ok(Self { cold, hot: Distribution::clickbench(all) })
     }
 }
 
@@ -299,13 +329,26 @@ mod tests {
     }
 
     #[test]
-    fn a_clickbench_number_is_the_best_of_the_runs_and_never_publishable_as_a_median() {
+    fn a_clickbench_number_is_the_best_of_the_runs_and_needs_two_of_them() {
         let d = Distribution::clickbench(ms(&[30, 10, 20]));
         assert_eq!(d.headline(), Duration::from_millis(10));
         assert_eq!(d.convention(), Convention::Clickbench);
-        // Even with fifty runs behind it. The bar is not the sample count, it is that a best of n
-        // and a median are different claims.
-        assert!(!Distribution::clickbench(ms(&[1; 50])).publishable());
+        assert!(Distribution::clickbench(ms(&[12, 10])).publishable());
+        assert!(!Distribution::clickbench(ms(&[10])).publishable());
+        assert!(!Distribution::clickbench(ms(&[12, 10])).with_timeouts(1).publishable());
+    }
+
+    #[test]
+    fn three_tries_keep_the_first_apart_and_take_the_best_of_the_other_two() {
+        let mut n = 0u32;
+        let runs = Runs::tries::<()>(3, || {
+            n += 1;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(runs.hot.runs(), 2);
+        assert_eq!(runs.hot.convention(), Convention::Clickbench);
     }
 
     #[test]
