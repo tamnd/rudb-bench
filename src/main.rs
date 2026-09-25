@@ -215,7 +215,7 @@ fn machine_record() {
     );
     println!("a gap in the record. Section 15.4 wants all of this printed next to the number and");
     println!("not assumed, because the assumption that fails silently is the frequency policy.");
-    let _ = std::fs::remove_dir_all(&scratch);
+    remove_scratch(&scratch);
 }
 
 /// What `run` does with the committed records afterwards.
@@ -621,7 +621,7 @@ fn run(plan: &Plan) -> ExitCode {
         Ok(dataset) => dataset,
         Err(e) => {
             eprintln!("rudb-bench: {e}");
-            let _ = std::fs::remove_dir_all(&scratch);
+            remove_scratch(&scratch);
             return ExitCode::FAILURE;
         }
     };
@@ -647,7 +647,7 @@ fn run(plan: &Plan) -> ExitCode {
                 }
                 Err(e) => {
                     eprintln!("rudb-bench: {e}");
-                    let _ = std::fs::remove_dir_all(&scratch);
+                    remove_scratch(&scratch);
                     return ExitCode::FAILURE;
                 }
             }
@@ -667,7 +667,7 @@ fn run(plan: &Plan) -> ExitCode {
                 for engine in &mut engines {
                     engine.unload();
                 }
-                let _ = std::fs::remove_dir_all(&scratch);
+                remove_scratch(&scratch);
                 return ExitCode::FAILURE;
             }
         }
@@ -727,7 +727,7 @@ fn run(plan: &Plan) -> ExitCode {
         }
     }
 
-    let _ = std::fs::remove_dir_all(&scratch);
+    remove_scratch(&scratch);
     if compared.results.is_empty() {
         return ExitCode::FAILURE;
     }
@@ -1124,7 +1124,7 @@ fn sweep(args: &[String]) -> ExitCode {
         Ok(dataset) => dataset,
         Err(e) => {
             eprintln!("rudb-bench: {e}");
-            let _ = std::fs::remove_dir_all(&scratch);
+            remove_scratch(&scratch);
             return ExitCode::FAILURE;
         }
     };
@@ -1138,7 +1138,7 @@ fn sweep(args: &[String]) -> ExitCode {
     let limit = Some(suite.timeout(None));
     let swept = rudb_bench::sweep::sweep(&found, suite, queries, &dataset, &scratch, runs, limit);
     print!("{}", rudb_bench::sweep::table(&swept));
-    let _ = std::fs::remove_dir_all(&scratch);
+    remove_scratch(&scratch);
     if swept.rows.iter().all(|row| row.result.is_err()) {
         return ExitCode::FAILURE;
     }
@@ -1254,21 +1254,21 @@ fn attribute(args: &[String]) -> ExitCode {
             Some(one) => eprintln!("rudb-bench: {engine_name} is not here: {}", one.why),
             None => eprintln!("rudb-bench: no engine called {engine_name}"),
         }
-        let _ = std::fs::remove_dir_all(&scratch);
+        remove_scratch(&scratch);
         return ExitCode::FAILURE;
     };
     let dataset = match rudb_bench::data::prepare(suite, &scratch, rows.as_ref(), None) {
         Ok(dataset) => dataset,
         Err(e) => {
             eprintln!("rudb-bench: {e}");
-            let _ = std::fs::remove_dir_all(&scratch);
+            remove_scratch(&scratch);
             return ExitCode::FAILURE;
         }
     };
     let limit = Some(suite.timeout(None));
     let attributed =
         rudb_bench::attribute::attribute(engine, suite, queries, &dataset, hot, limit, ablation);
-    let _ = std::fs::remove_dir_all(&scratch);
+    remove_scratch(&scratch);
     match attributed {
         Ok(attributed) => {
             print!("{}", rudb_bench::attribute::table(&attributed));
@@ -1540,7 +1540,7 @@ fn plans(args: &[String]) -> ExitCode {
         // declined is that rudb is not built, which is the one refusal that does apply here.
         if let Ability::No(why) = engine.can_run(built()) {
             eprintln!("rudb-bench: {why}");
-            let _ = std::fs::remove_dir_all(&scratch);
+            remove_scratch(&scratch);
             return ExitCode::FAILURE;
         }
         match one_suite(&root, &scratch, &mut engine, suite, scale, record, ablate.as_deref()) {
@@ -1552,7 +1552,7 @@ fn plans(args: &[String]) -> ExitCode {
             }
         }
     }
-    let _ = std::fs::remove_dir_all(&scratch);
+    remove_scratch(&scratch);
     worst
 }
 
@@ -1750,6 +1750,19 @@ fn scratch() -> Result<std::path::PathBuf, std::io::Error> {
     let under = std::env::var_os("RUDB_BENCH_SCRATCH")
         .map_or_else(std::env::temp_dir, std::path::PathBuf::from);
     scratch_under(&under)
+}
+
+/// Remove a run's scratch directory, unless `RUDB_BENCH_KEEP` asks for the databases to stay.
+///
+/// The engines already leave their databases in place when it is set, and removing the directory
+/// they are in afterwards took them away anyway, so a run that asked to keep its databases for a
+/// second pass over them, such as `scripts/instructions-per-query.py`, found nothing there.
+fn remove_scratch(scratch: &std::path::Path) {
+    if rudb_bench::engine::keeping() {
+        eprintln!("rudb-bench: RUDB_BENCH_KEEP is set, so {} stays", scratch.display());
+        return;
+    }
+    let _ = std::fs::remove_dir_all(scratch);
 }
 
 /// The directory a run works in, under the place it was told to work, made if it is not there.
