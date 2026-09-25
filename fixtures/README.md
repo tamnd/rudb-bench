@@ -29,6 +29,15 @@ COPY (
 
 Both were made with the pinned DuckDB, which is the same binary the comparison uses as its reference column. That matters more than it looks: the schema a fixture carries has to be the schema the suite's queries were written against, and taking it from the thing that defines the suite is how it stays that way.
 
+`job/` is the 21 IMDb tables of the Join Order Benchmark, taken from the loaded DuckDB database on server2 rather than from JOB's `schema.sql`, so each fixture has the types the benchmark actually reads:
+
+```sql
+COPY (SELECT * FROM title LIMIT 0) TO 'job/title.parquet' (FORMAT parquet, COMPRESSION zstd);
+-- and the same for the other 20 tables
+```
+
+The JOB baseline records something worth knowing. Over Parquet, every plan declines the semijoin reduction from tamnd/rudb#1898, because each relation is a projection over `read_parquet` rather than a scan of a stored table, and the rule only takes stored tables. The timed JOB runs read a native rudb file, where all 113 fire, and tamnd/rudb-compat's `tests/job.rs` checks that. When the rule learns to take a Parquet scan, this baseline changes on all 113 queries, and that diff is the review of it.
+
 ## Why ClickBench is not here
 
 The ClickBench suite has no fixture, so `rudb-bench plans` does not check it, and that is a gap rather than an oversight.
