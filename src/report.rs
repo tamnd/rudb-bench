@@ -1824,7 +1824,8 @@ pub fn comparison(compared: &Comparison) -> String {
     let unqualified = compared.unqualified();
     if !unqualified.is_empty() {
         line(&mut out, "");
-        line(&mut out, "These do not match the answer TPC-H publishes for them at SF1:");
+        let reference = crate::qualified::reference(compared.suite.name);
+        line(&mut out, &format!("These do not match {reference}:"));
         for (name, engines) in &unqualified {
             let tie = if crate::qualified::ties(name) {
                 ", whose LIMIT can cut a tie, so this may be a different correct set of rows"
@@ -1833,8 +1834,11 @@ pub fn comparison(compared: &Comparison) -> String {
             };
             line(&mut out, &format!("  {name}: {}{tie}", engines.join(", ")));
         }
-        line(&mut out, "That reference is the specification's own and not another engine's, so a");
-        line(&mut out, "difference here is a wrong answer rather than a disagreement.");
+        line(
+            &mut out,
+            "That reference is fixed and committed rather than another engine in this run,",
+        );
+        line(&mut out, "so a difference here is a wrong answer rather than a disagreement.");
     }
     // These are differences with an answer, so they read as the open ones do until the sentence
     // says where the argument is. Kept apart from the list above for that reason.

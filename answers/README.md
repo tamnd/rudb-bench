@@ -37,6 +37,8 @@ The answer of each of the 113 JOB queries on the IMDb snapshot of May 2013, one 
 
 They were written by the pinned DuckDB v2.0.0-dev84237 with `-csv` over a database loaded from the snapshot with JOB's own `schema.sql`, on server2 on 24 September 2026. The reduced form of every query, which runs no join, returns the same 113 answers on the same database, which is the check described in `reports/2026-09-24/job-reduced-prototype.md`. That is a second derivation of each answer through different operators, though not through a different engine.
 
+Every run over a corpus unpacked from the archive is checked against them, through `JOB_ANSWERS` in `src/qualified.rs`, and a query that does not match is reported as a wrong answer under the table. The spelled out `NULL` is turned back into the empty field `-csv` prints before the comparison.
+
 ## Adding a set
 
 Put the files under `answers/<suite>-<scale>/`, one per query, named for the query as `src/suite.rs` names it, with the column names on the first line. Then add the directory to `ANSWERS` in `src/qualified.rs` and say in the module doc where the numbers came from, because a reference whose provenance is not written down is a reference nobody can weigh.
