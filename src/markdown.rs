@@ -215,7 +215,11 @@ fn what_ran(compared: &Comparison) -> String {
 
 /// The one documented command, which is reporting rule eight.
 fn reproduce(compared: &Comparison) -> String {
-    let mut command = format!("rudb-bench run {}", compared.suite.name);
+    let mut command = if crate::engine::rudb_stored_answers_off() {
+        format!("RUDB_BENCH_STORED_ANSWERS=off rudb-bench run {}", compared.suite.name)
+    } else {
+        format!("rudb-bench run {}", compared.suite.name)
+    };
     // What was asked for rather than what came out. One row in every hundred of a hundred million
     // does not land on a round number, and asking for the number that came out would pick a
     // different stride and build a different file.
@@ -1138,15 +1142,29 @@ fn measured(compared: &Comparison, protocol: &crate::report::Protocol) -> String
         .filter(|(e, _)| e == "rudb")
         .map(|(_, q)| q.as_str())
         .collect();
-    out.push_str(&format!(
-        "rudb writes summaries of each column when it loads a table, and it can answer some \
-         queries from those without reading the rows. Its metrics said it did that for {}. Those \
-         times are lookups, not scans, and the other engines read the data for the same queries. \
-         The per query table marks them, and it also marks q1 to q7, whose shapes (counts, sums, \
-         averages, distinct counts and bounds over the whole table) are the ones a summary can \
-         answer. The headline below gives the ratios both with and without q1 to q7.\n\n",
-        if flagged.is_empty() { "no query".to_owned() } else { flagged.join(", ") }
-    ));
+    let said = if flagged.is_empty() { "no query".to_owned() } else { flagged.join(", ") };
+    if crate::engine::rudb_stored_answers_off() {
+        out.push_str(&format!(
+            "rudb writes summaries of each column when it loads a table, and it can answer some \
+             queries from those without reading the rows. This run turned that off with `SET \
+             stored_answers = false` before every rudb query (`RUDB_BENCH_STORED_ANSWERS=off`), so \
+             rudb read the rows the way the other engines did. Its metrics said it still answered \
+             from stored summaries for {said}. The per query table marks any such query, and it \
+             also marks q1 to q7, whose shapes (counts, sums, averages, distinct counts and bounds \
+             over the whole table) are the ones a summary can answer. The headline below gives the \
+             ratios both with and without q1 to q7.\n\n"
+        ));
+    } else {
+        out.push_str(&format!(
+            "rudb writes summaries of each column when it loads a table, and it can answer some \
+             queries from those without reading the rows. Its metrics said it did that for {said}. \
+             Those times are lookups, not scans, and the other engines read the data for the same \
+             queries. The per query table marks them, and it also marks q1 to q7, whose shapes \
+             (counts, sums, averages, distinct counts and bounds over the whole table) are the ones \
+             a summary can answer. The headline below gives the ratios both with and without q1 to \
+             q7.\n\n"
+        ));
+    }
     out
 }
 

@@ -1809,7 +1809,8 @@ fn help() {
     println!("                    The gate waits for the load average to be under the thread");
     println!("                    count, RUDB_BENCH_LOAD_WAIT seconds at most (default 1800).");
     println!("                    RUDB_BENCH_MEMORY sets the one memory budget every engine");
-    println!("                    gets, default 80% of RAM");
+    println!("                    gets, default 80% of RAM. RUDB_BENCH_STORED_ANSWERS=off runs");
+    println!("                    SET stored_answers = false before every rudb query");
     println!("    --sample-file f with --rows, run over this sample file instead of cutting one");
     println!("                    out of the full table, which then does not need to be here");
     println!("    --save          add what each engine measured to reports/saved-<suite>-");

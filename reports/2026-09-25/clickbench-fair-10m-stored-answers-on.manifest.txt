@@ -1,0 +1,4 @@
+path /root/rudb-data/hits-10m.parquet
+rows 9999750
+bytes 1498936215
+sha256 988229f0b8f3f2e2ce901ceffb61e6ae0eb0d2cecca354f5c8c71815b2395edd
