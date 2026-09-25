@@ -229,6 +229,19 @@ pub fn memory_budget() -> Option<u64> {
     Some(kib * 1024 / 10 * 8)
 }
 
+/// The thread count every engine is told to use, from `RUDB_BENCH_THREADS`, or `None` when unset.
+///
+/// Unset, each engine picks its own count, which is what the upstream board does. Set, every engine
+/// gets the same number: rudb as `threads`, DuckDB as `SET threads`, ClickHouse as `max_threads`.
+/// It exists for a run pinned to part of a machine with `taskset`, because the engines do not agree
+/// on what a pinned process has: rudb reads the affinity mask while DuckDB and ClickHouse count
+/// every core, and an engine that starts eight threads on four cores is measured on a contention
+/// the others do not have.
+#[must_use]
+pub fn engine_threads() -> Option<usize> {
+    std::env::var("RUDB_BENCH_THREADS").ok()?.trim().parse().ok().filter(|&n: &usize| n > 0)
+}
+
 /// Where [`memory_budget`] came from, for the report.
 #[must_use]
 pub fn memory_budget_source() -> &'static str {

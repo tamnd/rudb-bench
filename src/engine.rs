@@ -901,6 +901,9 @@ impl Duckdb {
         } else if let Some(statement) = memory_limit_statement() {
             command.arg("-c").arg(statement);
         }
+        if let Some(threads) = crate::machine::engine_threads() {
+            command.arg("-c").arg(format!("SET threads = {threads}"));
+        }
         for statement in statements {
             command.arg("-c").arg(statement);
         }
@@ -1085,6 +1088,9 @@ impl ClickhouseLocal {
         // of whatever memory was free when it started.
         if let Some(budget) = crate::machine::memory_budget() {
             command.arg(format!("--max_memory_usage={budget}"));
+        }
+        if let Some(threads) = crate::machine::engine_threads() {
+            command.arg(format!("--max_threads={threads}"));
         }
         command.arg("--query").arg(sql);
         self.runner.go(command, "clickhouse local", limit)
@@ -1368,6 +1374,9 @@ impl ClickhouseServer {
             .arg(WAIT.to_string())
             .arg("--send_timeout")
             .arg(WAIT.to_string());
+        if let Some(threads) = crate::machine::engine_threads() {
+            command.arg(format!("--max_threads={threads}"));
+        }
         command
     }
 
@@ -2275,6 +2284,9 @@ impl Engine for Rudb {
         // the tree was built would be a pin that did nothing and said nothing.
         for (seam, implementation) in &self.pins {
             command.arg("--set").arg(format!("{seam}={implementation}"));
+        }
+        if let Some(threads) = crate::machine::engine_threads() {
+            command.arg("--set").arg(format!("threads={threads}"));
         }
         // The one thing here that is not DuckDB's command line, and it is a flag DuckDB has no
         // spelling of rather than a different spelling of one it has. It asks the shell for the
