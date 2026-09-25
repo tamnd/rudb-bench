@@ -165,6 +165,104 @@ pub fn settle(say: impl Fn(&str)) -> Option<f64> {
     }
 }
 
+/// Wait until the one minute load average is below the number of hardware threads, or give up.
+///
+/// This is the gate the upstream protocol puts in front of every engine's turn. A reading at or
+/// above the core count means something wanted the whole machine, and a number taken then is partly
+/// a number about that other work. The gate waits up to `RUDB_BENCH_LOAD_WAIT` seconds, 1800 when
+/// that is unset, checking every thirty seconds, and then fails the run rather than measuring on a
+/// busy box.
+///
+/// Returns the reading it let the engine go on and how long it waited for it, or `None` on a
+/// system with no load average to read.
+///
+/// # Errors
+///
+/// When the machine stayed busy for the whole wait.
+pub fn gate(say: impl Fn(&str)) -> Result<Option<(f64, std::time::Duration)>, String> {
+    let threads = threads_here();
+    // The override is for trying the harness out on a busy machine. The report says when any
+    // reading was at or above the thread count, whatever the gate let through.
+    #[expect(clippy::cast_precision_loss, reason = "core counts are small integers")]
+    let limit = std::env::var("RUDB_BENCH_LOAD_LIMIT")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .unwrap_or(threads as f64);
+    let patience = std::env::var("RUDB_BENCH_LOAD_WAIT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(1800);
+    let start = std::time::Instant::now();
+    loop {
+        let Some(now) = load_now() else { return Ok(None) };
+        if now < limit {
+            return Ok(Some((now, start.elapsed())));
+        }
+        if start.elapsed().as_secs() >= patience {
+            return Err(format!(
+                "the load average was still {now:.2} on {threads} hardware threads after waiting \
+                 {patience}s, so nothing was measured"
+            ));
+        }
+        say(&format!("waiting, load is {now:.2} on {threads} hardware threads"));
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+}
+
+/// The memory every engine is given, in bytes, the same number for all of them.
+///
+/// `RUDB_BENCH_MEMORY` when it is set, in bytes or with a `KiB`, `MiB`, `GiB`, `KB`, `MB` or `GB`
+/// suffix. Otherwise 80% of `MemTotal`, which is DuckDB's own default share and a fixed number
+/// rather than one worked out from whatever happened to be free when an engine started. `None` on a
+/// system with no `/proc/meminfo` and nothing set, in which case each engine keeps its own default
+/// and the report says so.
+#[must_use]
+pub fn memory_budget() -> Option<u64> {
+    if let Ok(given) = std::env::var("RUDB_BENCH_MEMORY") {
+        if let Some(bytes) = parse_bytes(&given) {
+            return Some(bytes);
+        }
+    }
+    let text = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = text.lines().find(|l| l.starts_with("MemTotal:"))?;
+    let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kib * 1024 / 10 * 8)
+}
+
+/// Where [`memory_budget`] came from, for the report.
+#[must_use]
+pub fn memory_budget_source() -> &'static str {
+    match std::env::var("RUDB_BENCH_MEMORY").ok().as_deref().and_then(parse_bytes) {
+        Some(_) => "RUDB_BENCH_MEMORY",
+        None => "80% of MemTotal",
+    }
+}
+
+/// A byte count as a person writes one: `8589934592`, `8GiB`, `8192 MiB`, `8GB`.
+#[must_use]
+pub fn parse_bytes(text: &str) -> Option<u64> {
+    let text = text.trim();
+    let split = text.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(text.len());
+    let (number, unit) = text.split_at(split);
+    let number: f64 = number.parse().ok()?;
+    let scale: f64 = match unit.trim().to_ascii_lowercase().as_str() {
+        "" | "b" => 1.0,
+        "kib" | "k" => 1024.0,
+        "mib" | "m" => 1024.0 * 1024.0,
+        "gib" | "g" => 1024.0 * 1024.0 * 1024.0,
+        "kb" => 1e3,
+        "mb" => 1e6,
+        "gb" => 1e9,
+        _ => return None,
+    };
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "a memory size is a positive number far below 2^53"
+    )]
+    Some((number * scale) as u64)
+}
+
 /// Whether this run was asked to make its cold runs actually cold.
 ///
 /// Off unless `RUDB_BENCH_DROP_CACHES` is set to something other than `0` or `no`, which is the
@@ -365,7 +463,16 @@ fn field_in_file(path: &str, name: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Fact, field_in_file, probe, read_command};
+    use super::{Fact, field_in_file, parse_bytes, probe, read_command};
+
+    #[test]
+    fn a_memory_size_reads_the_way_people_write_it() {
+        assert_eq!(parse_bytes("1024"), Some(1024));
+        assert_eq!(parse_bytes("8GiB"), Some(8 << 30));
+        assert_eq!(parse_bytes("7650 MiB"), Some(7650 << 20));
+        assert_eq!(parse_bytes("2GB"), Some(2_000_000_000));
+        assert_eq!(parse_bytes("lots"), None);
+    }
 
     #[test]
     fn every_field_is_either_a_reading_or_a_sentence() {

@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use crate::data::{Dataset, Sample};
 use crate::engine::{BenchError, Engine, Loaded, Outcome};
-use crate::measure::{Distribution, Runs, show};
+use crate::measure::{Convention, Distribution, Runs, show};
 use crate::memory::{Cost, Peak};
 use crate::metrics::{Classes, Internal, Spend};
 use crate::suite::{Query, Suite};
@@ -674,6 +674,15 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
              board publishes"
         ));
     }
+    // A development build is not the DuckDB anybody downloads, and the board runs a release.
+    if result.engine.starts_with("duckdb")
+        && (result.version.contains("dev") || result.version.contains("Development"))
+    {
+        reasons.push(format!(
+            "{} is a development build, {}, and not a DuckDB release",
+            result.engine, result.version
+        ));
+    }
     // First among the reasons that are about this run rather than about the fleet, because it is
     // the one a reader is most likely to have forgotten. A smaller run prints the same table with
     // the same columns and every number in it is smaller, which is exactly what a real improvement
@@ -758,18 +767,31 @@ pub fn publishable(result: &SuiteResult) -> Vec<String> {
             ));
             continue;
         }
+        let upstream = query.runs.hot.convention() == Convention::Clickbench;
         if !query.runs.hot.publishable() {
-            reasons.push(format!(
-                "{} has {} hot runs and rule two wants at least five",
-                query.name,
-                query.runs.hot.runs()
-            ));
+            reasons.push(if upstream {
+                format!(
+                    "{} has {} hot tries and the upstream protocol keeps at least two",
+                    query.name,
+                    query.runs.hot.runs()
+                )
+            } else {
+                format!(
+                    "{} has {} hot runs and rule two wants at least five",
+                    query.name,
+                    query.runs.hot.runs()
+                )
+            });
         }
         if !query.peak().measured() && peaks != result.queries.len() {
             reasons
                 .push(format!("{} has no peak resident set, and rule six wants one", query.name));
         }
-        if let Some(spread) = query.runs.hot.relative_iqr().filter(|s| *s > NOISY) {
+        // Not under the upstream protocol, whose hot figure is the best of two tries. The spread
+        // of two samples is not a spread anybody can read a threshold off.
+        if let Some(spread) =
+            query.runs.hot.relative_iqr().filter(|s| *s > NOISY && !upstream)
+        {
             // Named per query rather than summarised, because the person reading this is deciding
             // whether to rerun the suite or to go and find what else is on the machine, and which
             // query swung is the thing that tells them apart.
@@ -896,105 +918,9 @@ pub fn run(
                 )));
             }
         }
-        let mut costs: Vec<Cost> = Vec::with_capacity(hot + 1);
-        let mut said: Vec<Option<Duration>> = Vec::with_capacity(hot + 1);
-        let mut answer = String::new();
-        let mut breakdown = None;
-        let mut planning: Vec<(Duration, Duration)> = Vec::with_capacity(hot + 1);
-        // A query that does not finish inside the limit will not finish inside it five more times
-        // either, and a suite where twenty of twenty two time out would otherwise spend the limit
-        // six times over on each of them to learn nothing. The first timeout leaves through the
-        // error channel so that the runs after it are never started, and it is caught here rather
-        // than being allowed to stop the suite. Doing it this way rather than probing first keeps
-        // the cold run cold: a probe would have pulled the file into memory before it was timed.
-        let mut hit: Option<Duration> = None;
-        let collected = Runs::collect(hot, || {
-            let ran = engine.run(sql, limit)?;
-            if let Outcome::TimedOut { limit } = ran.outcome {
-                hit = Some(limit);
-                return Err(BenchError::new(DID_NOT_FINISH));
-            }
-            if answer.is_empty() {
-                answer = ran.answer;
-            }
-            if let Some(document) = &ran.metrics {
-                planning.push((document.planning, document.execute));
-            }
-            // The cold run's, taken on the way past. The hot runs measure the same operators over
-            // the same rows, so keeping every one of them would be sixteen copies of one shape.
-            // The two spans above are the exception: they are a ratio rather than a shape, and one
-            // sample of a ratio is not enough to hold a gate up.
-            if breakdown.is_none() {
-                breakdown = ran.metrics.map(|document| (document, ran.cost.cpu));
-            }
-            costs.push(ran.cost);
-            said.push(ran.reported);
-            Ok::<(), BenchError>(())
-        });
-        let runs = match collected {
-            Ok(runs) => runs,
-            Err(why) => {
-                // Both of these are facts about one query, so both become one row and the suite
-                // carries on. The engine demonstrably starts, because the load above it ran, so
-                // what is left for a query to fail on is the query: a binder error, a function
-                // this engine does not have, a plan it cannot build. Stopping the whole column for
-                // one of those is how a run of twenty two queries came back with nothing in it
-                // because query eleven used a HAVING the engine could not bind yet.
-                //
-                // An engine that cannot start at all still stops the run, and it stops it earlier,
-                // where the load is.
-                let Some(limit) = hit else {
-                    let message = why.to_string();
-                    if progress() {
-                        eprintln!(
-                            "{who}: {} of {}, {}, failed, {message}",
-                            at + 1,
-                            queries.len(),
-                            query.name
-                        );
-                    }
-                    results.push(QueryResult::that_failed(query, message));
-                    continue;
-                };
-                if progress() {
-                    eprintln!(
-                        "{who}: {} of {}, {}, no result inside {}s",
-                        at + 1,
-                        queries.len(),
-                        query.name,
-                        limit.as_secs()
-                    );
-                }
-                results.push(QueryResult::that_did_not_finish(query, limit));
-                continue;
-            }
-        };
-        // The first entry is the cold run, by the order `Runs::collect` calls the closure in.
-        let (cold, rest) = costs.split_first().ok_or_else(|| BenchError::new("nothing ran"))?;
-        if progress() {
-            eprintln!(
-                "{who}: {} of {}, {}, cold {}, hot {}",
-                at + 1,
-                queries.len(),
-                query.name,
-                show(runs.cold),
-                show(runs.hot.median_of())
-            );
-        }
-        results.push(QueryResult {
-            name: query.name.to_owned(),
-            shape: query.shape.to_owned(),
-            runs,
-            reported: said_runs(&said),
-            cold: cold.clone(),
-            hot: together(rest),
-            answer,
-            planning,
-            spend: breakdown.as_ref().map(|(document, _)| document.by_kind()).unwrap_or_default(),
-            estimates: breakdown.as_ref().map(|(document, _)| document.estimates),
-            internal: breakdown.map(|(document, cpu)| document.internal(cpu)),
-            outcome: Outcome::Completed,
-        });
+        let (result, _) =
+            measure(engine, query, sql, hot, limit, Style::Median, (at, queries.len()));
+        results.push(result);
     }
 
     Ok(SuiteResult {
@@ -1013,6 +939,123 @@ pub fn run(
     })
 }
 
+/// Which of the two ways of timing a query this is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    /// One cold run and `n` hot ones, summarized by the median.
+    Median,
+    /// `n` tries in a row with the best of the tries after the first as the hot figure, which is
+    /// the upstream ClickBench driver.
+    Upstream,
+}
+
+/// Time one query on one engine and turn it into a row.
+///
+/// `n` is hot runs under [`Style::Median`] and tries under [`Style::Upstream`]. The second value
+/// is whether the engine said it answered from what the load stored, for the engine that says.
+fn measure(
+    engine: &mut dyn Engine,
+    query: &Query,
+    sql: &str,
+    n: usize,
+    limit: Option<Duration>,
+    style: Style,
+    (at, of): (usize, usize),
+) -> (QueryResult, Option<bool>) {
+    let who = engine.name().to_owned();
+    let mut costs: Vec<Cost> = Vec::with_capacity(n + 1);
+    let mut said: Vec<Option<Duration>> = Vec::with_capacity(n + 1);
+    let mut answer = String::new();
+    let mut breakdown = None;
+    let mut planning: Vec<(Duration, Duration)> = Vec::with_capacity(n + 1);
+    let mut metadata = None;
+    // A query that does not finish inside the limit will not finish inside it five more times
+    // either. The first timeout leaves through the error channel so that the runs after it are
+    // never started, and it is caught here rather than being allowed to stop the suite. Doing it
+    // this way rather than probing first keeps the cold run cold.
+    let mut hit: Option<Duration> = None;
+    let mut once = || {
+        let ran = engine.run(sql, limit)?;
+        if let Outcome::TimedOut { limit } = ran.outcome {
+            hit = Some(limit);
+            return Err(BenchError::new(DID_NOT_FINISH));
+        }
+        if answer.is_empty() {
+            answer = ran.answer;
+        }
+        if let Some(document) = &ran.metrics {
+            planning.push((document.planning, document.execute));
+            if metadata.is_none() {
+                metadata = Some(document.answered_from_metadata());
+            }
+        }
+        // The cold run's, taken on the way past. The hot runs measure the same operators over the
+        // same rows, so keeping every one of them would be many copies of one shape.
+        if breakdown.is_none() {
+            breakdown = ran.metrics.map(|document| (document, ran.cost.cpu));
+        }
+        costs.push(ran.cost);
+        said.push(ran.reported);
+        Ok::<(), BenchError>(())
+    };
+    let collected = match style {
+        Style::Median => Runs::collect(n, &mut once),
+        Style::Upstream => Runs::tries(n, &mut once),
+    };
+    let runs = match collected {
+        Ok(runs) => runs,
+        Err(why) => {
+            // Both of these are facts about one query, so both become one row and the suite
+            // carries on. The engine demonstrably starts, because the load ran, so what is left
+            // for a query to fail on is the query.
+            let Some(limit) = hit else {
+                let message = why.to_string();
+                if progress() {
+                    eprintln!("{who}: {} of {of}, {}, failed, {message}", at + 1, query.name);
+                }
+                return (QueryResult::that_failed(query, message), metadata);
+            };
+            if progress() {
+                eprintln!(
+                    "{who}: {} of {of}, {}, no result inside {}s",
+                    at + 1,
+                    query.name,
+                    limit.as_secs()
+                );
+            }
+            return (QueryResult::that_did_not_finish(query, limit), metadata);
+        }
+    };
+    // The first entry is the cold run, by the order the runs were taken in.
+    let Some((cold, rest)) = costs.split_first() else {
+        return (QueryResult::that_failed(query, "nothing ran".to_owned()), metadata);
+    };
+    if progress() {
+        eprintln!(
+            "{who}: {} of {of}, {}, cold {}, hot {}",
+            at + 1,
+            query.name,
+            show(runs.cold),
+            show(runs.hot.headline())
+        );
+    }
+    let result = QueryResult {
+        name: query.name.to_owned(),
+        shape: query.shape.to_owned(),
+        runs,
+        reported: said_runs(&said, style),
+        cold: cold.clone(),
+        hot: together(rest),
+        answer,
+        planning,
+        spend: breakdown.as_ref().map(|(document, _)| document.by_kind()).unwrap_or_default(),
+        estimates: breakdown.as_ref().map(|(document, _)| document.estimates),
+        internal: breakdown.map(|(document, cpu)| document.internal(cpu)),
+        outcome: Outcome::Completed,
+    };
+    (result, metadata)
+}
+
 /// What the engine said about each run, as a cold number and a hot distribution.
 ///
 /// All of them or none of them. An engine either reports its own query time or it does not, and a
@@ -1020,7 +1063,7 @@ pub fn run(
 /// a different set of runs than the wall clock next to it, which is the kind of number that is
 /// wrong in a way nobody can see. So one missing answer makes the whole column missing for that
 /// query, the same way a missing CPU half makes a load's CPU missing.
-fn said_runs(said: &[Option<Duration>]) -> Option<Runs> {
+fn said_runs(said: &[Option<Duration>], style: Style) -> Option<Runs> {
     let mut every = Vec::with_capacity(said.len());
     for one in said {
         every.push((*one)?);
@@ -1029,7 +1072,11 @@ fn said_runs(said: &[Option<Duration>]) -> Option<Runs> {
     if hot.is_empty() {
         return None;
     }
-    Some(Runs { cold: *cold, hot: Distribution::median(hot.to_vec()) })
+    let hot = match style {
+        Style::Median => Distribution::median(hot.to_vec()),
+        Style::Upstream => Distribution::clickbench(hot.to_vec()),
+    };
+    Some(Runs { cold: *cold, hot })
 }
 
 /// A set of runs of one query as one cost.
@@ -1301,6 +1348,51 @@ pub struct Comparison {
     /// difference between a query that took four seconds under a sixty second limit and the same
     /// four seconds under a five second one is the whole question of whether the table is tight.
     pub timeout: Option<Duration>,
+    /// How the run followed the upstream ClickBench protocol, when it did.
+    ///
+    /// `None` for the older way, one engine's whole suite after another's with a median of hot
+    /// runs.
+    pub protocol: Option<Protocol>,
+}
+
+/// What the upstream protocol recorded about a run, beyond the numbers.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Protocol {
+    /// Tries per query, the first of them cold.
+    pub tries: usize,
+    /// The memory every engine was given, in bytes, when there was a budget.
+    pub memory: Option<u64>,
+    /// Where that number came from.
+    pub memory_source: &'static str,
+    /// The load average each engine was let go on, one per load and one per query.
+    pub readings: Vec<Reading>,
+    /// Which engine went first on each query, in query order.
+    pub first: Vec<String>,
+    /// The queries an engine said it answered from what its load stored, as engine and query.
+    pub metadata: Vec<(String, String)>,
+    /// The data files, with their hashes.
+    pub data: Vec<crate::data::Fingerprint>,
+}
+
+/// One pass through the load gate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reading {
+    /// Whose turn it was.
+    pub engine: String,
+    /// `load`, or the query about to run.
+    pub at: String,
+    /// The one minute load average it went on.
+    pub load: f64,
+    /// How long the gate held it first.
+    pub waited: Duration,
+}
+
+impl Protocol {
+    /// Whether this engine said it answered this query from stored metadata.
+    #[must_use]
+    pub fn from_metadata(&self, engine: &str, query: &str) -> bool {
+        self.metadata.iter().any(|(e, q)| e == engine && q == query)
+    }
 }
 
 impl Comparison {
@@ -1466,6 +1558,11 @@ impl Comparison {
     /// two views was a table that satisfied the rule on a technicality.
     #[must_use]
     pub fn disturbed(&self) -> Vec<String> {
+        // Under the upstream protocol the hot figure is the best of two tries, and two samples
+        // have no spread worth a threshold.
+        if self.protocol.is_some() {
+            return Vec::new();
+        }
         self.results
             .iter()
             .filter_map(|result| {
@@ -1560,7 +1657,157 @@ pub fn compare(
         results,
         skipped,
         timeout: limit,
+        protocol: None,
     }
+}
+
+/// An engine that loaded: its place in the list, what the load cost, and the load average before
+/// and after it.
+type Running = (usize, Loaded, Option<(f64, f64)>);
+
+/// Run one suite on every engine the way the upstream ClickBench driver runs it, with the engines
+/// taking turns.
+///
+/// Every engine loads first, one at a time. Then for each query every engine gets a turn, and the
+/// order rotates by one each query so no engine always goes first or last. A turn is the load
+/// gate, the cold cycle (stop the server if there is one, drop the page cache, start it again),
+/// and `tries` runs in a row. The first try is the cold figure and the best of the rest is the hot
+/// one.
+///
+/// # Errors
+///
+/// When the page cache cannot be dropped or the machine stays busy past the gate. Both mean there
+/// is no fair number to report, so nothing is.
+pub fn interleave(
+    engines: &mut [Box<dyn Engine>],
+    suite: &'static Suite,
+    queries: &[Query],
+    dataset: &Dataset,
+    tries: usize,
+    limit: Option<Duration>,
+    data: Vec<crate::data::Fingerprint>,
+) -> Result<Comparison, BenchError> {
+    let say = |line: &str| {
+        if progress() {
+            eprintln!("{line}");
+        }
+    };
+    crate::machine::drop_caches().map_err(|why| {
+        BenchError::new(format!("the upstream protocol drops the page cache and {why}"))
+    })?;
+    let mut readings = Vec::new();
+    let mut gate = |engine: &str, at: &str| -> Result<(), BenchError> {
+        let got = crate::machine::gate(|line| say(&format!("{engine}: {line}")))
+            .map_err(BenchError::new)?;
+        if let Some((load, waited)) = got {
+            readings.push(Reading { engine: engine.to_owned(), at: at.to_owned(), load, waited });
+        }
+        Ok(())
+    };
+
+    let mut skipped = Vec::new();
+    let mut running: Vec<Running> = Vec::new();
+    for (i, engine) in engines.iter_mut().enumerate() {
+        if let Some(why) = engine.can_run(suite).why() {
+            skipped.push(Abstention {
+                engine: engine.name().to_owned(),
+                version: engine.version().to_owned(),
+                why: why.to_owned(),
+                unasked: false,
+            });
+            continue;
+        }
+        say(&format!("{}: loading {}", engine.name(), suite.name));
+        gate(engine.name(), "load")?;
+        let before = crate::machine::load_now();
+        match engine.load(&dataset.tables) {
+            Ok(loaded) => {
+                // Upstream syncs after every load, so the writes are on the device before the
+                // first cold try and none of them lands inside it.
+                let _ = std::process::Command::new("sync").status();
+                engine.rest();
+                running.push((i, loaded, before.zip(crate::machine::load_now())));
+            }
+            Err(e) => {
+                skipped.push(Abstention {
+                    engine: engine.name().to_owned(),
+                    version: engine.version().to_owned(),
+                    why: e.to_string(),
+                    unasked: false,
+                });
+                engine.unload();
+            }
+        }
+    }
+
+    let mut results: Vec<Vec<QueryResult>> = vec![Vec::new(); running.len()];
+    let mut missing: Vec<Vec<String>> = vec![Vec::new(); running.len()];
+    let mut first = Vec::new();
+    let mut metadata = Vec::new();
+    for (at, query) in queries.iter().enumerate() {
+        let n = running.len();
+        for turn in 0..n {
+            let slot = (at + turn) % n;
+            let engine = &mut engines[running[slot].0];
+            let who = engine.name().to_owned();
+            if turn == 0 {
+                first.push(who.clone());
+            }
+            let Some(sql) = query.sql_for(&who) else {
+                missing[slot].push(query.name.to_owned());
+                continue;
+            };
+            gate(&who, query.name)?;
+            engine.cold_cycle(&mut crate::machine::drop_caches)?;
+            let (result, answered) =
+                measure(engine.as_mut(), query, sql, tries, limit, Style::Upstream, (at, queries.len()));
+            engine.rest();
+            if answered == Some(true) {
+                metadata.push((who, query.name.to_owned()));
+            }
+            results[slot].push(result);
+        }
+    }
+
+    let mut done = Vec::with_capacity(running.len());
+    for (slot, (i, loaded, load)) in running.into_iter().enumerate() {
+        let engine = &mut engines[i];
+        done.push(SuiteResult {
+            suite,
+            engine: engine.name().to_owned(),
+            version: engine.version().to_owned(),
+            loaded,
+            queries: std::mem::take(&mut results[slot]),
+            sample: dataset.sample,
+            rows: dataset.rows,
+            keeps_state: engine.keeps_state(),
+            missing: std::mem::take(&mut missing[slot]),
+            load,
+            cold_forced: true,
+            corpus: dataset.manifest.as_ref().map(crate::corpus::Manifest::line),
+        });
+        engine.unload();
+    }
+
+    Ok(Comparison {
+        suite,
+        source_bytes: dataset.bytes(),
+        sample: dataset.sample,
+        rows: dataset.rows,
+        corpus: dataset.manifest.as_ref().map(crate::corpus::Manifest::line),
+        results: done,
+        skipped,
+        timeout: limit,
+        protocol: Some(Protocol {
+            tries,
+            memory: crate::machine::memory_budget(),
+            memory_source: crate::machine::memory_budget_source(),
+            readings,
+            first,
+            metadata,
+            data,
+        }),
+    })
 }
 
 /// The timeout each query was given, and how many of them reached it.
@@ -1853,7 +2100,11 @@ pub fn comparison(compared: &Comparison) -> String {
     // comparison between two different quantities however carefully each half was measured.
     let warm: Vec<&str> =
         compared.results.iter().filter(|r| r.keeps_state).map(|r| r.engine.as_str()).collect();
-    if warm.is_empty() {
+    if compared.protocol.is_some() {
+        line(&mut out, "Hot here means the tries after the first, with every cache as the first");
+        line(&mut out, "try left it. Servers were restarted before each query's first try, so");
+        line(&mut out, "nothing carries from one query to the next.");
+    } else if warm.is_empty() {
         line(
             &mut out,
             "Hot here means page cache warm and not buffer pool warm, because every run is",
@@ -2264,6 +2515,7 @@ mod tests {
             skipped,
             timeout: None,
             corpus: None,
+            protocol: None,
         }
     }
 

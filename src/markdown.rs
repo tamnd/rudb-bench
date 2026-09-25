@@ -71,6 +71,13 @@ pub fn render(compared: &Comparison, facts: &[Fact], machine: &str) -> String {
     heading(&mut out, 2, "What ran");
     out.push_str(&what_ran(compared));
 
+    if let Some(protocol) = &compared.protocol {
+        heading(&mut out, 2, "How it was measured");
+        out.push_str(&measured(compared, protocol));
+        heading(&mut out, 2, "Headline");
+        out.push_str(&headline(compared, protocol));
+    }
+
     heading(&mut out, 2, "How to reproduce it");
     out.push_str(&reproduce(compared));
 
@@ -103,15 +110,23 @@ fn opening(compared: &Comparison, machine: &str) -> String {
     let queries = compared.results.first().map_or(0, |r| r.queries.len());
     let runs =
         compared.results.first().map_or(0, |r| r.queries.first().map_or(0, |q| q.runs.hot.runs()));
+    let how = compared.protocol.as_ref().map_or_else(
+        || format!("with {runs} hot run{} of each query after one cold one", plural(runs)),
+        |p| {
+            format!(
+                "with {} tries of each query after a page cache drop, the way the upstream \
+                 ClickBench driver runs it",
+                p.tries
+            )
+        },
+    );
     let mut out = format!(
         "This is one run of the {} suite on {machine}, over {engines} engine{} and {queries} \
-         quer{}, with {runs} hot run{} of each query after one cold one. It was written by \
-         `rudb-bench run --report` and nothing in it was typed by hand. The command that \
-         reproduces it is below.\n\n",
+         quer{}, {how}. It was written by `rudb-bench run --report` and nothing in it was typed \
+         by hand. The command that reproduces it is below.\n\n",
         compared.suite.name,
         plural(engines),
         if queries == 1 { "y" } else { "ies" },
-        plural(runs),
     );
     if let Some(sample) = compared.sample {
         out.push_str(&format!(
@@ -162,7 +177,9 @@ fn what_ran(compared: &Comparison) -> String {
         "summary".to_owned(),
         match compared.results.first().map(|r| r.queries.first().map(|q| q.runs.hot.convention())) {
             Some(Some(Convention::Clickbench)) => {
-                "best of three, which is the ClickBench board's convention".to_owned()
+                "the best of the tries after the first, which is the upstream ClickBench \
+                 convention"
+                    .to_owned()
             }
             Some(Some(Convention::Median)) => {
                 "median with the interquartile range, per reporting rule two".to_owned()
@@ -212,13 +229,24 @@ fn reproduce(compared: &Comparison) -> String {
         let asked: Vec<&str> = compared.results.iter().map(|r| r.engine.as_str()).collect();
         command.push_str(&format!(" --engines {}", asked.join(",")));
     }
-    let runs = compared
-        .results
-        .first()
-        .and_then(|r| r.queries.first().map(|q| q.runs.hot.runs()))
-        .unwrap_or(0);
+    let runs = compared.protocol.as_ref().map_or_else(
+        || {
+            compared
+                .results
+                .first()
+                .and_then(|r| r.queries.first().map(|q| q.runs.hot.runs()))
+                .unwrap_or(0)
+        },
+        |p| p.tries,
+    );
     if runs > 0 {
         command.push_str(&format!(" --runs {runs}"));
+    }
+    if let Some(protocol) = &compared.protocol {
+        command.push_str(" --protocol upstream");
+        if let Some(file) = protocol.data.first().filter(|_| compared.sample.is_some()) {
+            command.push_str(&format!(" --sample-file {}", file.path.display()));
+        }
     }
     // Always, rather than only when it differs from the suite's default. The default moves with the
     // row count and a reader running this command next year would get whatever the default is then,
@@ -498,6 +526,10 @@ fn per_query(compared: &Comparison) -> String {
     for result in &compared.results {
         header.push(result.engine.clone());
     }
+    let flagged = compared.protocol.as_ref();
+    if flagged.is_some() {
+        header.push("rudb from stored summaries".to_owned());
+    }
     let mut rows = Vec::with_capacity(reference.queries.len());
     // By name and never by position, because a column short a query would otherwise put its q30
     // time on the q29 row, which is a wrong number rather than a missing one.
@@ -518,6 +550,9 @@ fn per_query(compared: &Comparison) -> String {
                 None if result.missing.contains(&query.name) => "no dialect".to_owned(),
                 None => "did not run".to_owned(),
             });
+        }
+        if let Some(protocol) = flagged {
+            row.push(metadata_cell(protocol, &query.name));
         }
         rows.push(row);
     }
@@ -957,7 +992,13 @@ fn caveats(compared: &Comparison) -> String {
 
     let warm: Vec<&str> =
         compared.results.iter().filter(|r| r.keeps_state).map(|r| r.engine.as_str()).collect();
-    if warm.is_empty() {
+    if compared.protocol.is_some() {
+        out.push_str(
+            "Hot here means the tries after the first, with the page cache and any server caches \
+             left as the first try left them. The server was restarted before every query's \
+             first try, so nothing carries from one query to the next.\n\n",
+        );
+    } else if warm.is_empty() {
         out.push_str(
             "Hot here means page cache warm and not buffer pool warm, because every run is a \
              fresh process so that no query's number depends on the one before it.\n\n",
@@ -971,6 +1012,222 @@ fn caveats(compared: &Comparison) -> String {
             warm.join(", ")
         ));
     }
+    out
+}
+
+/// The ClickBench queries that a load time summary can answer outright: counts, sums, averages,
+/// distinct counts and bounds over the whole table.
+const SUMMARY_SHAPED: [&str; 7] = ["q1", "q2", "q3", "q4", "q5", "q6", "q7"];
+
+/// What the per query table says about rudb and its stored summaries for one query.
+fn metadata_cell(protocol: &crate::report::Protocol, query: &str) -> String {
+    if protocol.from_metadata("rudb", query) {
+        "yes, per its metrics".to_owned()
+    } else if SUMMARY_SHAPED.contains(&query) {
+        "no, but the shape allows it".to_owned()
+    } else {
+        String::new()
+    }
+}
+
+/// The protocol, the memory budget, the data file and the load gate readings.
+fn measured(compared: &Comparison, protocol: &crate::report::Protocol) -> String {
+    let mut out = format!(
+        "Every engine loaded the data first, one at a time. Then each query was run on every \
+         engine in turn, and the order rotated by one engine per query, so no engine always went \
+         first or last. Before each engine's turn the harness waited for the one minute load \
+         average to be below the {} hardware threads, dropped the page cache (and for the \
+         ClickHouse server stopped it first and started it again after), then ran the query {} \
+         times in a row. The first try is the cold figure and the best of the other {} is the hot \
+         one, which is what the upstream ClickBench driver does. Every figure below is the \
+         engine's own timing where it reports one.\n\n",
+        crate::machine::threads_here(),
+        protocol.tries,
+        protocol.tries.saturating_sub(1),
+    );
+    out.push_str(&match protocol.memory {
+        Some(bytes) => format!(
+            "Every engine got the same memory budget, {} ({bytes} bytes, from {}). DuckDB and rudb \
+             got it as `SET memory_limit`, the ClickHouse server as `max_server_memory_usage` and \
+             `clickhouse local` as `max_memory_usage`.\n\n",
+            crate::memory::bytes(bytes),
+            protocol.memory_source
+        ),
+        None => "There was no memory budget, because this machine does not publish its memory \
+                 size, so each engine used its own default.\n\n"
+            .to_owned(),
+    });
+
+    if !protocol.data.is_empty() {
+        let rows: Vec<Vec<String>> = protocol
+            .data
+            .iter()
+            .map(|d| {
+                vec![
+                    format!("`{}`", d.path.display()),
+                    d.rows.map_or_else(|| "unknown".to_owned(), |n| n.to_string()),
+                    d.bytes.to_string(),
+                    format!("`{}`", d.sha256),
+                ]
+            })
+            .collect();
+        out.push_str("The data file, which is also written beside it as a manifest:\n\n");
+        out.push_str(&table(&["path", "rows", "bytes", "sha256"], &rows));
+    }
+
+    let mut rows = Vec::new();
+    for result in &compared.results {
+        let mut loads: Vec<f64> = protocol
+            .readings
+            .iter()
+            .filter(|r| r.engine == result.engine)
+            .map(|r| r.load)
+            .collect();
+        if loads.is_empty() {
+            continue;
+        }
+        loads.sort_by(f64::total_cmp);
+        let waited: std::time::Duration = protocol
+            .readings
+            .iter()
+            .filter(|r| r.engine == result.engine)
+            .map(|r| r.waited)
+            .sum();
+        let first = protocol.first.iter().filter(|e| **e == result.engine).count();
+        rows.push(vec![
+            result.engine.clone(),
+            loads.len().to_string(),
+            format!("{:.2}", loads[0]),
+            format!("{:.2}", loads[loads.len() / 2]),
+            format!("{:.2}", loads[loads.len() - 1]),
+            show(waited),
+            first.to_string(),
+        ]);
+    }
+    #[expect(clippy::cast_precision_loss, reason = "core counts are small integers")]
+    let threads = crate::machine::threads_here() as f64;
+    let busy = protocol.readings.iter().filter(|r| r.load >= threads).count();
+    if busy > 0 {
+        out.push_str(&format!(
+            "**This run is not a fair comparison.** The load average was at or above the {threads} \
+             hardware threads at {busy} of the {} readings, so the engines shared the machine with \
+             other work and the ratios below should not be quoted.\n\n",
+            protocol.readings.len()
+        ));
+    }
+    if !rows.is_empty() {
+        out.push_str(
+            "The one minute load average at the start of each engine's turns, counting its load \
+             and every query:\n\n",
+        );
+        out.push_str(&table(
+            &["engine", "readings", "lowest", "median", "highest", "held by the gate", "went first"],
+            &rows,
+        ));
+        out.push_str(
+            "The reading includes the tail of whatever ran just before, which is usually the \
+             previous engine's turn, because the one minute average takes about a minute to \
+             decay.\n\n",
+        );
+    }
+
+    let flagged: Vec<&str> = protocol
+        .metadata
+        .iter()
+        .filter(|(e, _)| e == "rudb")
+        .map(|(_, q)| q.as_str())
+        .collect();
+    out.push_str(&format!(
+        "rudb writes summaries of each column when it loads a table, and it can answer some \
+         queries from those without reading the rows. Its metrics said it did that for {}. Those \
+         times are lookups, not scans, and the other engines read the data for the same queries. \
+         The per query table marks them, and it also marks q1 to q7, whose shapes (counts, sums, \
+         averages, distinct counts and bounds over the whole table) are the ones a summary can \
+         answer. The headline below gives the ratios both with and without q1 to q7.\n\n",
+        if flagged.is_empty() { "no query".to_owned() } else { flagged.join(", ") }
+    ));
+    out
+}
+
+/// Totals, geometric means and ratios, with and without the summary shaped queries.
+fn headline(compared: &Comparison, protocol: &crate::report::Protocol) -> String {
+    let _ = protocol;
+    let hot = |q: &crate::report::QueryResult| {
+        q.reported.as_ref().map_or(q.runs.hot.headline(), |r| r.hot.headline())
+    };
+    let cold = |q: &crate::report::QueryResult| q.reported.as_ref().map_or(q.runs.cold, |r| r.cold);
+    // Queries every engine finished, so every total is over the same set.
+    let shared: Vec<String> = compared.results.first().map_or_else(Vec::new, |first| {
+        first
+            .queries
+            .iter()
+            .map(|q| q.name.clone())
+            .filter(|name| {
+                compared.results.iter().all(|r| r.find(name).is_some_and(|q| q.outcome.measured()))
+            })
+            .collect()
+    });
+    let rest: Vec<String> =
+        shared.iter().filter(|n| !SUMMARY_SHAPED.contains(&n.as_str())).cloned().collect();
+    let sum = |r: &SuiteResult, names: &[String], f: &dyn Fn(&crate::report::QueryResult) -> std::time::Duration| {
+        names.iter().filter_map(|n| r.find(n)).map(f).sum::<std::time::Duration>().as_secs_f64()
+    };
+    let geo = |r: &SuiteResult, names: &[String]| {
+        let logs: Vec<f64> = names
+            .iter()
+            .filter_map(|n| r.find(n))
+            .map(|q| hot(q).as_secs_f64().max(1e-6).ln())
+            .collect();
+        if logs.is_empty() {
+            return 0.0;
+        }
+        #[expect(clippy::cast_precision_loss, reason = "a query count is small")]
+        let n = logs.len() as f64;
+        (logs.iter().sum::<f64>() / n).exp()
+    };
+    let Some(base) = compared.results.first() else {
+        return "No engine produced a number.\n\n".to_owned();
+    };
+    let ratio = |mine: f64, theirs: f64| {
+        if theirs > 0.0 { format!("{:.3}x", mine / theirs) } else { "n/a".to_owned() }
+    };
+    let rows: Vec<Vec<String>> = compared
+        .results
+        .iter()
+        .map(|r| {
+            vec![
+                r.engine.clone(),
+                format!("{:.3}s", sum(r, &shared, &hot)),
+                format!("{:.3}s", sum(r, &shared, &cold)),
+                format!("{:.4}s", geo(r, &shared)),
+                ratio(sum(r, &shared, &hot), sum(base, &shared, &hot)),
+                ratio(geo(r, &shared), geo(base, &shared)),
+                ratio(sum(r, &rest, &hot), sum(base, &rest, &hot)),
+                ratio(geo(r, &rest), geo(base, &rest)),
+            ]
+        })
+        .collect();
+    let mut out = table(
+        &[
+            "engine",
+            "hot total",
+            "cold total",
+            "hot geomean",
+            &format!("total vs {}", base.engine),
+            &format!("geomean vs {}", base.engine),
+            "total vs, without q1 to q7",
+            "geomean vs, without q1 to q7",
+        ],
+        &rows,
+    );
+    out.push_str(&format!(
+        "Over the {} queries every engine finished, {} of them outside q1 to q7. Hot is the best \
+         of the tries after the first and cold is the first try, both by the engine's own clock. \
+         The geometric mean is over the hot figures. A ratio under 1 means faster than {}.\n\n",
+        shared.len(),
+        rest.len(),
+        base.engine
+    ));
     out
 }
 
@@ -1152,6 +1409,7 @@ mod tests {
                 result("rudb", &[5, 6, 7, 8, 9]),
             ],
             timeout: Some(Duration::from_secs(60)),
+            protocol: None,
             skipped: vec![Abstention {
                 engine: "polars".to_owned(),
                 version: "none".to_owned(),

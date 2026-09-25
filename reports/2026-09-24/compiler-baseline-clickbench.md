@@ -1,5 +1,7 @@
 # ClickBench compiler baseline
 
+The query time ratios in this report are withdrawn. See [the correction](compiler-baseline-clickbench-correction.md) for why and for the harness that replaces them.
+
 This is the ClickBench half of the C0 baseline for tamnd/rudb#1828: what every ClickBench query costs in rudb today, next to DuckDB and ClickHouse, and how long rudb's frontend (parse, bind, optimize) takes on each one. It is a measurement and changes nothing in rudb.
 
 ## Read this first

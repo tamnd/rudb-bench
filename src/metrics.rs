@@ -123,6 +123,9 @@ pub struct Operator {
     pub parent: Option<u64>,
     /// `Get`, `Filter`, `Sort` and so on.
     pub kind: String,
+    /// What the engine added about it, such as the table a scan read or `stored summary` for an
+    /// aggregate answered from what the load wrote down.
+    pub detail: Option<String>,
     /// Rows it was handed.
     pub rows_in: u64,
     /// Rows it handed on.
@@ -246,6 +249,22 @@ pub fn folded<'a>(every: impl Iterator<Item = &'a [Spend]>) -> Vec<Spend> {
 }
 
 impl Document {
+    /// Whether this statement was answered from what the load stored rather than from the rows.
+    ///
+    /// True when an operator says it read a stored summary, or when the plan has operators and no
+    /// scan among them, which is how a `min` and `max` answered from the stored bounds comes out.
+    /// A timing of either is a timing of a lookup, and a ClickBench report has to say so next to
+    /// the number rather than let it stand as a scan of ten million rows.
+    #[must_use]
+    pub fn answered_from_metadata(&self) -> bool {
+        let summary = self
+            .operators
+            .iter()
+            .any(|o| o.detail.as_deref().is_some_and(|d| d.contains("stored summary")));
+        let scanned = self.operators.iter().any(|o| matches!(o.kind.as_str(), "Scan" | "Get"));
+        summary || (!self.operators.is_empty() && !scanned)
+    }
+
     /// Read one document out of one line of JSON.
     ///
     /// # Errors
@@ -541,6 +560,7 @@ impl Operator {
             pipeline: count(json, "pipeline"),
             parent: json.at("parent").and_then(Json::count),
             kind: json.at("kind").and_then(Json::text).unwrap_or_default(),
+            detail: json.at("detail").and_then(Json::text),
             rows_in: count(json, "rows_in"),
             rows_out: count(json, "rows_out"),
             wall: nanos(json, "wall_ns"),

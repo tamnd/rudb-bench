@@ -207,6 +207,7 @@ pub fn restore(suite: &str, machine: &str, order: &[&str]) -> Result<Comparison,
         results: saved,
         skipped,
         timeout: None,
+        protocol: None,
     })
 }
 

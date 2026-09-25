@@ -267,6 +267,116 @@ pub fn prepare(
     Ok(Dataset { tables, sample, rows, scale, rows_exact: suite.rows_exact(scale), manifest })
 }
 
+/// The same as [`prepare`] with `--rows`, over a sample file that already exists.
+///
+/// For a machine that has the sample and not the full file, which is most of the fleet on the day
+/// the full ClickBench does not fit. The row count is read out of the file's footer, and the
+/// stride is worked out against the suite's declared row count, because the full file is not here
+/// to count. The sha256 in the manifest [`Fingerprint`] writes is what ties the numbers to the
+/// file.
+///
+/// # Errors
+///
+/// When the suite has more than one table, when the file cannot be read, or when there is no
+/// DuckDB to count its rows with.
+pub fn prepare_given(
+    suite: &'static Suite,
+    scratch: &Path,
+    file: &Path,
+    rows: &Rows,
+) -> Result<Dataset, BenchError> {
+    let [name] = suite.tables else {
+        return Err(BenchError::new(format!(
+            "--sample-file is for a suite of one table, and {} has {}",
+            suite.name,
+            suite.tables.len()
+        )));
+    };
+    let bytes = std::fs::metadata(file)
+        .map_err(|e| BenchError::new(format!("cannot read {}: {e}", file.display())))?
+        .len();
+    let duckdb = crate::engine::Duckdb::discover(scratch, suite)?;
+    let kept = count(&duckdb, file)?;
+    let full = suite.rows(None).unwrap_or(kept);
+    let every = full.checked_div(kept).unwrap_or(1).max(1);
+    Ok(Dataset {
+        tables: vec![Table { name: (*name).to_owned(), path: file.to_path_buf(), bytes }],
+        sample: Some(Sample { full, rows: kept, every, asked: rows.wanted }),
+        rows: Some(kept),
+        scale: suite.default_scale(),
+        rows_exact: true,
+        manifest: None,
+    })
+}
+
+/// Which file a run read, pinned down well enough to tell two copies of it apart.
+///
+/// Written beside the file as `<file>.manifest.txt` and printed in the report, so a number can be
+/// traced to the exact bytes it was measured over.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fingerprint {
+    /// Where the file was.
+    pub path: PathBuf,
+    /// How many rows it holds, where that is known.
+    pub rows: Option<u64>,
+    /// How big it is.
+    pub bytes: u64,
+    /// Its sha256, as `sha256sum` prints it.
+    pub sha256: String,
+}
+
+impl Fingerprint {
+    /// Hash a file with `sha256sum`, or `shasum -a 256` where that is what there is.
+    ///
+    /// # Errors
+    ///
+    /// When the file cannot be read or neither tool is there.
+    pub fn of(path: &Path, rows: Option<u64>) -> Result<Self, BenchError> {
+        let bytes = std::fs::metadata(path)
+            .map_err(|e| BenchError::new(format!("cannot read {}: {e}", path.display())))?
+            .len();
+        let hashed = Command::new("sha256sum")
+            .arg(path)
+            .output()
+            .or_else(|_| Command::new("shasum").arg("-a").arg("256").arg(path).output())
+            .map_err(|e| BenchError::new(format!("cannot hash {}: {e}", path.display())))?;
+        let text = String::from_utf8_lossy(&hashed.stdout);
+        let sha256 = text
+            .split_whitespace()
+            .next()
+            .filter(|h| h.len() == 64 && hashed.status.success())
+            .ok_or_else(|| BenchError::new(format!("cannot hash {}", path.display())))?
+            .to_owned();
+        Ok(Self { path: path.to_path_buf(), rows, bytes, sha256 })
+    }
+
+    /// The manifest as text, one field per line.
+    #[must_use]
+    pub fn text(&self) -> String {
+        format!(
+            "path {}\nrows {}\nbytes {}\nsha256 {}\n",
+            self.path.display(),
+            self.rows.map_or_else(|| "unknown".to_owned(), |n| n.to_string()),
+            self.bytes,
+            self.sha256
+        )
+    }
+
+    /// Write [`Self::text`] beside the file and say where.
+    ///
+    /// # Errors
+    ///
+    /// When the directory is not writable.
+    pub fn write_beside(&self) -> Result<PathBuf, BenchError> {
+        let mut name = self.path.file_name().unwrap_or_default().to_os_string();
+        name.push(".manifest.txt");
+        let at = self.path.with_file_name(name);
+        std::fs::write(&at, self.text())
+            .map_err(|e| BenchError::new(format!("cannot write {}: {e}", at.display())))?;
+        Ok(at)
+    }
+}
+
 /// The command that writes the corpus a run just failed to find, when there is one.
 ///
 /// Empty for a suite whose data is downloaded by hand, because pointing somebody at a generator
