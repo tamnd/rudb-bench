@@ -298,7 +298,9 @@ pub fn prepare_given(
     let duckdb = crate::engine::Duckdb::discover(scratch, suite)?;
     let kept = count(&duckdb, file)?;
     let full = suite.rows(None).unwrap_or(kept);
-    let every = full.checked_div(kept).unwrap_or(1).max(1);
+    // Rounded, because a stride of ten over a table whose length is not a multiple of ten keeps a
+    // few rows short of a tenth, and truncating would call that one in nine.
+    let every = (full + kept / 2).checked_div(kept).unwrap_or(1).max(1);
     Ok(Dataset {
         tables: vec![Table { name: (*name).to_owned(), path: file.to_path_buf(), bytes }],
         sample: Some(Sample { full, rows: kept, every, asked: rows.wanted }),

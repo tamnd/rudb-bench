@@ -546,6 +546,17 @@ pub fn memory_limit_statement() -> Option<String> {
     crate::machine::memory_budget().map(|b| format!("SET memory_limit = '{}MiB'", b >> 20))
 }
 
+/// Whether rudb is told not to answer from the summaries it wrote at load time.
+///
+/// `RUDB_BENCH_STORED_ANSWERS=off` (or `false`) runs `SET stored_answers = false` before every rudb
+/// query, so a whole table aggregate reads its rows the way the other engines do. The report says
+/// which way it was.
+#[must_use]
+pub fn rudb_stored_answers_off() -> bool {
+    std::env::var("RUDB_BENCH_STORED_ANSWERS")
+        .is_ok_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "off" | "false" | "0"))
+}
+
 /// Read what `duckdb_optimizers()` answered into the list `SET disabled_optimizers` takes.
 ///
 /// One name per line, which is what `-csv -noheader` over a one column table prints. Empty is an
@@ -2280,6 +2291,9 @@ impl Engine for Rudb {
         // Before the timer, so the budget's own statement prints no timing line.
         if let Some(statement) = memory_limit_statement() {
             command.arg("-c").arg(statement);
+        }
+        if rudb_stored_answers_off() {
+            command.arg("-c").arg("SET stored_answers = false");
         }
         // `.timer on` and the same `Run Time (s):` line DuckDB prints, because rudb's shell is
         // DuckDB's shell. One more place the drop in claim is tested rather than asserted.
