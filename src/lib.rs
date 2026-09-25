@@ -46,6 +46,7 @@ pub mod report;
 pub mod saved;
 pub mod suite;
 pub mod sweep;
+pub mod workload;
 
 pub use fleet::{FLEET, Machine, REPORTING_MACHINE, Role};
 

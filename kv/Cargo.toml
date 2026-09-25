@@ -1,0 +1,41 @@
+# The driver for the workloads that run for a duration, YCSB first. It is its own package and not a
+# member of a workspace with the harness, so that the harness keeps zero dependencies and no
+# `unsafe`. Everything native lives here, behind `src/ffi.rs`.
+#
+# The rudb backend is behind a feature. It takes rudb from crates.io, and a run against a checkout
+# overrides that with `--config 'patch.crates-io.rudb.path="<RUDB_PATH>/crates/rudb"'`.
+[package]
+name = "rudb-bench-kv"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85.0"
+license = "Apache-2.0"
+repository = "https://github.com/tamnd/rudb-bench"
+description = "The in-process driver rudb-bench starts for the workloads that run for a duration."
+publish = false
+
+[workspace]
+
+[features]
+rudb = ["dep:rudb"]
+
+[dependencies]
+rudb-bench = { path = ".." }
+rudb = { version = "0.4", optional = true }
+
+[lints.rust]
+missing_debug_implementations = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+unreachable_pub = "warn"
+unused_qualifications = "warn"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+doc_markdown = "allow"
+missing_panics_doc = "warn"
+todo = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
