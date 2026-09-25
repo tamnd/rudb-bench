@@ -1,4 +1,5 @@
-//! The answers TPC-H publishes for its own queries at scale factor one.
+//! The answers TPC-H publishes for its own queries at scale factor one, and the JOB answers the
+//! pinned DuckDB gives on the IMDb snapshot.
 //!
 //! Every other correctness check in this harness compares one engine against another. That catches
 //! a lot, and it cannot catch the thing it is worst placed to catch: two engines that are wrong in
@@ -75,21 +76,175 @@ const ANSWERS: &[(&str, &str)] = &[
     ("q22", include_str!("../answers/tpch-sf1/q22.csv")),
 ];
 
+/// The answer to each of the 113 JOB queries on the May 2013 IMDb snapshot, in query order.
+///
+/// These are not published by anybody. They are what the pinned DuckDB (v2.0.0-dev84237) returned
+/// on server2 on 24 September 2026 over a load of `imdb.tgz` from JOB's own `schema.sql`, and
+/// `answers/README.md` says more. So this is one engine's answer rather than an
+/// independent one, the same weakness the TPC-H set has, and it earns its place the same way: rudb
+/// had no part in producing it. JOB is kind to a stored answer, because every query returns one row
+/// with no `LIMIT` and no floating point aggregate, so there is nothing to tie and nothing to round.
+///
+/// A `NULL` is spelled out in the files so that a reader can see it. The engines print it as an
+/// empty field, so [`answer`] turns it back into one.
+const JOB_ANSWERS: &[(&str, &str)] = &[
+    ("1a", include_str!("../answers/job/1a.csv")),
+    ("1b", include_str!("../answers/job/1b.csv")),
+    ("1c", include_str!("../answers/job/1c.csv")),
+    ("1d", include_str!("../answers/job/1d.csv")),
+    ("2a", include_str!("../answers/job/2a.csv")),
+    ("2b", include_str!("../answers/job/2b.csv")),
+    ("2c", include_str!("../answers/job/2c.csv")),
+    ("2d", include_str!("../answers/job/2d.csv")),
+    ("3a", include_str!("../answers/job/3a.csv")),
+    ("3b", include_str!("../answers/job/3b.csv")),
+    ("3c", include_str!("../answers/job/3c.csv")),
+    ("4a", include_str!("../answers/job/4a.csv")),
+    ("4b", include_str!("../answers/job/4b.csv")),
+    ("4c", include_str!("../answers/job/4c.csv")),
+    ("5a", include_str!("../answers/job/5a.csv")),
+    ("5b", include_str!("../answers/job/5b.csv")),
+    ("5c", include_str!("../answers/job/5c.csv")),
+    ("6a", include_str!("../answers/job/6a.csv")),
+    ("6b", include_str!("../answers/job/6b.csv")),
+    ("6c", include_str!("../answers/job/6c.csv")),
+    ("6d", include_str!("../answers/job/6d.csv")),
+    ("6e", include_str!("../answers/job/6e.csv")),
+    ("6f", include_str!("../answers/job/6f.csv")),
+    ("7a", include_str!("../answers/job/7a.csv")),
+    ("7b", include_str!("../answers/job/7b.csv")),
+    ("7c", include_str!("../answers/job/7c.csv")),
+    ("8a", include_str!("../answers/job/8a.csv")),
+    ("8b", include_str!("../answers/job/8b.csv")),
+    ("8c", include_str!("../answers/job/8c.csv")),
+    ("8d", include_str!("../answers/job/8d.csv")),
+    ("9a", include_str!("../answers/job/9a.csv")),
+    ("9b", include_str!("../answers/job/9b.csv")),
+    ("9c", include_str!("../answers/job/9c.csv")),
+    ("9d", include_str!("../answers/job/9d.csv")),
+    ("10a", include_str!("../answers/job/10a.csv")),
+    ("10b", include_str!("../answers/job/10b.csv")),
+    ("10c", include_str!("../answers/job/10c.csv")),
+    ("11a", include_str!("../answers/job/11a.csv")),
+    ("11b", include_str!("../answers/job/11b.csv")),
+    ("11c", include_str!("../answers/job/11c.csv")),
+    ("11d", include_str!("../answers/job/11d.csv")),
+    ("12a", include_str!("../answers/job/12a.csv")),
+    ("12b", include_str!("../answers/job/12b.csv")),
+    ("12c", include_str!("../answers/job/12c.csv")),
+    ("13a", include_str!("../answers/job/13a.csv")),
+    ("13b", include_str!("../answers/job/13b.csv")),
+    ("13c", include_str!("../answers/job/13c.csv")),
+    ("13d", include_str!("../answers/job/13d.csv")),
+    ("14a", include_str!("../answers/job/14a.csv")),
+    ("14b", include_str!("../answers/job/14b.csv")),
+    ("14c", include_str!("../answers/job/14c.csv")),
+    ("15a", include_str!("../answers/job/15a.csv")),
+    ("15b", include_str!("../answers/job/15b.csv")),
+    ("15c", include_str!("../answers/job/15c.csv")),
+    ("15d", include_str!("../answers/job/15d.csv")),
+    ("16a", include_str!("../answers/job/16a.csv")),
+    ("16b", include_str!("../answers/job/16b.csv")),
+    ("16c", include_str!("../answers/job/16c.csv")),
+    ("16d", include_str!("../answers/job/16d.csv")),
+    ("17a", include_str!("../answers/job/17a.csv")),
+    ("17b", include_str!("../answers/job/17b.csv")),
+    ("17c", include_str!("../answers/job/17c.csv")),
+    ("17d", include_str!("../answers/job/17d.csv")),
+    ("17e", include_str!("../answers/job/17e.csv")),
+    ("17f", include_str!("../answers/job/17f.csv")),
+    ("18a", include_str!("../answers/job/18a.csv")),
+    ("18b", include_str!("../answers/job/18b.csv")),
+    ("18c", include_str!("../answers/job/18c.csv")),
+    ("19a", include_str!("../answers/job/19a.csv")),
+    ("19b", include_str!("../answers/job/19b.csv")),
+    ("19c", include_str!("../answers/job/19c.csv")),
+    ("19d", include_str!("../answers/job/19d.csv")),
+    ("20a", include_str!("../answers/job/20a.csv")),
+    ("20b", include_str!("../answers/job/20b.csv")),
+    ("20c", include_str!("../answers/job/20c.csv")),
+    ("21a", include_str!("../answers/job/21a.csv")),
+    ("21b", include_str!("../answers/job/21b.csv")),
+    ("21c", include_str!("../answers/job/21c.csv")),
+    ("22a", include_str!("../answers/job/22a.csv")),
+    ("22b", include_str!("../answers/job/22b.csv")),
+    ("22c", include_str!("../answers/job/22c.csv")),
+    ("22d", include_str!("../answers/job/22d.csv")),
+    ("23a", include_str!("../answers/job/23a.csv")),
+    ("23b", include_str!("../answers/job/23b.csv")),
+    ("23c", include_str!("../answers/job/23c.csv")),
+    ("24a", include_str!("../answers/job/24a.csv")),
+    ("24b", include_str!("../answers/job/24b.csv")),
+    ("25a", include_str!("../answers/job/25a.csv")),
+    ("25b", include_str!("../answers/job/25b.csv")),
+    ("25c", include_str!("../answers/job/25c.csv")),
+    ("26a", include_str!("../answers/job/26a.csv")),
+    ("26b", include_str!("../answers/job/26b.csv")),
+    ("26c", include_str!("../answers/job/26c.csv")),
+    ("27a", include_str!("../answers/job/27a.csv")),
+    ("27b", include_str!("../answers/job/27b.csv")),
+    ("27c", include_str!("../answers/job/27c.csv")),
+    ("28a", include_str!("../answers/job/28a.csv")),
+    ("28b", include_str!("../answers/job/28b.csv")),
+    ("28c", include_str!("../answers/job/28c.csv")),
+    ("29a", include_str!("../answers/job/29a.csv")),
+    ("29b", include_str!("../answers/job/29b.csv")),
+    ("29c", include_str!("../answers/job/29c.csv")),
+    ("30a", include_str!("../answers/job/30a.csv")),
+    ("30b", include_str!("../answers/job/30b.csv")),
+    ("30c", include_str!("../answers/job/30c.csv")),
+    ("31a", include_str!("../answers/job/31a.csv")),
+    ("31b", include_str!("../answers/job/31b.csv")),
+    ("31c", include_str!("../answers/job/31c.csv")),
+    ("32a", include_str!("../answers/job/32a.csv")),
+    ("32b", include_str!("../answers/job/32b.csv")),
+    ("33a", include_str!("../answers/job/33a.csv")),
+    ("33b", include_str!("../answers/job/33b.csv")),
+    ("33c", include_str!("../answers/job/33c.csv")),
+];
+
 /// The five queries whose `ORDER BY` does not settle which rows the `LIMIT` keeps.
 ///
 /// Document 04 section 4.4 names them and they are hard coded rather than worked out, because the
 /// query set is fixed by the specification and will not grow a twenty third.
 const TIED_AT_THE_CUT: &[&str] = &["q02", "q03", "q10", "q18", "q21"];
 
-/// The published answer for a TPC-H query, ready to compare.
+/// The committed answer for a query, ready to compare.
 ///
 /// The column names come off here. The file keeps them because a fixture nobody can read is a
 /// fixture nobody will check, and every engine in this harness is asked for CSV with no header, so
-/// leaving the line on would make the published answer one row longer than any engine's.
+/// leaving the line on would make the reference one row longer than any engine's.
+///
+/// The two suites share one lookup because their query names cannot collide: TPC-H's are `q01` to
+/// `q22` and JOB's a number and a letter.
 #[must_use]
-pub fn answer(query: &str) -> Option<&'static str> {
-    let text = ANSWERS.iter().find(|(name, _)| *name == query).map(|(_, text)| *text)?;
-    text.split_once('\n').map(|(_, rows)| rows)
+pub fn answer(query: &str) -> Option<String> {
+    if let Some((_, text)) = ANSWERS.iter().find(|(name, _)| *name == query) {
+        return text.split_once('\n').map(|(_, rows)| rows.to_owned());
+    }
+    let (_, text) = JOB_ANSWERS.iter().find(|(name, _)| *name == query)?;
+    let (_, rows) = text.split_once('\n')?;
+    Some(rows.lines().map(unspell).collect::<Vec<_>>().join("\n") + "\n")
+}
+
+/// A JOB answer line with each unquoted `NULL` field printed the way `-csv` prints a null, which is
+/// as nothing at all.
+fn unspell(line: &str) -> String {
+    let mut out = Vec::new();
+    let mut field = String::new();
+    let mut quoted = false;
+    for c in line.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                field.push(c);
+            }
+            ',' if !quoted => out.push(std::mem::take(&mut field)),
+            _ => field.push(c),
+        }
+    }
+    out.push(field);
+    out.iter().map(|f| if f == "NULL" { "" } else { f.as_str() }).collect::<Vec<_>>().join(",")
 }
 
 /// The scale factor a corpus line names.
@@ -105,12 +260,29 @@ pub fn scale(corpus: &str) -> Option<&str> {
 
 /// Whether these answers are the right reference for a run.
 ///
-/// Two conditions and both are necessary. The wrong suite has no answers here at all. The right
-/// suite at the wrong scale has answers that are all wrong, which is worse, because a check that
-/// fails on every query is a check that gets turned off rather than read.
+/// For TPC-H two conditions and both are necessary. The wrong suite has no answers here at all. The
+/// right suite at the wrong scale has answers that are all wrong, which is worse, because a check
+/// that fails on every query is a check that gets turned off rather than read.
+///
+/// For JOB the condition is that the corpus was unpacked from the IMDb archive, which is the one
+/// thing a JOB corpus can be. A run that does not say what it ran over is not checked.
 #[must_use]
 pub fn applies(suite: &str, corpus: Option<&str>) -> bool {
-    suite == "tpch" && corpus.and_then(scale) == Some("1")
+    match suite {
+        "tpch" => corpus.and_then(scale) == Some("1"),
+        "job" => corpus.is_some_and(|line| line.starts_with("imdb-archive,")),
+        _ => false,
+    }
+}
+
+/// What the reference is, for the sentence that introduces a query that does not match it.
+#[must_use]
+pub fn reference(suite: &str) -> &'static str {
+    if suite == "job" {
+        "the answer committed in answers/job, which the pinned DuckDB gave on the IMDb snapshot"
+    } else {
+        "the answer TPC-H publishes for them at SF1"
+    }
 }
 
 /// Whether a query's `LIMIT` can cut a tie, so that a difference in it is not settled.
@@ -122,14 +294,14 @@ pub fn ties(query: &str) -> bool {
 /// How an engine's answer stands against the published one, or nothing when they disagree.
 #[must_use]
 pub fn agrees(query: &str, got: &str) -> Option<Agreement> {
-    crate::answer::agreement(answer(query)?, got)
+    crate::answer::agreement(&answer(query)?, got)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ANSWERS, agrees, answer, applies, scale, ties};
+    use super::{ANSWERS, JOB_ANSWERS, agrees, answer, applies, scale, ties};
     use crate::answer::Agreement;
-    use crate::suite::TPCH;
+    use crate::suite::{JOB, TPCH};
 
     /// The cardinalities the specification prints, which is the cheapest check there is on twenty
     /// two files of data entry. A file that lost its last row, gained a stray line or kept a header
@@ -191,7 +363,7 @@ mod tests {
     fn each_answer_has_the_number_of_rows_the_specification_prints() {
         for (query, expected) in ROWS {
             let text = answer(query).expect("committed");
-            assert_eq!(rows(text), *expected, "{query}");
+            assert_eq!(rows(&text), *expected, "{query}");
         }
     }
 
@@ -221,9 +393,9 @@ mod tests {
 
     #[test]
     fn an_answer_agrees_with_itself_row_for_row() {
-        for (query, _) in ANSWERS {
+        for (query, _) in ANSWERS.iter().chain(JOB_ANSWERS) {
             let text = answer(query).expect("committed");
-            assert_eq!(agrees(query, text), Some(Agreement::Ordered), "{query}");
+            assert_eq!(agrees(query, &text), Some(Agreement::Ordered), "{query}");
         }
     }
 
@@ -284,5 +456,45 @@ mod tests {
         }
         assert!(!ties("q01"), "a query with no limit cannot tie at one");
         assert!(!ties("q05"));
+    }
+
+    #[test]
+    fn every_job_query_has_one_answer_row_under_its_column_names() {
+        for query in JOB {
+            let whole = JOB_ANSWERS
+                .iter()
+                .find(|(name, _)| *name == query.name)
+                .map(|(_, text)| *text)
+                .unwrap_or_else(|| panic!("{} has no answer committed", query.name));
+            let mut lines = whole.lines().filter(|line| !line.trim().is_empty());
+            let wide = fields(lines.next().expect("a header"));
+            // 7c's answer is a biography with commas inside quotes, which is why this counts
+            // separators outside quotes rather than splitting.
+            assert_eq!(lines.clone().count(), 1, "{}", query.name);
+            assert_eq!(fields(lines.next().expect("a row")), wide, "{}", query.name);
+        }
+        assert_eq!(JOB_ANSWERS.len(), JOB.len());
+    }
+
+    /// The five empty queries answer one row of nulls, which `-csv` prints as nothing but commas,
+    /// and an engine that did that has to agree with a file that spells the nulls out.
+    #[test]
+    fn a_row_of_nulls_is_what_the_engines_print_for_one() {
+        assert_eq!(answer("2c").as_deref(), Some("\n"));
+        assert_eq!(agrees("2c", "\n"), Some(Agreement::Ordered));
+        assert_eq!(agrees("5a", ",,\n"), Some(Agreement::Ordered));
+        assert_eq!(agrees("5a", "x,,\n"), None, "a value where the answer has a null is wrong");
+    }
+
+    #[test]
+    fn a_job_answer_is_checked_only_over_the_imdb_archive() {
+        let unpacked = Some("imdb-archive, corpus 0123456789abcdef, written 2026-09-25");
+        assert!(applies("job", unpacked));
+        assert!(!applies("job", None));
+        assert!(!applies(
+            "job",
+            Some("duckdb-tpch SF1, corpus e02fbb7bb0145593, written 2026-09-18")
+        ));
+        assert!(!applies("tpch", unpacked), "the TPC-H answers are not about IMDb");
     }
 }

@@ -929,7 +929,8 @@ fn caveats(compared: &Comparison) -> String {
     }
     let unqualified = compared.unqualified();
     if !unqualified.is_empty() {
-        out.push_str("These do not match the answer TPC-H publishes for them at SF1:\n\n");
+        let reference = crate::qualified::reference(compared.suite.name);
+        out.push_str(&format!("These do not match {reference}:\n\n"));
         for (name, engines) in &unqualified {
             let tie = if crate::qualified::ties(name) {
                 ", whose LIMIT can cut a tie, so this may be a different correct set of rows"
@@ -939,7 +940,7 @@ fn caveats(compared: &Comparison) -> String {
             out.push_str(&format!("- {name}: {}{tie}\n", engines.join(", ")));
         }
         out.push_str(
-            "\nThat reference is the specification's own and not another engine's, so a difference \
+            "\nThat reference is fixed and committed rather than another engine in this run, so a difference \
              here is a wrong answer rather than a disagreement. It is also the only check in this \
              report that can catch every engine being wrong the same way.\n\n",
         );
