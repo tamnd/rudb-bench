@@ -215,11 +215,7 @@ fn what_ran(compared: &Comparison) -> String {
 
 /// The one documented command, which is reporting rule eight.
 fn reproduce(compared: &Comparison) -> String {
-    let mut command = if crate::engine::rudb_stored_answers_off() {
-        format!("RUDB_BENCH_STORED_ANSWERS=off rudb-bench run {}", compared.suite.name)
-    } else {
-        format!("rudb-bench run {}", compared.suite.name)
-    };
+    let mut command = format!("rudb-bench run {}", compared.suite.name);
     // What was asked for rather than what came out. One row in every hundred of a hundred million
     // does not land on a round number, and asking for the number that came out would pick a
     // different stride and build a different file.
@@ -1147,8 +1143,9 @@ fn measured(compared: &Comparison, protocol: &crate::report::Protocol) -> String
         out.push_str(&format!(
             "rudb writes summaries of each column when it loads a table, and it can answer some \
              queries from those without reading the rows. This run turned that off with `SET \
-             stored_answers = false` before every rudb query (`RUDB_BENCH_STORED_ANSWERS=off`), so \
-             rudb read the rows the way the other engines did. Its metrics said it still answered \
+             stored_answers = false` before every rudb query, which rudb-bench always does. That \
+             also turns off the value and pair frequencies, the host groups and the run projections \
+             it keeps, so rudb read the rows the way the other engines did. Its metrics said it still answered \
              from stored summaries for {said}. The per query table marks any such query, and it \
              also marks q1 to q7, whose shapes (counts, sums, averages, distinct counts and bounds \
              over the whole table) are the ones a summary can answer. The headline below gives the \

@@ -546,15 +546,16 @@ pub fn memory_limit_statement() -> Option<String> {
     crate::machine::memory_budget().map(|b| format!("SET memory_limit = '{}MiB'", b >> 20))
 }
 
-/// Whether rudb is told not to answer from the summaries it wrote at load time.
+/// Whether rudb is told not to answer from what it wrote at load time.
 ///
-/// `RUDB_BENCH_STORED_ANSWERS=off` (or `false`) runs `SET stored_answers = false` before every rudb
-/// query, so a whole table aggregate reads its rows the way the other engines do. The report says
-/// which way it was.
+/// Always, so every rudb query runs after `SET stored_answers = false`. That turns off the whole
+/// table summaries, the value and pair frequencies, the host groups and the run projections, which
+/// ClickBench's rules count as precomputed answers, so rudb reads the rows the way the other
+/// engines do. `RUDB_BENCH_STORED_ANSWERS` is no longer read, so an old command line that sets it
+/// still runs and cannot turn them back on.
 #[must_use]
 pub fn rudb_stored_answers_off() -> bool {
-    std::env::var("RUDB_BENCH_STORED_ANSWERS")
-        .is_ok_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "off" | "false" | "0"))
+    true
 }
 
 /// Read what `duckdb_optimizers()` answered into the list `SET disabled_optimizers` takes.
