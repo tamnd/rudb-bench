@@ -1,0 +1,153 @@
+
+### harness wall, median of the 3 hot tries
+
+| query | clickhouse-server | duckdb | rudb | best rival | rudb / best rival |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| q1 | 40.3 ms | 40.4 ms | 20.3 ms | clickhouse-server | 0.50x |
+| q2 | 40.3 ms | 60.5 ms | 40.4 ms | clickhouse-server | 1.00x |
+| q3 | 63.1 ms | 80.6 ms | 40.6 ms | clickhouse-server | 0.64x |
+| q4 | 80.5 ms | 80.6 ms | 44.0 ms | clickhouse-server | 0.55x |
+| q5 | 204.4 ms | 228.0 ms | 204.2 ms | clickhouse-server | 1.00x |
+| q6 | 284.1 ms | 268.2 ms | 381.8 ms | duckdb | 1.42x |
+| q7 | 60.8 ms | 60.5 ms | 20.3 ms | duckdb | 0.34x |
+| q8 | 60.5 ms | 60.5 ms | 40.9 ms | clickhouse-server | 0.68x |
+| q9 | 366.8 ms | 285.9 ms | 144.1 ms | duckdb | 0.50x |
+| q10 | 390.7 ms | 368.6 ms | 182.3 ms | duckdb | 0.49x |
+| q11 | 144.9 ms | 121.2 ms | 64.0 ms | duckdb | 0.53x |
+| q12 | 143.8 ms | 142.3 ms | 60.5 ms | duckdb | 0.43x |
+| q13 | 288.0 ms | 305.5 ms | 60.8 ms | clickhouse-server | 0.21x |
+| q14 | 424.4 ms | 547.8 ms | 124.0 ms | clickhouse-server | 0.29x |
+| q15 | 309.9 ms | 343.7 ms | 104.7 ms | clickhouse-server | 0.34x |
+| q16 | 184.4 ms | 265.3 ms | 20.4 ms | clickhouse-server | 0.11x |
+| q17 | 692.0 ms | 668.2 ms | 40.5 ms | duckdb | 0.06x |
+| q18 | 286.6 ms | 465.7 ms | 60.6 ms | clickhouse-server | 0.21x |
+| q19 | 1.21 s | 1.19 s | 364.9 ms | duckdb | 0.31x |
+| q20 | 40.4 ms | 60.5 ms | 20.3 ms | clickhouse-server | 0.50x |
+| q21 | 283.9 ms | 464.8 ms | 246.0 ms | clickhouse-server | 0.87x |
+| q22 | 120.7 ms | 508.4 ms | 345.7 ms | clickhouse-server | 2.87x |
+| q23 | 391.0 ms | 627.0 ms | 324.0 ms | clickhouse-server | 0.83x |
+| q24 | 103.4 ms | 140.8 ms | 121.3 ms | clickhouse-server | 1.17x |
+| q25 | 80.6 ms | 80.5 ms | 40.4 ms | duckdb | 0.50x |
+| q26 | 153.7 ms | 127.4 ms | 80.8 ms | duckdb | 0.63x |
+| q27 | 84.1 ms | 80.5 ms | 60.5 ms | duckdb | 0.75x |
+| q28 | 142.5 ms | 424.9 ms | 256.0 ms | clickhouse-server | 1.80x |
+| q29 | 1.04 s | 3.66 s | 1.06 s | clickhouse-server | 1.02x |
+| q30 | 73.4 ms | 80.6 ms | 41.7 ms | clickhouse-server | 0.57x |
+| q31 | 204.0 ms | 304.0 ms | 126.0 ms | clickhouse-server | 0.62x |
+| q32 | 248.3 ms | 431.0 ms | 144.1 ms | clickhouse-server | 0.58x |
+| q33 | 1.31 s | 1.54 s | 347.6 ms | clickhouse-server | 0.27x |
+| q34 | 1.39 s | 1.38 s | 20.4 ms | duckdb | 0.01x |
+| q35 | 1.39 s | 1.48 s | 124.1 ms | clickhouse-server | 0.09x |
+| q36 | 166.0 ms | 243.6 ms | 20.3 ms | clickhouse-server | 0.12x |
+| q37 | 60.5 ms | 60.4 ms | 40.4 ms | duckdb | 0.67x |
+| q38 | 60.5 ms | 60.5 ms | 40.4 ms | duckdb | 0.67x |
+| q39 | 60.5 ms | 60.5 ms | 40.4 ms | duckdb | 0.67x |
+| q40 | 100.7 ms | 80.6 ms | 80.6 ms | duckdb | 1.00x |
+| q41 | 60.5 ms | 60.4 ms | 20.4 ms | duckdb | 0.34x |
+| q42 | 60.5 ms | 60.4 ms | 40.4 ms | duckdb | 0.67x |
+| q43 | 60.5 ms | 60.4 ms | 20.4 ms | duckdb | 0.34x |
+| total | 12.97 s | 17.66 s | 5.69 s | | |
+
+rudb / best rival: geomean 0.46x, best 0.01x, worst 2.87x, at or under 0.1x on 3 of 43, under 1x on 37
+
+### engine clock, median of the 3 hot tries
+
+| query | clickhouse-server | duckdb | rudb | best rival | rudb / best rival |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| q1 | 1.0 ms | 9.0 ms | 3.0 ms | clickhouse-server | 2.97x |
+| q2 | 1.0 ms | 26.0 ms | 7.3 ms | clickhouse-server | 7.29x |
+| q3 | 21.0 ms | 46.0 ms | 23.1 ms | clickhouse-server | 1.10x |
+| q4 | 27.0 ms | 50.0 ms | 18.6 ms | clickhouse-server | 0.69x |
+| q5 | 166.0 ms | 183.0 ms | 155.9 ms | clickhouse-server | 0.94x |
+| q6 | 238.0 ms | 217.0 ms | 358.4 ms | duckdb | 1.65x |
+| q7 | 14.0 ms | 16.0 ms | 6.2 ms | clickhouse-server | 0.44x |
+| q8 | 8.0 ms | 22.0 ms | 8.4 ms | clickhouse-server | 1.05x |
+| q9 | 313.0 ms | 232.0 ms | 106.3 ms | duckdb | 0.46x |
+| q10 | 348.0 ms | 317.0 ms | 140.1 ms | duckdb | 0.44x |
+| q11 | 94.0 ms | 85.0 ms | 31.1 ms | duckdb | 0.37x |
+| q12 | 104.0 ms | 106.0 ms | 37.3 ms | clickhouse-server | 0.36x |
+| q13 | 233.0 ms | 244.0 ms | 35.2 ms | clickhouse-server | 0.15x |
+| q14 | 376.0 ms | 463.0 ms | 85.1 ms | clickhouse-server | 0.23x |
+| q15 | 274.0 ms | 278.0 ms | 76.9 ms | clickhouse-server | 0.28x |
+| q16 | 152.0 ms | 220.0 ms | 0.7 ms | clickhouse-server | 0.00x |
+| q17 | 649.0 ms | 543.0 ms | 19.3 ms | duckdb | 0.04x |
+| q18 | 248.0 ms | 385.0 ms | 35.0 ms | clickhouse-server | 0.14x |
+| q19 | 1.18 s | 991.0 ms | 298.2 ms | duckdb | 0.30x |
+| q20 | 2.0 ms | 31.0 ms | 2.9 ms | clickhouse-server | 1.44x |
+| q21 | 234.0 ms | 402.0 ms | 218.9 ms | clickhouse-server | 0.94x |
+| q22 | 70.0 ms | 440.0 ms | 297.1 ms | clickhouse-server | 4.24x |
+| q23 | 352.0 ms | 488.0 ms | 288.5 ms | clickhouse-server | 0.82x |
+| q24 | 62.0 ms | 88.0 ms | 101.8 ms | clickhouse-server | 1.64x |
+| q25 | 36.0 ms | 38.0 ms | 15.7 ms | clickhouse-server | 0.44x |
+| q26 | 111.0 ms | 88.0 ms | 62.4 ms | duckdb | 0.71x |
+| q27 | 38.0 ms | 39.0 ms | 44.7 ms | clickhouse-server | 1.18x |
+| q28 | 94.0 ms | 352.0 ms | 221.0 ms | clickhouse-server | 2.35x |
+| q29 | 995.0 ms | 3.50 s | 1.01 s | clickhouse-server | 1.02x |
+| q30 | 27.0 ms | 44.0 ms | 17.9 ms | clickhouse-server | 0.66x |
+| q31 | 149.0 ms | 249.0 ms | 96.5 ms | clickhouse-server | 0.65x |
+| q32 | 210.0 ms | 351.0 ms | 102.5 ms | clickhouse-server | 0.49x |
+| q33 | 1.26 s | 1.25 s | 280.2 ms | duckdb | 0.22x |
+| q34 | 1.34 s | 1.12 s | 0.7 ms | duckdb | 0.00x |
+| q35 | 1.34 s | 1.21 s | 97.8 ms | duckdb | 0.08x |
+| q36 | 129.0 ms | 190.0 ms | 0.7 ms | clickhouse-server | 0.01x |
+| q37 | 21.0 ms | 30.0 ms | 24.6 ms | clickhouse-server | 1.17x |
+| q38 | 11.0 ms | 19.0 ms | 15.4 ms | clickhouse-server | 1.40x |
+| q39 | 11.0 ms | 22.0 ms | 22.7 ms | clickhouse-server | 2.06x |
+| q40 | 47.0 ms | 48.0 ms | 62.2 ms | clickhouse-server | 1.32x |
+| q41 | 8.0 ms | 19.0 ms | 6.5 ms | clickhouse-server | 0.81x |
+| q42 | 6.0 ms | 19.0 ms | 8.5 ms | clickhouse-server | 1.42x |
+| q43 | 6.0 ms | 18.0 ms | 3.9 ms | clickhouse-server | 0.64x |
+| total | 11.01 s | 14.48 s | 4.45 s | | |
+
+rudb / best rival: geomean 0.47x, best 0.00x, worst 7.29x, at or under 0.1x on 5 of 43, under 1x on 27
+
+### cold, and load at start / max during each query
+
+| query | clickhouse-server cold | duckdb cold | rudb cold | clickhouse-server load | duckdb load | rudb load |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| q1 | 40.4 ms | 103.7 ms | 44.2 ms | 2.27/2.27 | 1.96/1.96 | 2.77/2.77 |
+| q2 | 40.3 ms | 102.8 ms | 644.8 ms | 1.37/1.37 | 2.62/2.62 | 2.85/2.85 |
+| q3 | 120.7 ms | 163.6 ms | 666.1 ms | 1.37/1.37 | 2.62/2.62 | 2.85/2.85 |
+| q4 | 80.8 ms | 163.1 ms | 646.0 ms | 1.37/1.37 | 2.62/2.62 | 2.85/2.85 |
+| q5 | 244.5 ms | 307.2 ms | 767.9 ms | 3.71/3.71 | 2.62/2.62 | 3.01/3.01 |
+| q6 | 329.9 ms | 445.6 ms | 706.7 ms | 2.25/2.25 | 2.62/2.62 | 3.01/3.01 |
+| q7 | 61.1 ms | 102.5 ms | 646.2 ms | 1.52/1.52 | 2.62/2.62 | 3.01/3.01 |
+| q8 | 80.5 ms | 102.8 ms | 666.4 ms | 4.25/4.25 | 2.62/2.62 | 3.01/3.01 |
+| q9 | 405.5 ms | 365.8 ms | 705.9 ms | 4.25/4.25 | 2.62/2.62 | 1.82/1.82 |
+| q10 | 444.2 ms | 485.7 ms | 807.3 ms | 4.25/4.25 | 2.62/2.62 | 2.72/2.72 |
+| q11 | 183.1 ms | 224.2 ms | 685.6 ms | 2.18/2.18 | 2.62/2.62 | 2.72/2.72 |
+| q12 | 182.0 ms | 243.5 ms | 686.7 ms | 2.84/2.84 | 1.58/1.58 | 2.72/2.72 |
+| q13 | 328.9 ms | 392.0 ms | 685.5 ms | 2.84/2.84 | 1.58/1.58 | 1.88/1.88 |
+| q14 | 506.9 ms | 693.5 ms | 786.3 ms | 2.40/2.40 | 2.70/2.70 | 1.88/1.88 |
+| q15 | 393.3 ms | 432.1 ms | 707.8 ms | 1.46/1.46 | 2.70/2.70 | 1.88/1.88 |
+| q16 | 224.8 ms | 345.3 ms | 43.3 ms | 1.46/1.46 | 2.70/2.70 | 1.88/1.88 |
+| q17 | 754.8 ms | 792.8 ms | 785.3 ms | 1.38/1.38 | 2.70/2.70 | 1.88/1.88 |
+| q18 | 365.5 ms | 611.5 ms | 525.0 ms | 1.38/1.38 | 2.70/2.70 | 1.88/1.88 |
+| q19 | 1.29 s | 1.39 s | 953.3 ms | 2.88/2.88 | 2.74/2.74 | 1.88/1.88 |
+| q20 | 100.7 ms | 143.6 ms | 83.4 ms | 2.88/2.88 | 2.74/2.74 | 2.62/2.62 |
+| q21 | 657.0 ms | 826.2 ms | 907.3 ms | 1.83/1.83 | 2.74/2.74 | 2.62/2.62 |
+| q22 | 730.7 ms | 970.0 ms | 988.2 ms | 2.17/2.17 | 2.74/2.74 | 2.62/2.62 |
+| q23 | 895.3 ms | 906.6 ms | 1.27 s | 1.37/1.37 | 2.58/2.58 | 1.67/1.67 |
+| q24 | 242.8 ms | 224.3 ms | 366.7 ms | 1.69/1.69 | 2.58/2.58 | 1.67/1.67 |
+| q25 | 140.8 ms | 142.8 ms | 183.2 ms | 1.69/1.69 | 2.84/2.84 | 1.67/1.67 |
+| q26 | 203.7 ms | 223.8 ms | 765.7 ms | 1.69/1.69 | 2.84/2.84 | 1.67/1.67 |
+| q27 | 140.8 ms | 143.1 ms | 227.8 ms | 1.69/1.69 | 2.84/2.84 | 1.67/1.67 |
+| q28 | 164.6 ms | 785.9 ms | 854.0 ms | 3.05/3.05 | 2.84/2.84 | 1.67/1.67 |
+| q29 | 1.28 s | 3.84 s | 1.48 s | 1.85/1.85 | 2.84/2.84 | 2.77/2.77 |
+| q30 | 100.7 ms | 164.5 ms | 648.0 ms | 1.28/1.28 | 2.16/2.16 | 2.77/2.77 |
+| q31 | 286.7 ms | 447.1 ms | 807.8 ms | 1.30/1.30 | 1.53/1.53 | 2.77/2.77 |
+| q32 | 323.2 ms | 708.7 ms | 1.03 s | 1.30/1.30 | 1.53/1.53 | 1.68/1.68 |
+| q33 | 1.36 s | 1.75 s | 1.15 s | 1.30/1.30 | 1.53/1.53 | 2.67/2.67 |
+| q34 | 1.56 s | 1.80 s | 43.8 ms | 2.31/2.31 | 2.48/2.48 | 2.67/2.67 |
+| q35 | 1.60 s | 1.88 s | 725.0 ms | 2.51/3.20 | 2.78/2.78 | 0.22/0.22 |
+| q36 | 224.8 ms | 307.9 ms | 43.4 ms | 2.58/2.58 | 2.65/2.65 | 0.22/0.22 |
+| q37 | 120.8 ms | 122.9 ms | 102.6 ms | 1.64/1.64 | 1.97/1.97 | 0.22/0.22 |
+| q38 | 121.3 ms | 103.3 ms | 82.9 ms | 1.64/1.64 | 1.97/1.97 | 0.22/0.22 |
+| q39 | 102.5 ms | 122.7 ms | 83.0 ms | 1.64/1.64 | 1.28/1.28 | 0.22/0.22 |
+| q40 | 141.1 ms | 122.8 ms | 123.2 ms | 4.59/4.59 | 1.28/1.28 | 0.22/0.22 |
+| q41 | 120.8 ms | 102.7 ms | 82.7 ms | 4.59/4.59 | 1.28/1.28 | 0.22/0.22 |
+| q42 | 104.2 ms | 82.8 ms | 82.6 ms | 4.59/4.59 | 1.28/1.28 | 0.22/0.22 |
+| q43 | 81.0 ms | 102.6 ms | 63.4 ms | 4.59/4.59 | 1.28/1.28 | 0.22/0.22 |
+clickhouse-server: 43 queries, cold total 16.9s, load at start median 1.85 max 4.59, max during 4.59
+duckdb: 43 queries, cold total 23.5s, load at start median 2.62 max 2.84, max during 2.84
+rudb: 43 queries, cold total 24.4s, load at start median 1.88 max 3.01, max during 3.01

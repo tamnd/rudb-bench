@@ -1,0 +1,204 @@
+1790412291 hits        /home/gopher/c0-gpc/data/hits.parquet
+1790412291 
+1790412311 manifest    /home/gopher/c0-gpc/data/hits.parquet.manifest.txt
+1790412311 sha256      a390f6cb782f6aaef278c72fc1dd86c4f30bc843ebab3c159e9bd4d45ddb079f
+1790412311 duckdb: loading clickbench
+1790412353 duckdb: waiting, load is 6.31 on 16 hardware threads
+1790412383 duckdb: waiting, load is 3.82 on 16 hardware threads
+1790412413 duckdb: waiting, load is 2.32 on 16 hardware threads
+1790412444 duckdb: 1 of 43, q1, cold 103.712ms, hot 40.351ms, hot median 40.360ms, own cold 10.000ms, own hot 9.000ms, own hot median 9.000ms
+1790412444 duckdb: 2 of 43, q2, cold 102.842ms, hot 60.456ms, hot median 60.458ms, own cold 45.000ms, own hot 23.000ms, own hot median 26.000ms
+1790412444 duckdb: 3 of 43, q3, cold 163.562ms, hot 80.537ms, hot median 80.562ms, own cold 73.000ms, own hot 46.000ms, own hot median 46.000ms
+1790412445 duckdb: 4 of 43, q4, cold 163.086ms, hot 80.534ms, hot median 80.591ms, own cold 75.000ms, own hot 46.000ms, own hot median 50.000ms
+1790412446 duckdb: 5 of 43, q5, cold 307.188ms, hot 227.987ms, hot median 228.043ms, own cold 216.000ms, own hot 183.000ms, own hot median 183.000ms
+1790412447 duckdb: 6 of 43, q6, cold 445.646ms, hot 268.159ms, hot median 268.213ms, own cold 345.000ms, own hot 212.000ms, own hot median 217.000ms
+1790412447 duckdb: 7 of 43, q7, cold 102.472ms, hot 60.402ms, hot median 60.455ms, own cold 20.000ms, own hot 16.000ms, own hot median 16.000ms
+1790412448 duckdb: 8 of 43, q8, cold 102.831ms, hot 60.449ms, hot median 60.464ms, own cold 47.000ms, own hot 22.000ms, own hot median 22.000ms
+1790412449 duckdb: 9 of 43, q9, cold 365.844ms, hot 282.761ms, hot median 285.875ms, own cold 276.000ms, own hot 231.000ms, own hot median 232.000ms
+1790412451 duckdb: 10 of 43, q10, cold 485.721ms, hot 368.038ms, hot median 368.559ms, own cold 379.000ms, own hot 317.000ms, own hot median 317.000ms
+1790412451 duckdb: waiting, load is 2.62 on 16 hardware threads
+1790412481 duckdb: 11 of 43, q11, cold 224.200ms, hot 120.705ms, hot median 121.162ms, own cold 126.000ms, own hot 83.000ms, own hot median 85.000ms
+1790412482 duckdb: 12 of 43, q12, cold 243.476ms, hot 141.002ms, hot median 142.264ms, own cold 151.000ms, own hot 101.000ms, own hot median 106.000ms
+1790412483 duckdb: 13 of 43, q13, cold 392.008ms, hot 304.892ms, hot median 305.475ms, own cold 282.000ms, own hot 241.000ms, own hot median 244.000ms
+1790412486 duckdb: 14 of 43, q14, cold 693.536ms, hot 545.190ms, hot median 547.790ms, own cold 542.000ms, own hot 460.000ms, own hot median 463.000ms
+1790412487 duckdb: 15 of 43, q15, cold 432.078ms, hot 343.200ms, hot median 343.677ms, own cold 331.000ms, own hot 278.000ms, own hot median 278.000ms
+1790412488 duckdb: 16 of 43, q16, cold 345.255ms, hot 262.945ms, hot median 265.292ms, own cold 246.000ms, own hot 218.000ms, own hot median 220.000ms
+1790412491 duckdb: 17 of 43, q17, cold 792.832ms, hot 667.754ms, hot median 668.212ms, own cold 610.000ms, own hot 539.000ms, own hot median 543.000ms
+1790412491 duckdb: waiting, load is 2.70 on 16 hardware threads
+1790412523 duckdb: 18 of 43, q18, cold 611.547ms, hot 453.160ms, hot median 465.728ms, own cold 479.000ms, own hot 383.000ms, own hot median 385.000ms
+1790412528 duckdb: 19 of 43, q19, cold 1.394s, hot 1.193s, hot median 1.194s, own cold 1.140s, own hot 987.000ms, own hot median 991.000ms
+1790412529 duckdb: 20 of 43, q20, cold 143.578ms, hot 60.463ms, hot median 60.472ms, own cold 47.000ms, own hot 29.000ms, own hot median 31.000ms
+1790412531 duckdb: 21 of 43, q21, cold 826.216ms, hot 462.981ms, hot median 464.792ms, own cold 671.000ms, own hot 399.000ms, own hot median 402.000ms
+1790412531 duckdb: waiting, load is 2.74 on 16 hardware threads
+1790412564 duckdb: 22 of 43, q22, cold 970.040ms, hot 505.487ms, hot median 508.386ms, own cold 803.000ms, own hot 439.000ms, own hot median 440.000ms
+1790412566 duckdb: 23 of 43, q23, cold 906.568ms, hot 608.807ms, hot median 627.021ms, own cold 737.000ms, own hot 483.000ms, own hot median 488.000ms
+1790412567 duckdb: waiting, load is 2.81 on 16 hardware threads
+1790412597 duckdb: 24 of 43, q24, cold 224.290ms, hot 140.775ms, hot median 140.793ms, own cold 126.000ms, own hot 88.000ms, own hot median 88.000ms
+1790412598 duckdb: 25 of 43, q25, cold 142.829ms, hot 80.476ms, hot median 80.541ms, own cold 48.000ms, own hot 38.000ms, own hot median 38.000ms
+1790412598 duckdb: 26 of 43, q26, cold 223.813ms, hot 123.481ms, hot median 127.376ms, own cold 131.000ms, own hot 86.000ms, own hot median 88.000ms
+1790412599 duckdb: 27 of 43, q27, cold 143.109ms, hot 80.515ms, hot median 80.541ms, own cold 48.000ms, own hot 39.000ms, own hot median 39.000ms
+1790412601 duckdb: 28 of 43, q28, cold 785.894ms, hot 424.336ms, hot median 424.939ms, own cold 627.000ms, own hot 350.000ms, own hot median 352.000ms
+1790412601 duckdb: waiting, load is 2.84 on 16 hardware threads
+1790412646 duckdb: 29 of 43, q29, cold 3.840s, hot 3.640s, hot median 3.660s, own cold 3.639s, own hot 3.484s, own hot median 3.501s
+1790412646 duckdb: waiting, load is 3.87 on 16 hardware threads
+1790412676 duckdb: waiting, load is 2.34 on 16 hardware threads
+1790412706 duckdb: 30 of 43, q30, cold 164.513ms, hot 80.548ms, hot median 80.567ms, own cold 63.000ms, own hot 43.000ms, own hot median 44.000ms
+1790412708 duckdb: 31 of 43, q31, cold 447.134ms, hot 303.638ms, hot median 303.982ms, own cold 349.000ms, own hot 248.000ms, own hot median 249.000ms
+1790412710 duckdb: 32 of 43, q32, cold 708.701ms, hot 422.571ms, hot median 430.951ms, own cold 562.000ms, own hot 350.000ms, own hot median 351.000ms
+1790412716 duckdb: 33 of 43, q33, cold 1.755s, hot 1.520s, hot median 1.540s, own cold 1.443s, own hot 1.235s, own hot median 1.246s
+1790412716 duckdb: waiting, load is 2.69 on 16 hardware threads
+1790412752 duckdb: 34 of 43, q34, cold 1.801s, hot 1.376s, hot median 1.376s, own cold 1.501s, own hot 1.115s, own hot median 1.116s
+1790412752 duckdb: waiting, load is 2.78 on 16 hardware threads
+1790412789 duckdb: 35 of 43, q35, cold 1.880s, hot 1.484s, hot median 1.484s, own cold 1.551s, own hot 1.202s, own hot median 1.211s
+1790412789 duckdb: waiting, load is 2.88 on 16 hardware threads
+1790412820 duckdb: 36 of 43, q36, cold 307.869ms, hot 243.593ms, hot median 243.612ms, own cold 206.000ms, own hot 188.000ms, own hot median 190.000ms
+1790412820 duckdb: 37 of 43, q37, cold 122.920ms, hot 60.444ms, hot median 60.444ms, own cold 37.000ms, own hot 29.000ms, own hot median 30.000ms
+1790412820 duckdb: waiting, load is 2.15 on 16 hardware threads
+1790412850 duckdb: 38 of 43, q38, cold 103.306ms, hot 60.447ms, hot median 60.459ms, own cold 24.000ms, own hot 18.000ms, own hot median 19.000ms
+1790412851 duckdb: 39 of 43, q39, cold 122.701ms, hot 60.452ms, hot median 60.461ms, own cold 31.000ms, own hot 22.000ms, own hot median 22.000ms
+1790412851 duckdb: 40 of 43, q40, cold 122.837ms, hot 80.552ms, hot median 80.557ms, own cold 68.000ms, own hot 47.000ms, own hot median 48.000ms
+1790412851 duckdb: 41 of 43, q41, cold 102.673ms, hot 60.436ms, hot median 60.442ms, own cold 25.000ms, own hot 18.000ms, own hot median 19.000ms
+1790412852 duckdb: 42 of 43, q42, cold 82.769ms, hot 60.438ms, hot median 60.448ms, own cold 26.000ms, own hot 18.000ms, own hot median 19.000ms
+1790412852 duckdb: 43 of 43, q43, cold 102.604ms, hot 60.424ms, hot median 60.427ms, own cold 22.000ms, own hot 18.000ms, own hot median 18.000ms
+1790412852 suite    clickbench
+1790412852 engine   duckdb v2.0.0-dev84237 (Development Version) cc7e7bac7f
+1790412852 load     42.066s to build, 508.270s of CPU, 19.05 GiB on disk
+1790412852 on disk  is its own database file
+1790412852 writes   474.520s user, 33.750s system, 19.05 GiB written, 24.97 GiB peak resident, - accounted
+1790412852 
+1790412852 query  shape                         cold  hot median      IQR    hot cpu    peak RSS   cold read
+1790412852 q1     count                    103.712ms    40.351ms     0.1%   20.000ms   45.95 MiB   63.19 MiB
+1790412852 q2     filtered count           102.842ms    60.456ms    99.6%  110.000ms  128.21 MiB   98.10 MiB
+1790412852 q3     three aggregates         163.562ms    80.537ms     0.1%  360.000ms  248.98 MiB  259.68 MiB
+1790412852 q4     average                  163.086ms    80.534ms    25.0%  490.000ms  327.04 MiB  343.42 MiB
+1790412852 q5     count distinct, high card   307.188ms   227.987ms     0.0%     2.630s  790.78 MiB  340.45 MiB
+1790412852 q6     count distinct, strings   445.646ms   268.159ms     6.8%     3.190s    1.63 GiB  525.71 MiB
+1790412852 q7     min and max of a date    102.472ms    60.402ms     0.1%   40.000ms   61.93 MiB   77.14 MiB
+1790412852 q8     group by, low card       102.831ms    60.449ms     0.1%  140.000ms  131.23 MiB  111.66 MiB
+1790412852 q9     group by and count distinct   365.844ms   282.761ms     7.2%     3.390s    1.02 GiB  502.21 MiB
+1790412852 q10    group by, several aggregates   485.721ms   368.038ms     1.1%     4.730s    1.21 GiB  671.45 MiB
+1790412852 q11    group by a string and count distinct   224.200ms   120.705ms     2.5%  860.000ms  579.33 MiB  435.71 MiB
+1790412852 q12    group by two strings and count distinct   243.476ms   141.002ms    14.3%  990.000ms  647.21 MiB  500.70 MiB
+1790412852 q13    group by a string and top k   392.008ms   304.892ms     1.6%     3.670s    1.60 GiB  523.44 MiB
+1790412852 q14    group by a string and count distinct   693.536ms   545.190ms     0.6%     7.010s    2.49 GiB  786.72 MiB
+1790412852 q15    group by two columns and top k   432.078ms   343.200ms     0.4%     4.190s    1.73 GiB  620.21 MiB
+1790412852 q16    group by, very high card   345.255ms   262.945ms     2.2%     3.240s  977.33 MiB  340.20 MiB
+1790412852 q17    group by two, very high card   792.832ms   667.754ms     1.1%     7.820s    2.93 GiB  788.73 MiB
+1790412852 q18    group by two, no ordering   611.547ms   453.160ms     3.4%     5.730s    2.92 GiB  788.02 MiB
+1790412852 q19    group by with an extract      1.394s      1.193s     0.6%    14.700s    5.66 GiB    1.27 GiB
+1790412852 q20    point lookup             143.578ms    60.463ms     0.2%  180.000ms  246.22 MiB  259.41 MiB
+1790412852 q21    substring scan           826.216ms   462.981ms     5.1%     6.110s    2.96 GiB    3.00 GiB
+1790412852 q22    substring scan and group by   970.040ms   505.487ms     3.9%     6.600s    3.36 GiB    3.38 GiB
+1790412852 q23    two substring scans and group by   906.568ms   608.807ms     6.2%     6.840s    3.42 GiB    3.33 GiB
+1790412852 q24    select star and top k    224.290ms   140.775ms     0.2%  610.000ms  431.84 MiB  424.99 MiB
+1790412852 q25    top k by a date          142.829ms    80.476ms     0.2%  220.000ms  199.74 MiB  181.41 MiB
+1790412852 q26    top k by a string        223.813ms   123.481ms    13.7%     1.060s  556.42 MiB  523.91 MiB
+1790412852 q27    top k by two columns     143.109ms    80.515ms     0.1%  230.000ms  203.60 MiB  181.41 MiB
+1790412852 q28    group by with a string length   785.894ms   424.336ms     5.5%     5.100s    3.02 GiB    3.04 GiB
+1790412852 q29    group by a regular expression      3.840s      3.640s     0.7%    54.770s    4.71 GiB    2.32 GiB
+1790412852 q30    ninety sums over one column   164.513ms    80.548ms     0.0%  300.000ms  189.80 MiB  196.69 MiB
+1790412852 q31    group by two and several aggregates   447.134ms   303.638ms     1.5%     3.470s    1.59 GiB  981.21 MiB
+1790412852 q32    group by a high card pair   708.701ms   422.571ms     5.3%     4.970s    2.68 GiB    1.92 GiB
+1790412852 q33    group by a high card pair, unfiltered      1.755s      1.520s     3.6%    18.960s    8.45 GiB    1.47 GiB
+1790412852 q34    group by a long string      1.801s      1.376s     1.4%    16.640s    8.64 GiB    3.00 GiB
+1790412852 q35    group by a constant and a long string      1.880s      1.484s     0.8%    18.240s    8.86 GiB    2.99 GiB
+1790412852 q36    group by four expressions   307.869ms   243.593ms     0.3%     2.760s  871.43 MiB  255.96 MiB
+1790412852 q37    date range and group by a URL   122.920ms    60.444ms     0.0%  170.000ms  207.12 MiB  104.46 MiB
+1790412852 q38    date range and group by a title   103.306ms    60.447ms     0.0%   80.000ms   95.91 MiB   83.46 MiB
+1790412852 q39    date range, group by and offset   122.701ms    60.452ms     0.1%  110.000ms  115.03 MiB  104.68 MiB
+1790412852 q40    date range, a case and a wide group by   122.837ms    80.552ms     0.0%  300.000ms  358.26 MiB   92.21 MiB
+1790412852 q41    date range with an IN and a hash   102.673ms    60.436ms     0.1%   80.000ms   93.09 MiB   95.46 MiB
+1790412852 q42    date range and a deep offset    82.769ms    60.438ms     0.0%   80.000ms   85.73 MiB   47.05 MiB
+1790412852 q43    minute buckets over a date range   102.604ms    60.424ms     0.1%   70.000ms   78.20 MiB   84.21 MiB
+1790412852 
+1790412852 total    23.502s cold, 17.562s hot, over 43 queries
+1790412852 cpu      211.260s over the hot runs
+1790412852 peak     8.86 GiB
+1790412852 read     187.51 MiB at the block layer during the hot runs, so hot was not warm
+1790412852 
+1790412852 This is not a publishable number, because:
+1790412852   no machine this project owns is a c6a.4xlarge, 16 vCPU, 32 GiB, gp2, per rule seven
+1790412852   duckdb is a development build, v2.0.0-dev84237 (Development Version) cc7e7bac7f, and not a DuckDB release
+1790412852 
+1790412852 Hot here means page cache warm and not buffer pool warm, because every run is
+1790412852 a fresh process so that no query's number depends on the one before it.
+1790412852 
+1790412852 suite    clickbench
+1790412852 data     13.76 GiB of Parquet in 1 table
+1790412852 timeout  600s per query, and no query reached it
+1790412852 engine   duckdb v2.0.0-dev84237 (Development Version) cc7e7bac7f
+1790412852 
+1790412852 query         shape                                        duckdb
+1790412852 q1            count                                      40.351ms
+1790412852 q2            filtered count                             60.456ms
+1790412852 q3            three aggregates                           80.537ms
+1790412852 q4            average                                    80.534ms
+1790412852 q5            count distinct, high card                 227.987ms
+1790412852 q6            count distinct, strings                   268.159ms
+1790412852 q7            min and max of a date                      60.402ms
+1790412852 q8            group by, low card                         60.449ms
+1790412852 q9            group by and count distinct               282.761ms
+1790412852 q10           group by, several aggregates              368.038ms
+1790412852 q11           group by a string and count distinct      120.705ms
+1790412852 q12           group by two strings and count distinct   141.002ms
+1790412852 q13           group by a string and top k               304.892ms
+1790412852 q14           group by a string and count distinct      545.190ms
+1790412852 q15           group by two columns and top k            343.200ms
+1790412852 q16           group by, very high card                  262.945ms
+1790412852 q17           group by two, very high card              667.754ms
+1790412852 q18           group by two, no ordering                 453.160ms
+1790412852 q19           group by with an extract                     1.193s
+1790412852 q20           point lookup                               60.463ms
+1790412852 q21           substring scan                            462.981ms
+1790412852 q22           substring scan and group by               505.487ms
+1790412852 q23           two substring scans and group by          608.807ms
+1790412852 q24           select star and top k                     140.775ms
+1790412852 q25           top k by a date                            80.476ms
+1790412852 q26           top k by a string                         123.481ms
+1790412852 q27           top k by two columns                       80.515ms
+1790412852 q28           group by with a string length             424.336ms
+1790412852 q29           group by a regular expression                3.640s
+1790412852 q30           ninety sums over one column                80.548ms
+1790412852 q31           group by two and several aggregates       303.638ms
+1790412852 q32           group by a high card pair                 422.571ms
+1790412852 q33           group by a high card pair, unfiltered        1.520s
+1790412852 q34           group by a long string                       1.376s
+1790412852 q35           group by a constant and a long string        1.484s
+1790412852 q36           group by four expressions                 243.593ms
+1790412852 q37           date range and group by a URL              60.444ms
+1790412852 q38           date range and group by a title            60.447ms
+1790412852 q39           date range, group by and offset            60.452ms
+1790412852 q40           date range, a case and a wide group by     80.552ms
+1790412852 q41           date range with an IN and a hash           60.436ms
+1790412852 q42           date range and a deep offset               60.438ms
+1790412852 q43           minute buckets over a date range           60.424ms
+1790412852 
+1790412852 total hot                                                 17.562s
+1790412852 worst IQR                                                   99.6%
+1790412852 shape spread                                               90.69x
+1790412852 total cold                                                23.502s
+1790412852 query time                                                14.381s
+1790412852 hot cpu                                                  211.260s
+1790412852 peak RSS                                                 8.86 GiB
+1790412852 load                                                      42.066s
+1790412852 on disk                                                 19.05 GiB
+1790412852 storage                                                own format
+1790412852 vs duckdb                                                   1.00x
+1790412852 duckdb-pinned not asked for did not run: left out of this run by --engines
+1790412852 clickhouse-local not asked for did not run: left out of this run by --engines
+1790412852 datafusion not asked for did not run: left out of this run by --engines
+1790412852 polars not asked for did not run: left out of this run by --engines
+1790412852 clickhouse-server not asked for did not run: left out of this run by --engines
+1790412852 rudb not asked for did not run: left out of this run by --engines
+1790412852 
+1790412852 The ratio is on the query time row, which is what each engine says the
+1790412852 queries cost it and what the public board publishes. The wall clock row
+1790412852 above it also holds a process start per query, which is this harness and
+1790412852 not the engine, and on a small sample it is most of what separates them.
+1790412852 
+1790412852 Hot here means the tries after the first, with every cache as the first
+1790412852 try left it. Servers were restarted before each query's first try, so
+1790412852 nothing carries from one query to the next.
+1790412852 
+1790412852 wrote reports/2026-09-26/run-clickbench-gamingpc-wsl.md
+1790412852 wrote reports/2026-09-26/run-clickbench-gamingpc-wsl.manifest.txt
