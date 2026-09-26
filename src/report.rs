@@ -1030,20 +1030,32 @@ fn measure(
     let Some((cold, rest)) = costs.split_first() else {
         return (QueryResult::that_failed(query, "nothing ran".to_owned()), metadata);
     };
+    let reported = said_runs(&said, style);
     if progress() {
+        // The hot median and the engine's own figures go on the line as well, so a run read from
+        // its log alone can be summarized by the median of the hot tries rather than the best.
+        let own = reported.as_ref().map_or_else(String::new, |own| {
+            format!(
+                ", own cold {}, own hot {}, own hot median {}",
+                show(own.cold),
+                show(own.hot.headline()),
+                show(own.hot.median_of())
+            )
+        });
         eprintln!(
-            "{who}: {} of {of}, {}, cold {}, hot {}",
+            "{who}: {} of {of}, {}, cold {}, hot {}, hot median {}{own}",
             at + 1,
             query.name,
             show(runs.cold),
-            show(runs.hot.headline())
+            show(runs.hot.headline()),
+            show(runs.hot.median_of())
         );
     }
     let result = QueryResult {
         name: query.name.to_owned(),
         shape: query.shape.to_owned(),
         runs,
-        reported: said_runs(&said, style),
+        reported,
         cold: cold.clone(),
         hot: together(rest),
         answer,
