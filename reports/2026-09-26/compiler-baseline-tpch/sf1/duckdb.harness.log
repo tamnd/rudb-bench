@@ -1,0 +1,158 @@
+1790415345 lineitem    /home/gopher/c0-gpc/data/tpch/sf1/lineitem.parquet
+1790415345 orders      /home/gopher/c0-gpc/data/tpch/sf1/orders.parquet
+1790415345 customer    /home/gopher/c0-gpc/data/tpch/sf1/customer.parquet
+1790415345 part        /home/gopher/c0-gpc/data/tpch/sf1/part.parquet
+1790415345 partsupp    /home/gopher/c0-gpc/data/tpch/sf1/partsupp.parquet
+1790415345 supplier    /home/gopher/c0-gpc/data/tpch/sf1/supplier.parquet
+1790415345 nation      /home/gopher/c0-gpc/data/tpch/sf1/nation.parquet
+1790415345 region      /home/gopher/c0-gpc/data/tpch/sf1/region.parquet
+1790415345 
+1790415345 manifest    /home/gopher/c0-gpc/data/tpch/sf1/lineitem.parquet.manifest.txt
+1790415345 sha256      a66b99aafb9882125a1a48e26a8dfdc881c31a0b48bde529e766f0970a2d3704
+1790415345 manifest    /home/gopher/c0-gpc/data/tpch/sf1/orders.parquet.manifest.txt
+1790415345 sha256      33f9e7e14255888e66d65e437cc65f6fff0e3f9416edf3c49525d4a686259469
+1790415345 manifest    /home/gopher/c0-gpc/data/tpch/sf1/customer.parquet.manifest.txt
+1790415345 sha256      4478dabc6ae820bdedb1274651c92012795aa98e75f23fc5c58f414625d05a25
+1790415345 manifest    /home/gopher/c0-gpc/data/tpch/sf1/part.parquet.manifest.txt
+1790415345 sha256      91189368144f954cc593383bfb1d71ccb236b38322504062e2453295edc04806
+1790415345 manifest    /home/gopher/c0-gpc/data/tpch/sf1/partsupp.parquet.manifest.txt
+1790415345 sha256      b8155f44b46d1e8f2e5ee80ed3df9e0ba23b486f0a27c968d7ca6895d7ed5cb4
+1790415345 manifest    /home/gopher/c0-gpc/data/tpch/sf1/supplier.parquet.manifest.txt
+1790415345 sha256      0febe07e859b36473b0904328438f09604c5d1c237112d3983b1853ffc05e177
+1790415345 manifest    /home/gopher/c0-gpc/data/tpch/sf1/nation.parquet.manifest.txt
+1790415345 sha256      2d3f229e3fa24d721df8ebf61ed05ba2b9b0a744808c857f4cad9545a1b365c8
+1790415345 manifest    /home/gopher/c0-gpc/data/tpch/sf1/region.parquet.manifest.txt
+1790415345 sha256      483f5f6a11e6bb13a3b3b3fb899df60a6418d049b75de07b15b3281867427971
+1790415345 duckdb: loading tpch
+1790415347 duckdb: 1 of 22, q01, cold 124.463ms, hot 60.498ms, hot median 80.642ms, own cold 37.000ms, own hot 35.000ms, own hot median 35.000ms
+1790415347 duckdb: 2 of 22, q02, cold 103.080ms, hot 40.465ms, hot median 40.474ms, own cold 13.000ms, own hot 10.000ms, own hot median 10.000ms
+1790415348 duckdb: 3 of 22, q03, cold 123.644ms, hot 60.531ms, hot median 60.548ms, own cold 26.000ms, own hot 23.000ms, own hot median 23.000ms
+1790415348 duckdb: 4 of 22, q04, cold 62.869ms, hot 60.498ms, hot median 60.550ms, own cold 25.000ms, own hot 17.000ms, own hot median 17.000ms
+1790415348 duckdb: 5 of 22, q05, cold 103.111ms, hot 60.504ms, hot median 60.574ms, own cold 27.000ms, own hot 21.000ms, own hot median 21.000ms
+1790415349 duckdb: 6 of 22, q06, cold 103.064ms, hot 40.409ms, hot median 40.416ms, own cold 14.000ms, own hot 9.000ms, own hot median 11.000ms
+1790415349 duckdb: 7 of 22, q07, cold 82.955ms, hot 80.610ms, hot median 80.650ms, own cold 44.000ms, own hot 34.000ms, own hot median 35.000ms
+1790415349 duckdb: 8 of 22, q08, cold 123.108ms, hot 80.619ms, hot median 80.631ms, own cold 35.000ms, own hot 33.000ms, own hot median 33.000ms
+1790415350 duckdb: 9 of 22, q09, cold 143.099ms, hot 80.685ms, hot median 80.696ms, own cold 57.000ms, own hot 42.000ms, own hot median 42.000ms
+1790415350 duckdb: 10 of 22, q10, cold 143.305ms, hot 80.644ms, hot median 80.651ms, own cold 54.000ms, own hot 41.000ms, own hot median 43.000ms
+1790415350 duckdb: 11 of 22, q11, cold 102.871ms, hot 40.429ms, hot median 40.515ms, own cold 10.000ms, own hot 10.000ms, own hot median 11.000ms
+1790415351 duckdb: 12 of 22, q12, cold 102.878ms, hot 60.514ms, hot median 60.551ms, own cold 24.000ms, own hot 22.000ms, own hot median 23.000ms
+1790415351 duckdb: 13 of 22, q13, cold 123.116ms, hot 80.668ms, hot median 80.699ms, own cold 37.000ms, own hot 36.000ms, own hot median 37.000ms
+1790415351 duckdb: 14 of 22, q14, cold 123.544ms, hot 60.569ms, hot median 60.578ms, own cold 26.000ms, own hot 20.000ms, own hot median 21.000ms
+1790415352 duckdb: 15 of 22, q15, cold 102.936ms, hot 60.485ms, hot median 60.529ms, own cold 26.000ms, own hot 25.000ms, own hot median 25.000ms
+1790415352 duckdb: 16 of 22, q16, cold 123.974ms, hot 61.086ms, hot median 61.139ms, own cold 28.000ms, own hot 28.000ms, own hot median 29.000ms
+1790415352 duckdb: 17 of 22, q17, cold 103.168ms, hot 60.511ms, hot median 60.545ms, own cold 21.000ms, own hot 18.000ms, own hot median 18.000ms
+1790415353 duckdb: 18 of 22, q18, cold 123.223ms, hot 60.560ms, hot median 60.590ms, own cold 35.000ms, own hot 28.000ms, own hot median 28.000ms
+1790415353 duckdb: 19 of 22, q19, cold 123.172ms, hot 60.558ms, hot median 60.621ms, own cold 36.000ms, own hot 25.000ms, own hot median 25.000ms
+1790415353 duckdb: 20 of 22, q20, cold 123.698ms, hot 60.566ms, hot median 60.579ms, own cold 28.000ms, own hot 22.000ms, own hot median 22.000ms
+1790415354 duckdb: 21 of 22, q21, cold 122.919ms, hot 62.844ms, hot median 63.136ms, own cold 36.000ms, own hot 28.000ms, own hot median 29.000ms
+1790415354 duckdb: 22 of 22, q22, cold 103.086ms, hot 60.506ms, hot median 60.544ms, own cold 27.000ms, own hot 22.000ms, own hot median 22.000ms
+1790415354 suite    tpch
+1790415354 engine   duckdb v2.0.0-dev84237 (Development Version) cc7e7bac7f
+1790415354 load     1.271s to build, 8.530s of CPU, 268.76 MiB on disk
+1790415354 on disk  is its own database file
+1790415354 writes   7.580s user, 950.000ms system, 270.46 MiB written, 1.31 GiB peak resident, - accounted
+1790415354 corpus   duckdb-tpch SF1, corpus 5739c03f28043b03, written 2026-09-26
+1790415354 
+1790415354 query  shape                         cold  hot median      IQR    hot cpu    peak RSS   cold read
+1790415354 q01    pricing summary report   124.463ms    60.498ms    25.0%  170.000ms  111.93 MiB  127.84 MiB
+1790415354 q02    minimum cost supplier    103.080ms    40.465ms     0.1%   40.000ms   64.83 MiB   67.53 MiB
+1790415354 q03    shipping priority        123.644ms    60.531ms     0.1%  120.000ms  131.45 MiB  121.53 MiB
+1790415354 q04    order priority checking    62.869ms    60.498ms     0.1%  100.000ms  100.93 MiB   67.50 MiB
+1790415354 q05    local supplier volume    103.111ms    60.504ms     0.2%  130.000ms  139.62 MiB  129.77 MiB
+1790415354 q06    forecasting revenue change   103.064ms    40.409ms     0.1%   80.000ms  104.68 MiB  132.74 MiB
+1790415354 q07    volume shipping           82.955ms    80.610ms     0.1%  170.000ms  148.79 MiB  106.72 MiB
+1790415354 q08    national market share    123.108ms    80.619ms     0.1%  150.000ms  146.63 MiB  172.44 MiB
+1790415354 q09    product type profit measure   143.099ms    80.685ms     0.0%  330.000ms  224.12 MiB  193.11 MiB
+1790415354 q10    returned item reporting   143.305ms    80.644ms     0.3%  210.000ms  193.43 MiB  149.09 MiB
+1790415354 q11    important stock identification   102.871ms    40.429ms     0.3%   50.000ms   63.56 MiB   66.78 MiB
+1790415354 q12    shipping modes and order priority   102.878ms    60.514ms     0.1%  130.000ms  118.85 MiB  122.52 MiB
+1790415354 q13    customer distribution    123.116ms    80.668ms     0.0%  270.000ms  163.50 MiB  107.02 MiB
+1790415354 q14    promotion effect         123.544ms    60.569ms     0.0%  100.000ms  134.46 MiB  133.21 MiB
+1790415354 q15    top supplier             102.936ms    60.485ms     0.1%  110.000ms  124.84 MiB  128.09 MiB
+1790415354 q16    parts supplier relationship   123.974ms    61.086ms     0.5%  110.000ms  104.98 MiB   64.03 MiB
+1790415354 q17    small quantity order revenue   103.168ms    60.511ms     0.1%  120.000ms  121.51 MiB  125.45 MiB
+1790415354 q18    large volume customer    123.223ms    60.560ms     6.0%  280.000ms  204.74 MiB  114.38 MiB
+1790415354 q19    discounted revenue       123.172ms    60.558ms     0.2%  140.000ms  142.24 MiB  210.00 MiB
+1790415354 q20    potential part promotion   123.698ms    60.566ms     0.1%  130.000ms  134.26 MiB  135.43 MiB
+1790415354 q21    suppliers who kept orders waiting   122.919ms    62.844ms     1.0%  190.000ms  130.05 MiB  122.47 MiB
+1790415354 q22    global sales opportunity   103.086ms    60.506ms     0.1%   70.000ms   75.07 MiB   69.97 MiB
+1790415354 
+1790415354 total    2.491s cold, 1.375s hot, over 22 queries
+1790415354 cpu      3.200s over the hot runs
+1790415354 peak     224.12 MiB
+1790415354 
+1790415354 This is not a publishable number, because:
+1790415354   no machine this project owns is a c6a.4xlarge, 16 vCPU, 32 GiB, gp2, per rule seven
+1790415354   duckdb is a development build, v2.0.0-dev84237 (Development Version) cc7e7bac7f, and not a DuckDB release
+1790415354   every query here ran within 2.00x of every other one, so most of what was timed is whatever they have in common rather than the queries
+1790415354 
+1790415354 Hot here means page cache warm and not buffer pool warm, because every run is
+1790415354 a fresh process so that no query's number depends on the one before it.
+1790415354 
+1790415354 suite    tpch
+1790415354 data     310.61 MiB of Parquet in 8 tables
+1790415354 corpus   duckdb-tpch SF1, corpus 5739c03f28043b03, written 2026-09-26
+1790415354 timeout  600s per query, and no query reached it
+1790415354 engine   duckdb v2.0.0-dev84237 (Development Version) cc7e7bac7f
+1790415354 
+1790415354 query         shape                                  duckdb
+1790415354 q01           pricing summary report               60.498ms
+1790415354 q02           minimum cost supplier                40.465ms
+1790415354 q03           shipping priority                    60.531ms
+1790415354 q04           order priority checking              60.498ms
+1790415354 q05           local supplier volume                60.504ms
+1790415354 q06           forecasting revenue change           40.409ms
+1790415354 q07           volume shipping                      80.610ms
+1790415354 q08           national market share                80.619ms
+1790415354 q09           product type profit measure          80.685ms
+1790415354 q10           returned item reporting              80.644ms
+1790415354 q11           important stock identification       40.429ms
+1790415354 q12           shipping modes and order priority    60.514ms
+1790415354 q13           customer distribution                80.668ms
+1790415354 q14           promotion effect                     60.569ms
+1790415354 q15           top supplier                         60.485ms
+1790415354 q16           parts supplier relationship          61.086ms
+1790415354 q17           small quantity order revenue         60.511ms
+1790415354 q18           large volume customer                60.560ms
+1790415354 q19           discounted revenue                   60.558ms
+1790415354 q20           potential part promotion             60.566ms
+1790415354 q21           suppliers who kept orders waiting    62.844ms
+1790415354 q22           global sales opportunity             60.506ms
+1790415354 
+1790415354 total hot                                            1.375s
+1790415354 worst IQR                                             25.0%
+1790415354 shape spread                                          2.00x
+1790415354 total cold                                           2.491s
+1790415354 query time                                        549.000ms
+1790415354 hot cpu                                              3.200s
+1790415354 peak RSS                                         224.12 MiB
+1790415354 load                                                 1.271s
+1790415354 on disk                                          268.76 MiB
+1790415354 storage                                          own format
+1790415354 vs duckdb                                             1.00x
+1790415354 duckdb-pinned not asked for did not run: left out of this run by --engines
+1790415354 clickhouse-local not asked for did not run: left out of this run by --engines
+1790415354 datafusion not asked for did not run: left out of this run by --engines
+1790415354 polars not asked for did not run: left out of this run by --engines
+1790415354 clickhouse-server not asked for did not run: left out of this run by --engines
+1790415354 rudb not asked for did not run: left out of this run by --engines
+1790415354 
+1790415354 The ratio is on the query time row, which is what each engine says the
+1790415354 queries cost it and what the public board publishes. The wall clock row
+1790415354 above it also holds a process start per query, which is this harness and
+1790415354 not the engine, and on a small sample it is most of what separates them.
+1790415354 
+1790415354 These ran every query at about the same speed:
+1790415354   duckdb ran every query within 2.00x of every other one, and this suite spreads over 6x on an engine it is measuring
+1790415354 A column that flat is not a column about the queries. Whatever every query
+1790415354 in it has in common is larger than the difference between a count and a
+1790415354 self join, and in this harness the thing they have in common is the process
+1790415354 that gets started to ask. Read those numbers as an upper bound on the
+1790415354 engine and not as a measurement of it.
+1790415354 
+1790415354 Hot here means the tries after the first, with every cache as the first
+1790415354 try left it. Servers were restarted before each query's first try, so
+1790415354 nothing carries from one query to the next.
+1790415354 
+1790415354 wrote reports/2026-09-26/run-tpch-gamingpc-wsl.md
+1790415354 wrote reports/2026-09-26/run-tpch-gamingpc-wsl.manifest.txt

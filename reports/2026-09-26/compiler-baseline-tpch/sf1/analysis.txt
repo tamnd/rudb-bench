@@ -1,0 +1,89 @@
+
+### harness wall, median of the 3 hot tries
+
+| query | duckdb | rudb | best rival | rudb / best rival |
+| --- | ---: | ---: | ---: | ---: |
+| q01 | 80.6 ms | 20.4 ms | duckdb | 0.25x |
+| q02 | 40.5 ms | 20.6 ms | duckdb | 0.51x |
+| q03 | 60.5 ms | 20.5 ms | duckdb | 0.34x |
+| q04 | 60.5 ms | 20.5 ms | duckdb | 0.34x |
+| q05 | 60.6 ms | 20.6 ms | duckdb | 0.34x |
+| q06 | 40.4 ms | 20.5 ms | duckdb | 0.51x |
+| q07 | 80.7 ms | 20.5 ms | duckdb | 0.25x |
+| q08 | 80.6 ms | 20.5 ms | duckdb | 0.25x |
+| q09 | 80.7 ms | 40.6 ms | duckdb | 0.50x |
+| q10 | 80.7 ms | 20.4 ms | duckdb | 0.25x |
+| q11 | 40.5 ms | 20.6 ms | duckdb | 0.51x |
+| q12 | 60.6 ms | 20.4 ms | duckdb | 0.34x |
+| q13 | 80.7 ms | 20.4 ms | duckdb | 0.25x |
+| q14 | 60.6 ms | 20.5 ms | duckdb | 0.34x |
+| q15 | 60.5 ms | 20.5 ms | duckdb | 0.34x |
+| q16 | 61.1 ms | 41.6 ms | duckdb | 0.68x |
+| q17 | 60.5 ms | 20.5 ms | duckdb | 0.34x |
+| q18 | 60.6 ms | 20.5 ms | duckdb | 0.34x |
+| q19 | 60.6 ms | 20.4 ms | duckdb | 0.34x |
+| q20 | 60.6 ms | 20.6 ms | duckdb | 0.34x |
+| q21 | 63.1 ms | 40.5 ms | duckdb | 0.64x |
+| q22 | 60.5 ms | 20.5 ms | duckdb | 0.34x |
+| total | 1.40 s | 512.1 ms | | |
+
+rudb / best rival: geomean 0.36x, best 0.25x, worst 0.68x, at or under 0.1x on 0 of 22, under 1x on 22
+
+### engine clock, median of the 3 hot tries
+
+| query | duckdb | rudb | best rival | rudb / best rival |
+| --- | ---: | ---: | ---: | ---: |
+| q01 | 35.0 ms | 10.5 ms | duckdb | 0.30x |
+| q02 | 10.0 ms | 5.2 ms | duckdb | 0.52x |
+| q03 | 23.0 ms | 10.7 ms | duckdb | 0.47x |
+| q04 | 17.0 ms | 7.2 ms | duckdb | 0.42x |
+| q05 | 21.0 ms | 12.2 ms | duckdb | 0.58x |
+| q06 | 11.0 ms | 3.1 ms | duckdb | 0.29x |
+| q07 | 35.0 ms | 9.8 ms | duckdb | 0.28x |
+| q08 | 33.0 ms | 8.9 ms | duckdb | 0.27x |
+| q09 | 42.0 ms | 21.1 ms | duckdb | 0.50x |
+| q10 | 43.0 ms | 13.5 ms | duckdb | 0.31x |
+| q11 | 11.0 ms | 5.0 ms | duckdb | 0.45x |
+| q12 | 23.0 ms | 13.7 ms | duckdb | 0.59x |
+| q13 | 37.0 ms | 12.9 ms | duckdb | 0.35x |
+| q14 | 21.0 ms | 5.5 ms | duckdb | 0.26x |
+| q15 | 25.0 ms | 5.8 ms | duckdb | 0.23x |
+| q16 | 29.0 ms | 19.7 ms | duckdb | 0.68x |
+| q17 | 18.0 ms | 6.3 ms | duckdb | 0.35x |
+| q18 | 28.0 ms | 14.0 ms | duckdb | 0.50x |
+| q19 | 25.0 ms | 4.9 ms | duckdb | 0.19x |
+| q20 | 22.0 ms | 8.7 ms | duckdb | 0.39x |
+| q21 | 29.0 ms | 33.4 ms | duckdb | 1.15x |
+| q22 | 22.0 ms | 5.9 ms | duckdb | 0.27x |
+| total | 560.0 ms | 237.9 ms | | |
+
+rudb / best rival: geomean 0.39x, best 0.19x, worst 1.15x, at or under 0.1x on 0 of 22, under 1x on 21
+
+### cold, and load at start / max during each query
+
+| query | duckdb cold | rudb cold | duckdb load | rudb load |
+| --- | ---: | ---: | ---: | ---: |
+| q01 | 124.5 ms | 63.4 ms | 0.37/0.37 | 0.37/0.37 |
+| q02 | 103.1 ms | 42.9 ms | 0.37/0.37 | 0.37/0.37 |
+| q03 | 123.6 ms | 83.6 ms | 0.37/0.37 | 0.37/0.37 |
+| q04 | 62.9 ms | 63.2 ms | 0.37/0.37 | 0.37/0.37 |
+| q05 | 103.1 ms | 82.8 ms | 0.37/0.37 | 0.37/0.37 |
+| q06 | 103.1 ms | 42.7 ms | 0.37/0.37 | 0.37/0.37 |
+| q07 | 83.0 ms | 83.7 ms | 0.37/0.37 | 0.37/0.37 |
+| q08 | 123.1 ms | 83.3 ms | 0.37/0.37 | 0.37/0.37 |
+| q09 | 143.1 ms | 103.0 ms | 0.37/0.37 | 0.37/0.37 |
+| q10 | 143.3 ms | 82.8 ms | 0.37/0.37 | 0.37/0.37 |
+| q11 | 102.9 ms | 42.8 ms | 0.37/0.37 | 0.37/0.37 |
+| q12 | 102.9 ms | 83.1 ms | 0.37/0.37 | 0.37/0.37 |
+| q13 | 123.1 ms | 42.9 ms | 0.37/0.37 | 0.37/0.37 |
+| q14 | 123.5 ms | 63.0 ms | 0.37/0.37 | 0.37/0.37 |
+| q15 | 102.9 ms | 63.2 ms | 0.37/0.37 | 0.37/0.37 |
+| q16 | 124.0 ms | 64.1 ms | 0.37/0.37 | 0.37/0.37 |
+| q17 | 103.2 ms | 62.8 ms | 0.37/0.37 | 0.37/0.37 |
+| q18 | 123.2 ms | 62.8 ms | 0.37/0.37 | 0.37/0.37 |
+| q19 | 123.2 ms | 62.7 ms | 0.37/0.37 | 0.37/0.37 |
+| q20 | 123.7 ms | 84.7 ms | 0.37/0.37 | 0.37/0.37 |
+| q21 | 122.9 ms | 104.3 ms | 0.37/0.37 | 0.37/0.37 |
+| q22 | 103.1 ms | 42.9 ms | 0.37/0.37 | 0.37/0.37 |
+duckdb: 22 queries, cold total 2.5s, load at start median 0.37 max 0.37, max during 0.37
+rudb: 22 queries, cold total 1.5s, load at start median 0.37 max 0.37, max during 0.37

@@ -1,0 +1,89 @@
+
+### harness wall, median of the 3 hot tries
+
+| query | duckdb | rudb | best rival | rudb / best rival |
+| --- | ---: | ---: | ---: | ---: |
+| q01 | 161.2 ms | 84.0 ms | duckdb | 0.52x |
+| q02 | 80.7 ms | 40.7 ms | duckdb | 0.50x |
+| q03 | 162.2 ms | 102.4 ms | duckdb | 0.63x |
+| q04 | 161.5 ms | 104.0 ms | duckdb | 0.64x |
+| q05 | 181.1 ms | 104.1 ms | duckdb | 0.57x |
+| q06 | 121.1 ms | 40.7 ms | duckdb | 0.34x |
+| q07 | 181.4 ms | 82.8 ms | duckdb | 0.46x |
+| q08 | 182.1 ms | 104.4 ms | duckdb | 0.57x |
+| q09 | 365.7 ms | 244.2 ms | duckdb | 0.67x |
+| q10 | 243.2 ms | 123.9 ms | duckdb | 0.51x |
+| q11 | 60.5 ms | 40.6 ms | duckdb | 0.67x |
+| q12 | 181.1 ms | 125.1 ms | duckdb | 0.69x |
+| q13 | 245.2 ms | 165.2 ms | duckdb | 0.67x |
+| q14 | 161.4 ms | 60.9 ms | duckdb | 0.38x |
+| q15 | 160.9 ms | 60.7 ms | duckdb | 0.38x |
+| q16 | 122.7 ms | 62.6 ms | duckdb | 0.51x |
+| q17 | 141.4 ms | 62.0 ms | duckdb | 0.44x |
+| q18 | 263.7 ms | 143.1 ms | duckdb | 0.54x |
+| q19 | 161.1 ms | 43.9 ms | duckdb | 0.27x |
+| q20 | 162.1 ms | 81.0 ms | duckdb | 0.50x |
+| q21 | 222.9 ms | 305.2 ms | duckdb | 1.37x |
+| q22 | 80.9 ms | 40.7 ms | duckdb | 0.50x |
+| total | 3.80 s | 2.22 s | | |
+
+rudb / best rival: geomean 0.53x, best 0.27x, worst 1.37x, at or under 0.1x on 0 of 22, under 1x on 21
+
+### engine clock, median of the 3 hot tries
+
+| query | duckdb | rudb | best rival | rudb / best rival |
+| --- | ---: | ---: | ---: | ---: |
+| q01 | 118.0 ms | 71.1 ms | duckdb | 0.60x |
+| q02 | 35.0 ms | 16.8 ms | duckdb | 0.48x |
+| q03 | 109.0 ms | 84.7 ms | duckdb | 0.78x |
+| q04 | 115.0 ms | 73.6 ms | duckdb | 0.64x |
+| q05 | 133.0 ms | 78.3 ms | duckdb | 0.59x |
+| q06 | 73.0 ms | 16.2 ms | duckdb | 0.22x |
+| q07 | 137.0 ms | 58.1 ms | duckdb | 0.42x |
+| q08 | 136.0 ms | 73.4 ms | duckdb | 0.54x |
+| q09 | 305.0 ms | 209.3 ms | duckdb | 0.69x |
+| q10 | 195.0 ms | 95.1 ms | duckdb | 0.49x |
+| q11 | 28.0 ms | 19.1 ms | duckdb | 0.68x |
+| q12 | 138.0 ms | 96.9 ms | duckdb | 0.70x |
+| q13 | 198.0 ms | 152.4 ms | duckdb | 0.77x |
+| q14 | 105.0 ms | 37.3 ms | duckdb | 0.36x |
+| q15 | 106.0 ms | 32.7 ms | duckdb | 0.31x |
+| q16 | 78.0 ms | 50.4 ms | duckdb | 0.65x |
+| q17 | 101.0 ms | 35.5 ms | duckdb | 0.35x |
+| q18 | 209.0 ms | 121.1 ms | duckdb | 0.58x |
+| q19 | 118.0 ms | 27.8 ms | duckdb | 0.24x |
+| q20 | 109.0 ms | 57.9 ms | duckdb | 0.53x |
+| q21 | 171.0 ms | 280.2 ms | duckdb | 1.64x |
+| q22 | 47.0 ms | 30.3 ms | duckdb | 0.64x |
+| total | 2.76 s | 1.72 s | | |
+
+rudb / best rival: geomean 0.53x, best 0.22x, worst 1.64x, at or under 0.1x on 0 of 22, under 1x on 21
+
+### cold, and load at start / max during each query
+
+| query | duckdb cold | rudb cold | duckdb load | rudb load |
+| --- | ---: | ---: | ---: | ---: |
+| q01 | 245.8 ms | 307.9 ms | 2.05/2.05 | 2.81/2.81 |
+| q02 | 123.2 ms | 104.4 ms | 1.24/1.24 | 2.99/2.99 |
+| q03 | 284.1 ms | 446.1 ms | 1.24/1.24 | 2.99/2.99 |
+| q04 | 225.5 ms | 385.6 ms | 1.24/1.24 | 2.99/2.99 |
+| q05 | 263.9 ms | 425.6 ms | 1.24/1.24 | 2.99/2.99 |
+| q06 | 203.5 ms | 285.1 ms | 1.24/1.24 | 2.99/2.99 |
+| q07 | 264.8 ms | 405.1 ms | 1.24/1.24 | 2.99/2.99 |
+| q08 | 304.1 ms | 425.0 ms | 1.80/1.80 | 2.99/2.99 |
+| q09 | 488.8 ms | 527.0 ms | 1.80/1.80 | 2.99/2.99 |
+| q10 | 344.8 ms | 445.5 ms | 1.80/1.80 | 1.81/1.81 |
+| q11 | 123.3 ms | 103.6 ms | 1.80/1.80 | 1.81/1.81 |
+| q12 | 243.5 ms | 404.5 ms | 1.80/1.80 | 1.81/1.81 |
+| q13 | 327.6 ms | 228.0 ms | 1.80/1.80 | 1.81/1.81 |
+| q14 | 244.9 ms | 324.1 ms | 1.80/1.80 | 1.81/1.81 |
+| q15 | 224.0 ms | 304.9 ms | 1.80/1.80 | 1.81/2.56 |
+| q16 | 165.7 ms | 125.8 ms | 1.80/1.80 | 1.83/1.83 |
+| q17 | 225.5 ms | 364.3 ms | 1.80/1.80 | 1.83/1.83 |
+| q18 | 348.2 ms | 468.9 ms | 1.80/1.80 | 1.83/1.83 |
+| q19 | 303.8 ms | 305.4 ms | 2.89/2.89 | 1.83/1.83 |
+| q20 | 264.6 ms | 387.1 ms | 2.89/2.89 | 1.83/1.83 |
+| q21 | 331.9 ms | 647.3 ms | 2.89/2.89 | 1.83/1.83 |
+| q22 | 143.5 ms | 143.8 ms | 2.89/2.89 | 1.83/1.83 |
+duckdb: 22 queries, cold total 5.7s, load at start median 1.80 max 2.89, max during 2.89
+rudb: 22 queries, cold total 7.6s, load at start median 1.83 max 2.99, max during 2.99
