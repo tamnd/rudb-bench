@@ -248,11 +248,21 @@ pub fn folded<'a>(every: impl Iterator<Item = &'a [Spend]>) -> Vec<Spend> {
     out
 }
 
+/// What rudb's operators say when they answer out of something the load wrote rather than the rows.
+const KEPT: [&str; 5] = [
+    "stored summary",
+    "native value frequencies",
+    "native pair frequencies",
+    "native host groups",
+    "covering grouped distinct",
+];
+
 impl Document {
     /// Whether this statement was answered from what the load stored rather than from the rows.
     ///
-    /// True when an operator says it read a stored summary, or when the plan has operators and no
-    /// scan among them, which is how a `min` and `max` answered from the stored bounds comes out.
+    /// True when an operator says it read a stored summary or groups the writer kept, or when the
+    /// plan has operators and no scan among them, which is how a `min` and `max` answered from the
+    /// stored bounds comes out.
     /// A timing of either is a timing of a lookup, and a ClickBench report has to say so next to
     /// the number rather than let it stand as a scan of ten million rows.
     #[must_use]
@@ -260,7 +270,7 @@ impl Document {
         let summary = self
             .operators
             .iter()
-            .any(|o| o.detail.as_deref().is_some_and(|d| d.contains("stored summary")));
+            .any(|o| o.detail.as_deref().is_some_and(|d| KEPT.iter().any(|k| d.contains(k))));
         let scanned = self.operators.iter().any(|o| matches!(o.kind.as_str(), "Scan" | "Get"));
         summary || (!self.operators.is_empty() && !scanned)
     }
