@@ -51,6 +51,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -103,8 +104,19 @@ def phases(timing):
     }
 
 
-def gate(limit, patience):
-    """Waits for the one minute load average to fall below `limit` and returns the last reading."""
+def gate(limit, patience, scratch):
+    """Waits for the one minute load average to fall below `limit` and returns the last reading.
+
+    It also waits, with no limit, while the disk the metrics are written to has under 2 GB free.
+    A full disk cuts a metrics document off part way, and a shared machine's disk does fill.
+    """
+    waited = 0
+    while shutil.disk_usage(scratch).free < 2 << 30:
+        if waited % 300 == 0:
+            free = shutil.disk_usage(scratch).free >> 20
+            print(f'waiting for disk, {free} MiB free', file=sys.stderr, flush=True)
+        time.sleep(5)
+        waited += 5
     waited = 0
     while True:
         load = os.getloadavg()[0]
@@ -125,8 +137,17 @@ def process(args, sql, scratch):
     script = ''.join(f'{spaced(sql, round)};\n' for round in range(1 + args.repeats))
     made = subprocess.run(command, input=script, stdout=subprocess.DEVNULL,
                           stderr=subprocess.PIPE, text=True, check=False)
-    documents = [json.loads(line) for line in metrics.read_text().splitlines() if line.strip()] \
-        if metrics.exists() else []
+    documents = []
+    for line in metrics.read_text().splitlines() if metrics.exists() else []:
+        if not line.strip():
+            continue
+        try:
+            documents.append(json.loads(line))
+        except json.JSONDecodeError:
+            # A document cut off part way, which is what a process killed while writing it
+            # leaves. The exit status below says why.
+            return None, f'exit status {made.returncode}, a metrics document cut off, ' \
+                f'{made.stderr.strip()[-200:]}'
     failed = [d for d in documents if d.get('outcome', {}).get('state') != 'succeeded']
     if made.returncode or failed or len(documents) != 1 + args.repeats:
         why = failed[0]['outcome'].get('message') if failed else made.stderr.strip()[-300:]
@@ -201,7 +222,7 @@ def main():
             why = None
             loads = []
             for _ in range(args.processes):
-                loads.append(gate(args.gate, args.patience))
+                loads.append(gate(args.gate, args.patience, scratch))
                 runs, why = process(args, sql, scratch)
                 if runs is None:
                     break
