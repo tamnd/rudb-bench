@@ -1,0 +1,46 @@
+1790415360 lineitem    /home/gopher/c0-gpc/data/tpch/sf10/lineitem.parquet
+1790415360 orders      /home/gopher/c0-gpc/data/tpch/sf10/orders.parquet
+1790415360 customer    /home/gopher/c0-gpc/data/tpch/sf10/customer.parquet
+1790415360 part        /home/gopher/c0-gpc/data/tpch/sf10/part.parquet
+1790415360 partsupp    /home/gopher/c0-gpc/data/tpch/sf10/partsupp.parquet
+1790415360 supplier    /home/gopher/c0-gpc/data/tpch/sf10/supplier.parquet
+1790415360 nation      /home/gopher/c0-gpc/data/tpch/sf10/nation.parquet
+1790415360 region      /home/gopher/c0-gpc/data/tpch/sf10/region.parquet
+1790415360 
+1790415363 manifest    /home/gopher/c0-gpc/data/tpch/sf10/lineitem.parquet.manifest.txt
+1790415363 sha256      3367ae6f01bed55b66d08a490d6259495dd06373c656cde472ae776dfed08f20
+1790415364 manifest    /home/gopher/c0-gpc/data/tpch/sf10/orders.parquet.manifest.txt
+1790415364 sha256      fe9836f7ee4d9a2a00c048953f7c2459895567b35afd2946388f7282f46eb3ef
+1790415364 manifest    /home/gopher/c0-gpc/data/tpch/sf10/customer.parquet.manifest.txt
+1790415364 sha256      5ead990cb99ee306f9bf19661fa63e4b682a402e2369cd553c6e0d42645dc7ac
+1790415364 manifest    /home/gopher/c0-gpc/data/tpch/sf10/part.parquet.manifest.txt
+1790415364 sha256      72ec41325e610e09b4de3ce4c5434967bb12243379121d5c2ce6be5dc1e64f63
+1790415365 manifest    /home/gopher/c0-gpc/data/tpch/sf10/partsupp.parquet.manifest.txt
+1790415365 sha256      91b0717199118a0b65a0c24b353f69098aa5b80385d1259b7a7ece44b3e64e73
+1790415365 manifest    /home/gopher/c0-gpc/data/tpch/sf10/supplier.parquet.manifest.txt
+1790415365 sha256      672e61a4ade385d63dd89bd98a5e816c3a66f8bea4ca7cd2457e9a72e583893c
+1790415365 manifest    /home/gopher/c0-gpc/data/tpch/sf10/nation.parquet.manifest.txt
+1790415365 sha256      2d3f229e3fa24d721df8ebf61ed05ba2b9b0a744808c857f4cad9545a1b365c8
+1790415365 manifest    /home/gopher/c0-gpc/data/tpch/sf10/region.parquet.manifest.txt
+1790415365 sha256      483f5f6a11e6bb13a3b3b3fb899df60a6418d049b75de07b15b3281867427971
+1790415365 clickhouse-server: loading tpch
+1790415366 suite    tpch
+1790415366 data     3.21 GiB of Parquet in 8 tables
+1790415366 corpus   duckdb-tpch SF10, corpus 02eb57f3a084bd10, written 2026-09-26
+1790415366 timeout  600s per query, and no query reached it
+1790415366 
+1790415366 No engine produced a number.
+1790415366 clickhouse-server 26.9.1.1138 did not run: clickhouse client loading a parquet file failed: Error on processing query: Code: 108. DB::Exception: No data to insert. (NO_DATA_TO_INSERT) (version 26.9.1.1138 (official build)) (query: INSERT INTO lineitem FORMAT Parquet)
+1790415366 duckdb not asked for did not run: left out of this run by --engines
+1790415366 duckdb-pinned not asked for did not run: left out of this run by --engines
+1790415366 clickhouse-local not asked for did not run: left out of this run by --engines
+1790415366 datafusion not asked for did not run: left out of this run by --engines
+1790415366 polars not asked for did not run: left out of this run by --engines
+1790415366 rudb not asked for did not run: left out of this run by --engines
+1790415366 
+1790415366 Hot here means the tries after the first, with every cache as the first
+1790415366 try left it. Servers were restarted before each query's first try, so
+1790415366 nothing carries from one query to the next.
+1790415366 
+1790415366 wrote reports/2026-09-26/run-tpch-gamingpc-wsl.md
+1790415366 wrote reports/2026-09-26/run-tpch-gamingpc-wsl.manifest.txt

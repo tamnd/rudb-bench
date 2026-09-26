@@ -1,0 +1,6 @@
+Sat Sep 26 09:36:00 UTC 2026 clickhouse-server start, /dev/sdd       1007G  423G  534G  45% /, load 0.58 1.13 1.81
+Sat Sep 26 09:36:06 UTC 2026 clickhouse-server done, scratch cleared, /dev/sdd       1007G  423G  534G  45% /
+Sat Sep 26 09:36:06 UTC 2026 duckdb start, /dev/sdd       1007G  423G  534G  45% /, load 0.62 1.13 1.81
+Sat Sep 26 09:37:37 UTC 2026 duckdb done, scratch cleared, /dev/sdd       1007G  423G  534G  45% /
+Sat Sep 26 09:37:37 UTC 2026 rudb start, /dev/sdd       1007G  423G  534G  45% /, load 1.81 1.51 1.89
+Sat Sep 26 09:39:33 UTC 2026 rudb done, scratch cleared, /dev/sdd       1007G  423G  534G  45% /
