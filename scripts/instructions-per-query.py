@@ -31,6 +31,14 @@ Usage:
     cargo run --example export_queries -- clickbench clickhouse-server /tmp/clickhouse.sql
     scripts/instructions-per-query.py --engine clickhouse --binary /usr/bin/clickhouse \\
         --database /path/to/scratch/clickhouse-server/config.xml --queries /tmp/clickhouse.sql
+    cargo run --example export_queries -- clickbench rudb /tmp/rudb.sql
+    scripts/instructions-per-query.py --engine rudb --binary rudb --database /path/to/hits.rudb \\
+        --queries /tmp/rudb.sql --set stored_answers=false
+
+rudb keeps summaries of each column and answers some ClickBench queries from them without reading
+the rows. The harness turns that off for ClickBench with `RUDB_BENCH_STORED_ANSWERS=off`, and a count
+taken here to go beside a harness run has to do the same with `--set stored_answers=false`, or those
+queries come out at a million instructions instead of hundreds of millions.
 """
 
 import argparse
@@ -84,18 +92,26 @@ class Server:
         self.process.wait()
 
 
-def command(engine, binary, database, sql, threads, server):
-    """How to run one query and which process perf counts, `None` for the command itself."""
+def command(engine, binary, database, sql, threads, server, settings=()):
+    """How to run one query and which process perf counts, `None` for the command itself.
+
+    `settings` are rudb `--set` options, put after the thread count and before the database so they
+    are in force for the query the way a `SET` in front of it would be.
+    """
     if engine == 'clickhouse':
         return ['-p', str(server.process.pid), '--'] + server.client(sql, threads)
-    return ab.command(engine, binary, database, sql, threads)
+    made = ab.command(engine, binary, database, sql, threads)
+    if engine == 'rudb':
+        for setting in settings:
+            made[3:3] = ['--set', setting]
+    return made
 
 
-def ran(engine, binary, database, sql, threads, server=None):
+def ran(engine, binary, database, sql, threads, server=None, settings=()):
     """One query, as the user space instructions of the process that ran it and its wall time."""
     started = time.monotonic()
     made = subprocess.run(['perf', 'stat', '-e', EVENT, '-x,']
-                          + command(engine, binary, database, sql, threads, server),
+                          + command(engine, binary, database, sql, threads, server, settings),
                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, check=False)
     took = time.monotonic() - started
     if made.returncode:
@@ -124,8 +140,13 @@ def main():
     parser.add_argument('--only', nargs='+', metavar='qNN', help='measure only these queries')
     parser.add_argument('--rounds', type=int, default=3, help='runs a query, the median taken')
     parser.add_argument('--threads', type=int, default=1, help='what to SET threads to')
+    parser.add_argument('--set', action='append', default=[], metavar='NAME=VALUE',
+                        help='a rudb setting for every query, such as stored_answers=false, which '
+                             'the harness sets for a fair ClickBench run; may be given more than once')
     parser.add_argument('--tsv', type=pathlib.Path, help='also write the per query rows here')
     args = parser.parse_args()
+    if args.set and args.engine != 'rudb':
+        parser.error('--set is for rudb only')
     if args.rounds < 1:
         parser.error('--rounds must be positive')
     if sys.platform != 'linux':
@@ -133,14 +154,14 @@ def main():
 
     named = ab.queries(args.queries, args.only)
     print(f'{args.engine}, {len(named)} queries, {args.rounds} rounds, threads={args.threads}, '
-          f'{EVENT}')
+          f'settings {args.set or "none"}, {EVENT}')
 
     def rounds(sql):
         counts, seconds, loads = [], [], []
         for _ in range(args.rounds):
             loads.append(load_now())
             counted, took, why = ran(args.engine, args.binary, args.database, sql, args.threads,
-                                     server)
+                                     server, args.set)
             if counted is None:
                 return None, why
             counts.append(counted)
