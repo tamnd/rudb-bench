@@ -1538,16 +1538,20 @@ impl Engine for ClickhouseServer {
                 continue;
             }
 
-            // Through the client from a file on stdin, which works wherever the file happens to
-            // be. `file()` on a server only reads inside `user_files_path`.
-            let handle = std::fs::File::open(&table.path).map_err(|e| {
-                BenchError::new(format!("cannot open {}: {e}", table.path.display()))
+            // Through the client, which reads the file itself and works wherever the file happens
+            // to be. `file()` on a server only reads inside `user_files_path`. Not the file on
+            // stdin, because `output` gives every child a null stdin so that nothing it starts can
+            // wait on the terminal, and the server then answered "No data to insert" for every
+            // table that came this way, which was every TPC-H table.
+            let path = table.path.to_str().ok_or_else(|| {
+                BenchError::new(format!("{} is not a UTF-8 path", table.path.display()))
             })?;
             let mut command = self.client();
-            command
-                .arg("--query")
-                .arg(format!("INSERT INTO {} FORMAT Parquet", table.name))
-                .stdin(Stdio::from(handle));
+            command.arg("--query").arg(format!(
+                "INSERT INTO {} FROM INFILE '{}' FORMAT Parquet",
+                table.name,
+                path.replace('\\', "\\\\").replace('\'', "\\'")
+            ));
             output(&mut command, "clickhouse client loading a parquet file")?;
 
             // Merge to one part before the clock stops, for the same reason DuckDB checkpoints
