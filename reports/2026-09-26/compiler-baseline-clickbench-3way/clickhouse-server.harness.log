@@ -1,0 +1,212 @@
+1790413835 hits        /home/gopher/c0-gpc/data/hits.parquet
+1790413835 
+1790413855 manifest    /home/gopher/c0-gpc/data/hits.parquet.manifest.txt
+1790413855 sha256      a390f6cb782f6aaef278c72fc1dd86c4f30bc843ebab3c159e9bd4d45ddb079f
+1790413855 clickhouse-server: loading clickbench
+1790413899 clickhouse-server: waiting, load is 29.42 on 16 hardware threads
+1790413929 clickhouse-server: waiting, load is 17.83 on 16 hardware threads
+1790413959 clickhouse-server: waiting, load is 10.88 on 16 hardware threads
+1790413989 clickhouse-server: waiting, load is 6.59 on 16 hardware threads
+1790414019 clickhouse-server: waiting, load is 4.07 on 16 hardware threads
+1790414049 clickhouse-server: waiting, load is 2.46 on 16 hardware threads
+1790414080 clickhouse-server: 1 of 43, q1, cold 40.366ms, hot 40.325ms, hot median 40.345ms, own cold 1.000ms, own hot 1.000ms, own hot median 1.000ms
+1790414083 clickhouse-server: 2 of 43, q2, cold 40.344ms, hot 40.340ms, hot median 40.344ms, own cold 1.000ms, own hot 1.000ms, own hot median 1.000ms
+1790414086 clickhouse-server: 3 of 43, q3, cold 120.724ms, hot 61.900ms, hot median 63.134ms, own cold 72.000ms, own hot 18.000ms, own hot median 21.000ms
+1790414089 clickhouse-server: 4 of 43, q4, cold 80.760ms, hot 64.325ms, hot median 80.519ms, own cold 37.000ms, own hot 26.000ms, own hot median 27.000ms
+1790414092 clickhouse-server: 5 of 43, q5, cold 244.472ms, hot 203.081ms, hot median 204.369ms, own cold 206.000ms, own hot 164.000ms, own hot median 166.000ms
+1790414094 clickhouse-server: waiting, load is 4.04 on 16 hardware threads
+1790414124 clickhouse-server: waiting, load is 2.45 on 16 hardware threads
+1790414156 clickhouse-server: 6 of 43, q6, cold 329.885ms, hot 269.278ms, hot median 284.093ms, own cold 280.000ms, own hot 230.000ms, own hot median 238.000ms
+1790414159 clickhouse-server: 7 of 43, q7, cold 61.098ms, hot 60.456ms, hot median 60.770ms, own cold 9.000ms, own hot 6.000ms, own hot median 14.000ms
+1790414161 clickhouse-server: 8 of 43, q8, cold 80.501ms, hot 60.448ms, hot median 60.452ms, own cold 33.000ms, own hot 8.000ms, own hot median 8.000ms
+1790414164 clickhouse-server: 9 of 43, q9, cold 405.543ms, hot 349.587ms, hot median 366.777ms, own cold 372.000ms, own hot 302.000ms, own hot median 313.000ms
+1790414168 clickhouse-server: 10 of 43, q10, cold 444.213ms, hot 382.732ms, hot median 390.698ms, own cold 408.000ms, own hot 348.000ms, own hot median 348.000ms
+1790414169 clickhouse-server: waiting, load is 4.25 on 16 hardware threads
+1790414199 clickhouse-server: waiting, load is 2.58 on 16 hardware threads
+1790414230 clickhouse-server: 11 of 43, q11, cold 183.107ms, hot 143.305ms, hot median 144.888ms, own cold 141.000ms, own hot 91.000ms, own hot median 94.000ms
+1790414233 clickhouse-server: 12 of 43, q12, cold 182.043ms, hot 141.099ms, hot median 143.764ms, own cold 148.000ms, own hot 102.000ms, own hot median 104.000ms
+1790414236 clickhouse-server: 13 of 43, q13, cold 328.912ms, hot 283.168ms, hot median 287.979ms, own cold 289.000ms, own hot 230.000ms, own hot median 233.000ms
+1790414238 clickhouse-server: waiting, load is 2.84 on 16 hardware threads
+1790414271 clickhouse-server: 14 of 43, q14, cold 506.916ms, hot 402.406ms, hot median 424.444ms, own cold 469.000ms, own hot 362.000ms, own hot median 376.000ms
+1790414275 clickhouse-server: 15 of 43, q15, cold 393.264ms, hot 308.877ms, hot median 309.900ms, own cold 353.000ms, own hot 264.000ms, own hot median 274.000ms
+1790414278 clickhouse-server: 16 of 43, q16, cold 224.807ms, hot 183.846ms, hot median 184.380ms, own cold 186.000ms, own hot 150.000ms, own hot median 152.000ms
+1790414284 clickhouse-server: 17 of 43, q17, cold 754.770ms, hot 690.207ms, hot median 692.028ms, own cold 715.000ms, own hot 644.000ms, own hot median 649.000ms
+1790414288 clickhouse-server: 18 of 43, q18, cold 365.469ms, hot 284.673ms, hot median 286.631ms, own cold 324.000ms, own hot 246.000ms, own hot median 248.000ms
+1790414296 clickhouse-server: 19 of 43, q19, cold 1.292s, hot 1.202s, hot median 1.213s, own cold 1.258s, own hot 1.158s, own hot median 1.176s
+1790414297 clickhouse-server: waiting, load is 2.88 on 16 hardware threads
+1790414328 clickhouse-server: 20 of 43, q20, cold 100.737ms, hot 40.340ms, hot median 40.419ms, own cold 50.000ms, own hot 2.000ms, own hot median 2.000ms
+1790414332 clickhouse-server: 21 of 43, q21, cold 657.009ms, hot 265.734ms, hot median 283.920ms, own cold 610.000ms, own hot 224.000ms, own hot median 234.000ms
+1790414333 clickhouse-server: waiting, load is 3.76 on 16 hardware threads
+1790414363 clickhouse-server: waiting, load is 2.36 on 16 hardware threads
+1790414395 clickhouse-server: 22 of 43, q22, cold 730.690ms, hot 106.670ms, hot median 120.650ms, own cold 670.000ms, own hot 61.000ms, own hot median 70.000ms
+1790414399 clickhouse-server: 23 of 43, q23, cold 895.303ms, hot 381.691ms, hot median 391.045ms, own cold 856.000ms, own hot 335.000ms, own hot median 352.000ms
+1790414401 clickhouse-server: 24 of 43, q24, cold 242.827ms, hot 100.587ms, hot median 103.355ms, own cold 201.000ms, own hot 61.000ms, own hot median 62.000ms
+1790414404 clickhouse-server: 25 of 43, q25, cold 140.848ms, hot 80.533ms, hot median 80.627ms, own cold 99.000ms, own hot 36.000ms, own hot median 36.000ms
+1790414406 clickhouse-server: 26 of 43, q26, cold 203.737ms, hot 146.853ms, hot median 153.737ms, own cold 161.000ms, own hot 108.000ms, own hot median 111.000ms
+1790414410 clickhouse-server: 27 of 43, q27, cold 140.789ms, hot 80.924ms, hot median 84.061ms, own cold 91.000ms, own hot 36.000ms, own hot median 38.000ms
+1790414412 clickhouse-server: 28 of 43, q28, cold 164.627ms, hot 141.484ms, hot median 142.544ms, own cold 118.000ms, own hot 92.000ms, own hot median 94.000ms
+1790414413 clickhouse-server: waiting, load is 3.31 on 16 hardware threads
+1790414443 clickhouse-server: waiting, load is 2.01 on 16 hardware threads
+1790414478 clickhouse-server: 29 of 43, q29, cold 1.277s, hot 1.028s, hot median 1.045s, own cold 1.233s, own hot 985.000ms, own hot median 995.000ms
+1790414482 clickhouse-server: 30 of 43, q30, cold 100.654ms, hot 60.493ms, hot median 73.434ms, own cold 43.000ms, own hot 23.000ms, own hot median 27.000ms
+1790414484 clickhouse-server: 31 of 43, q31, cold 286.736ms, hot 184.509ms, hot median 203.959ms, own cold 228.000ms, own hot 146.000ms, own hot median 149.000ms
+1790414488 clickhouse-server: 32 of 43, q32, cold 323.158ms, hot 246.404ms, hot median 248.295ms, own cold 279.000ms, own hot 204.000ms, own hot median 210.000ms
+1790414496 clickhouse-server: 33 of 43, q33, cold 1.364s, hot 1.294s, hot median 1.307s, own cold 1.319s, own hot 1.244s, own hot median 1.265s
+1790414497 clickhouse-server: waiting, load is 6.31 on 16 hardware threads
+1790414527 clickhouse-server: waiting, load is 3.82 on 16 hardware threads
+1790414557 clickhouse-server: waiting, load is 2.31 on 16 hardware threads
+1790414594 clickhouse-server: 34 of 43, q34, cold 1.565s, hot 1.375s, hot median 1.392s, own cold 1.511s, own hot 1.337s, own hot median 1.341s
+1790414595 clickhouse-server: waiting, load is 2.73 on 16 hardware threads
+1790414632 clickhouse-server: 35 of 43, q35, cold 1.600s, hot 1.341s, hot median 1.388s, own cold 1.542s, own hot 1.288s, own hot median 1.345s
+1790414634 clickhouse-server: waiting, load is 5.03 on 16 hardware threads
+1790414664 clickhouse-server: waiting, load is 3.05 on 16 hardware threads
+1790414696 clickhouse-server: 36 of 43, q36, cold 224.850ms, hot 164.356ms, hot median 166.002ms, own cold 185.000ms, own hot 127.000ms, own hot median 129.000ms
+1790414698 clickhouse-server: 37 of 43, q37, cold 120.773ms, hot 60.502ms, hot median 60.505ms, own cold 76.000ms, own hot 21.000ms, own hot median 21.000ms
+1790414700 clickhouse-server: 38 of 43, q38, cold 121.262ms, hot 60.525ms, hot median 60.547ms, own cold 58.000ms, own hot 11.000ms, own hot median 11.000ms
+1790414703 clickhouse-server: 39 of 43, q39, cold 102.550ms, hot 60.486ms, hot median 60.499ms, own cold 49.000ms, own hot 11.000ms, own hot median 11.000ms
+1790414705 clickhouse-server: 40 of 43, q40, cold 141.051ms, hot 100.643ms, hot median 100.670ms, own cold 91.000ms, own hot 43.000ms, own hot median 47.000ms
+1790414708 clickhouse-server: 41 of 43, q41, cold 120.817ms, hot 60.500ms, hot median 60.519ms, own cold 59.000ms, own hot 7.000ms, own hot median 8.000ms
+1790414710 clickhouse-server: 42 of 43, q42, cold 104.242ms, hot 60.456ms, hot median 60.495ms, own cold 55.000ms, own hot 6.000ms, own hot median 6.000ms
+1790414712 clickhouse-server: 43 of 43, q43, cold 81.024ms, hot 60.516ms, hot median 60.527ms, own cold 28.000ms, own hot 6.000ms, own hot median 6.000ms
+1790414714 suite    clickbench
+1790414714 engine   clickhouse-server 26.9.1.1138
+1790414714 load     41.334s to build, no reading of CPU, 9.37 GiB on disk
+1790414714 on disk  is its own MergeTree parts, sorted by hits by (CounterID, EventDate, UserID, EventTime, WatchID), as system.parts counts the active ones
+1790414714 
+1790414714 query  shape                         cold  hot median      IQR    hot cpu    peak RSS   cold read
+1790414714 q1     count                     40.366ms    40.325ms     0.1%   not read    not read    not read
+1790414714 q2     filtered count            40.344ms    40.340ms     0.1%   not read    not read    not read
+1790414714 q3     three aggregates         120.724ms    61.900ms    29.5%   not read    not read    not read
+1790414714 q4     average                   80.760ms    64.325ms    24.5%   not read    not read    not read
+1790414714 q5     count distinct, high card   244.472ms   203.081ms     4.6%   not read    not read    not read
+1790414714 q6     count distinct, strings   329.885ms   269.278ms     5.5%   not read    not read    not read
+1790414714 q7     min and max of a date     61.098ms    60.456ms    33.0%   not read    not read    not read
+1790414714 q8     group by, low card        80.501ms    60.448ms     0.0%   not read    not read    not read
+1790414714 q9     group by and count distinct   405.543ms   349.587ms     5.6%   not read    not read    not read
+1790414714 q10    group by, several aggregates   444.213ms   382.732ms     5.7%   not read    not read    not read
+1790414714 q11    group by a string and count distinct   183.107ms   143.305ms    12.3%   not read    not read    not read
+1790414714 q12    group by two strings and count distinct   182.043ms   141.099ms     7.1%   not read    not read    not read
+1790414714 q13    group by a string and top k   328.912ms   283.168ms     1.7%   not read    not read    not read
+1790414714 q14    group by a string and count distinct   506.916ms   402.406ms     5.9%   not read    not read    not read
+1790414714 q15    group by two columns and top k   393.264ms   308.877ms     1.0%   not read    not read    not read
+1790414714 q16    group by, very high card   224.807ms   183.846ms    11.0%   not read    not read    not read
+1790414714 q17    group by two, very high card   754.770ms   690.207ms     0.5%   not read    not read    not read
+1790414714 q18    group by two, no ordering   365.469ms   284.673ms     0.8%   not read    not read    not read
+1790414714 q19    group by with an extract      1.292s      1.202s     1.9%   not read    not read    not read
+1790414714 q20    point lookup             100.737ms    40.340ms    49.8%   not read    not read    not read
+1790414714 q21    substring scan           657.009ms   265.734ms     7.4%   not read    not read    not read
+1790414714 q22    substring scan and group by   730.690ms   106.670ms    11.9%   not read    not read    not read
+1790414714 q23    two substring scans and group by   895.303ms   381.691ms     5.5%   not read    not read    not read
+1790414714 q24    select star and top k    242.827ms   100.587ms     3.2%   not read    not read    not read
+1790414714 q25    top k by a date          140.848ms    80.533ms     4.6%   not read    not read    not read
+1790414714 q26    top k by a string        203.737ms   146.853ms     9.2%   not read    not read    not read
+1790414714 q27    top k by two columns     140.789ms    80.924ms     6.6%   not read    not read    not read
+1790414714 q28    group by with a string length   164.627ms   141.484ms    15.8%   not read    not read    not read
+1790414714 q29    group by a regular expression      1.277s      1.028s     4.1%   not read    not read    not read
+1790414714 q30    ninety sums over one column   100.654ms    60.493ms   713.2%   not read    not read    not read
+1790414714 q31    group by two and several aggregates   286.736ms   184.509ms     9.6%   not read    not read    not read
+1790414714 q32    group by a high card pair   323.158ms   246.404ms     3.6%   not read    not read    not read
+1790414714 q33    group by a high card pair, unfiltered      1.364s      1.294s     1.3%   not read    not read    not read
+1790414714 q34    group by a long string      1.565s      1.375s     6.4%   not read    not read    not read
+1790414714 q35    group by a constant and a long string      1.600s      1.341s     3.6%   not read    not read    not read
+1790414714 q36    group by four expressions   224.850ms   164.356ms    14.0%   not read    not read    not read
+1790414714 q37    date range and group by a URL   120.773ms    60.502ms    33.2%   not read    not read    not read
+1790414714 q38    date range and group by a title   121.262ms    60.525ms     0.1%   not read    not read    not read
+1790414714 q39    date range, group by and offset   102.550ms    60.486ms     0.0%   not read    not read    not read
+1790414714 q40    date range, a case and a wide group by   141.051ms   100.643ms     0.1%   not read    not read    not read
+1790414714 q41    date range with an IN and a hash   120.817ms    60.500ms     0.0%   not read    not read    not read
+1790414714 q42    date range and a deep offset   104.242ms    60.456ms     0.1%   not read    not read    not read
+1790414714 q43    minute buckets over a date range    81.024ms    60.516ms     0.1%   not read    not read    not read
+1790414714 
+1790414714 total    16.889s cold, 12.674s hot, over 43 queries
+1790414714 cpu      not read over the hot runs
+1790414714 peak     not measured, the timer wraps clickhouse client and the work happens in a server process it did not start
+1790414714 
+1790414714 This is not a publishable number, because:
+1790414714   no machine this project owns is a c6a.4xlarge, 16 vCPU, 32 GiB, gp2, per rule seven
+1790414714   no query has a peak resident set, and rule six wants one. not measured, the timer wraps clickhouse client and the work happens in a server process it did not start
+1790414714 
+1790414714 Hot here means this engine's own caches are warm, because it is a server
+1790414714 that stayed up across the whole suite. That is the stronger kind of hot and
+1790414714 it is not the kind the other rows were measured with, so a ratio against
+1790414714 them is a ratio between two different quantities.
+1790414714 
+1790414714 suite    clickbench
+1790414714 data     13.76 GiB of Parquet in 1 table
+1790414714 timeout  600s per query, and no query reached it
+1790414714 engine   clickhouse-server 26.9.1.1138
+1790414714 
+1790414714 query                 shape                                    clickhouse-server
+1790414714 q1                    count                                             40.325ms
+1790414714 q2                    filtered count                                    40.340ms
+1790414714 q3                    three aggregates                                  61.900ms
+1790414714 q4                    average                                           64.325ms
+1790414714 q5                    count distinct, high card                        203.081ms
+1790414714 q6                    count distinct, strings                          269.278ms
+1790414714 q7                    min and max of a date                             60.456ms
+1790414714 q8                    group by, low card                                60.448ms
+1790414714 q9                    group by and count distinct                      349.587ms
+1790414714 q10                   group by, several aggregates                     382.732ms
+1790414714 q11                   group by a string and count distinct             143.305ms
+1790414714 q12                   group by two strings and count distinct          141.099ms
+1790414714 q13                   group by a string and top k                      283.168ms
+1790414714 q14                   group by a string and count distinct             402.406ms
+1790414714 q15                   group by two columns and top k                   308.877ms
+1790414714 q16                   group by, very high card                         183.846ms
+1790414714 q17                   group by two, very high card                     690.207ms
+1790414714 q18                   group by two, no ordering                        284.673ms
+1790414714 q19                   group by with an extract                            1.202s
+1790414714 q20                   point lookup                                      40.340ms
+1790414714 q21                   substring scan                                   265.734ms
+1790414714 q22                   substring scan and group by                      106.670ms
+1790414714 q23                   two substring scans and group by                 381.691ms
+1790414714 q24                   select star and top k                            100.587ms
+1790414714 q25                   top k by a date                                   80.533ms
+1790414714 q26                   top k by a string                                146.853ms
+1790414714 q27                   top k by two columns                              80.924ms
+1790414714 q28                   group by with a string length                    141.484ms
+1790414714 q29                   group by a regular expression                       1.028s
+1790414714 q30                   ninety sums over one column                       60.493ms
+1790414714 q31                   group by two and several aggregates              184.509ms
+1790414714 q32                   group by a high card pair                        246.404ms
+1790414714 q33                   group by a high card pair, unfiltered               1.294s
+1790414714 q34                   group by a long string                              1.375s
+1790414714 q35                   group by a constant and a long string               1.341s
+1790414715 q36                   group by four expressions                        164.356ms
+1790414715 q37                   date range and group by a URL                     60.502ms
+1790414715 q38                   date range and group by a title                   60.525ms
+1790414715 q39                   date range, group by and offset                   60.486ms
+1790414715 q40                   date range, a case and a wide group by           100.643ms
+1790414715 q41                   date range with an IN and a hash                  60.500ms
+1790414715 q42                   date range and a deep offset                      60.456ms
+1790414715 q43                   minute buckets over a date range                  60.516ms
+1790414715 
+1790414715 total hot                                                                12.674s
+1790414715 worst IQR                                                                 713.2%
+1790414715 shape spread                                                              34.51x
+1790414715 total cold                                                               16.889s
+1790414715 query time                                                               10.765s
+1790414715 hot cpu                                                                 not read
+1790414715 peak RSS                                                                not read
+1790414715 load                                                                     41.334s
+1790414715 on disk                                                                 9.37 GiB
+1790414715 storage                                                               own format
+1790414715 vs clickhouse-server                                                       1.00x
+1790414715 duckdb not asked for did not run: left out of this run by --engines
+1790414715 duckdb-pinned not asked for did not run: left out of this run by --engines
+1790414715 clickhouse-local not asked for did not run: left out of this run by --engines
+1790414715 datafusion not asked for did not run: left out of this run by --engines
+1790414715 polars not asked for did not run: left out of this run by --engines
+1790414715 rudb not asked for did not run: left out of this run by --engines
+1790414715 
+1790414715 The ratio is on the query time row, which is what each engine says the
+1790414715 queries cost it and what the public board publishes. The wall clock row
+1790414715 above it also holds a process start per query, which is this harness and
+1790414715 not the engine, and on a small sample it is most of what separates them.
+1790414715 
+1790414715 Hot here means the tries after the first, with every cache as the first
+1790414715 try left it. Servers were restarted before each query's first try, so
+1790414715 nothing carries from one query to the next.
+1790414715 
+1790414715 wrote reports/2026-09-26/run-clickbench-gamingpc-wsl.md
+1790414715 wrote reports/2026-09-26/run-clickbench-gamingpc-wsl.manifest.txt

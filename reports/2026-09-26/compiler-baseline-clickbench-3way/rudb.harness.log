@@ -1,0 +1,212 @@
+1790412852 hits        /home/gopher/c0-gpc/data/hits.parquet
+1790412852 
+1790412873 manifest    /home/gopher/c0-gpc/data/hits.parquet.manifest.txt
+1790412873 sha256      a390f6cb782f6aaef278c72fc1dd86c4f30bc843ebab3c159e9bd4d45ddb079f
+1790412873 rudb: loading clickbench
+1790412918 rudb: waiting, load is 8.65 on 16 hardware threads
+1790412948 rudb: waiting, load is 5.24 on 16 hardware threads
+1790412978 rudb: waiting, load is 3.17 on 16 hardware threads
+1790413009 rudb: 1 of 43, q1, cold 44.197ms, hot 20.296ms, hot median 20.317ms, own cold 9.470ms, own hot 2.811ms, own hot median 2.966ms
+1790413010 rudb: 2 of 43, q2, cold 644.789ms, hot 40.409ms, hot median 40.412ms, own cold 614.933ms, own hot 7.262ms, own hot median 7.292ms
+1790413011 rudb: 3 of 43, q3, cold 666.129ms, hot 40.503ms, hot median 40.559ms, own cold 625.951ms, own hot 21.804ms, own hot median 23.066ms
+1790413011 rudb: waiting, load is 3.10 on 16 hardware threads
+1790413041 rudb: 4 of 43, q4, cold 645.952ms, hot 43.042ms, hot median 44.041ms, own cold 611.845ms, own hot 17.904ms, own hot median 18.613ms
+1790413043 rudb: 5 of 43, q5, cold 767.878ms, hot 203.828ms, hot median 204.174ms, own cold 706.287ms, own hot 154.768ms, own hot median 155.920ms
+1790413045 rudb: 6 of 43, q6, cold 706.659ms, hot 381.760ms, hot median 381.786ms, own cold 659.018ms, own hot 357.068ms, own hot median 358.375ms
+1790413046 rudb: 7 of 43, q7, cold 646.169ms, hot 20.303ms, hot median 20.325ms, own cold 605.941ms, own hot 6.098ms, own hot median 6.178ms
+1790413046 rudb: waiting, load is 3.01 on 16 hardware threads
+1790413077 rudb: 8 of 43, q8, cold 666.389ms, hot 40.460ms, hot median 40.912ms, own cold 619.359ms, own hot 8.324ms, own hot median 8.395ms
+1790413078 rudb: 9 of 43, q9, cold 705.888ms, hot 143.992ms, hot median 144.077ms, own cold 653.635ms, own hot 104.446ms, own hot median 106.260ms
+1790413079 rudb: 10 of 43, q10, cold 807.311ms, hot 167.506ms, hot median 182.327ms, own cold 749.384ms, own hot 139.800ms, own hot median 140.127ms
+1790413080 rudb: 11 of 43, q11, cold 685.638ms, hot 62.429ms, hot median 63.981ms, own cold 647.661ms, own hot 30.656ms, own hot median 31.074ms
+1790413080 rudb: waiting, load is 2.96 on 16 hardware threads
+1790413111 rudb: 12 of 43, q12, cold 686.664ms, hot 60.522ms, hot median 60.532ms, own cold 649.760ms, own hot 37.215ms, own hot median 37.261ms
+1790413112 rudb: 13 of 43, q13, cold 685.467ms, hot 60.588ms, hot median 60.761ms, own cold 640.658ms, own hot 33.838ms, own hot median 35.171ms
+1790413114 rudb: 14 of 43, q14, cold 786.287ms, hot 121.459ms, hot median 124.013ms, own cold 734.418ms, own hot 84.930ms, own hot median 85.055ms
+1790413115 rudb: 15 of 43, q15, cold 707.764ms, hot 104.000ms, hot median 104.669ms, own cold 658.586ms, own hot 76.205ms, own hot median 76.864ms
+1790413115 rudb: 16 of 43, q16, cold 43.315ms, hot 20.340ms, hot median 20.378ms, own cold 5.131ms, own hot 664.773us, own hot median 710.510us
+1790413116 rudb: 17 of 43, q17, cold 785.258ms, hot 40.513ms, hot median 40.514ms, own cold 757.868ms, own hot 19.160ms, own hot median 19.284ms
+1790413117 rudb: 18 of 43, q18, cold 524.983ms, hot 60.552ms, hot median 60.588ms, own cold 498.917ms, own hot 34.962ms, own hot median 35.037ms
+1790413119 rudb: 19 of 43, q19, cold 953.283ms, hot 355.169ms, hot median 364.904ms, own cold 878.004ms, own hot 296.833ms, own hot median 298.188ms
+1790413119 rudb: 20 of 43, q20, cold 83.435ms, hot 20.293ms, hot median 20.299ms, own cold 56.209ms, own hot 2.606ms, own hot median 2.870ms
+1790413121 rudb: 21 of 43, q21, cold 907.307ms, hot 242.994ms, hot median 246.041ms, own cold 860.834ms, own hot 215.760ms, own hot median 218.929ms
+1790413121 rudb: waiting, load is 2.85 on 16 hardware threads
+1790413153 rudb: 22 of 43, q22, cold 988.216ms, hot 324.212ms, hot median 345.735ms, own cold 938.469ms, own hot 292.090ms, own hot median 297.118ms
+1790413156 rudb: 23 of 43, q23, cold 1.269s, hot 323.715ms, hot median 323.978ms, own cold 1.221s, own hot 287.211ms, own hot median 288.464ms
+1790413156 rudb: 24 of 43, q24, cold 366.703ms, hot 120.920ms, hot median 121.256ms, own cold 324.599ms, own hot 100.506ms, own hot median 101.810ms
+1790413157 rudb: 25 of 43, q25, cold 183.209ms, hot 40.398ms, hot median 40.404ms, own cold 148.329ms, own hot 13.129ms, own hot median 15.720ms
+1790413158 rudb: 26 of 43, q26, cold 765.680ms, hot 80.665ms, hot median 80.809ms, own cold 720.277ms, own hot 61.212ms, own hot median 62.389ms
+1790413158 rudb: 27 of 43, q27, cold 227.757ms, hot 60.515ms, hot median 60.539ms, own cold 188.403ms, own hot 43.317ms, own hot median 44.679ms
+1790413160 rudb: 28 of 43, q28, cold 854.013ms, hot 247.894ms, hot median 256.023ms, own cold 820.731ms, own hot 213.215ms, own hot median 220.973ms
+1790413165 rudb: 29 of 43, q29, cold 1.476s, hot 1.044s, hot median 1.064s, own cold 1.422s, own hot 996.138ms, own hot median 1.010s
+1790413166 rudb: 30 of 43, q30, cold 647.990ms, hot 40.423ms, hot median 41.659ms, own cold 616.874ms, own hot 17.477ms, own hot median 17.892ms
+1790413166 rudb: waiting, load is 2.77 on 16 hardware threads
+1790413197 rudb: 31 of 43, q31, cold 807.847ms, hot 124.074ms, hot median 125.988ms, own cold 759.279ms, own hot 92.967ms, own hot median 96.450ms
+1790413199 rudb: 32 of 43, q32, cold 1.029s, hot 143.962ms, hot median 144.062ms, own cold 971.291ms, own hot 101.278ms, own hot median 102.453ms
+1790413201 rudb: 33 of 43, q33, cold 1.153s, hot 343.979ms, hot median 347.551ms, own cold 1.067s, own hot 280.100ms, own hot median 280.206ms
+1790413201 rudb: waiting, load is 2.90 on 16 hardware threads
+1790413231 rudb: 34 of 43, q34, cold 43.803ms, hot 20.328ms, hot median 20.411ms, own cold 5.412ms, own hot 682.626us, own hot median 737.931us
+1790413233 rudb: 35 of 43, q35, cold 725.029ms, hot 123.782ms, hot median 124.121ms, own cold 680.898ms, own hot 96.576ms, own hot median 97.784ms
+1790413233 rudb: 36 of 43, q36, cold 43.379ms, hot 20.327ms, hot median 20.344ms, own cold 4.462ms, own hot 723.089us, own hot median 727.452us
+1790413233 rudb: 37 of 43, q37, cold 102.635ms, hot 40.397ms, hot median 40.420ms, own cold 63.559ms, own hot 24.208ms, own hot median 24.594ms
+1790413233 rudb: 38 of 43, q38, cold 82.854ms, hot 40.396ms, hot median 40.399ms, own cold 53.203ms, own hot 15.273ms, own hot median 15.353ms
+1790413233 rudb: 39 of 43, q39, cold 83.023ms, hot 40.407ms, hot median 40.410ms, own cold 58.701ms, own hot 22.458ms, own hot median 22.697ms
+1790413234 rudb: 40 of 43, q40, cold 123.172ms, hot 80.549ms, hot median 80.553ms, own cold 95.911ms, own hot 62.104ms, own hot median 62.162ms
+1790413234 rudb: 41 of 43, q41, cold 82.691ms, hot 20.339ms, hot median 20.379ms, own cold 41.479ms, own hot 6.420ms, own hot median 6.503ms
+1790413234 rudb: 42 of 43, q42, cold 82.625ms, hot 40.395ms, hot median 40.421ms, own cold 46.083ms, own hot 8.437ms, own hot median 8.527ms
+1790413234 rudb: 43 of 43, q43, cold 63.397ms, hot 20.387ms, hot median 20.396ms, own cold 35.984ms, own hot 3.759ms, own hot median 3.852ms
+1790413235 suite    clickbench
+1790413235 engine   rudb rudb 0.6.0
+1790413235 load     45.548s to build, 595.620s of CPU, 10.66 GiB on disk
+1790413235 on disk  is its own database file
+1790413235 writes   533.220s user, 62.400s system, 10.66 GiB written, 10.06 GiB peak resident, - accounted
+1790413235 planner  165 decisions, 22% exact, 0% certified, 78% estimated, 0% unknown
+1790413235 
+1790413235 query  shape                         cold  hot median      IQR    hot cpu    peak RSS   cold read
+1790413235 q1     count                     44.197ms    20.296ms     0.2%   30.000ms   22.75 MiB   24.58 MiB
+1790413235 q2     filtered count           644.789ms    40.409ms     0.2%   90.000ms   60.15 MiB    4.00 GiB
+1790413235 q3     three aggregates         666.129ms    40.503ms     6.7%  320.000ms  136.90 MiB    4.01 GiB
+1790413235 q4     average                  645.952ms    43.042ms    39.7%  270.000ms  219.42 MiB    3.97 GiB
+1790413235 q5     count distinct, high card   767.878ms   203.828ms     1.3%     2.290s    1.44 GiB    3.97 GiB
+1790413235 q6     count distinct, strings   706.659ms   381.760ms     5.2%     1.500s  398.30 MiB    4.04 GiB
+1790413235 q7     min and max of a date    646.169ms    20.303ms     0.1%   80.000ms   59.41 MiB    3.95 GiB
+1790413235 q8     group by, low card       666.389ms    40.460ms     2.0%  110.000ms   61.50 MiB    4.01 GiB
+1790413235 q9     group by and count distinct   705.888ms   143.992ms     0.4%     1.640s  683.25 MiB    3.96 GiB
+1790413235 q10    group by, several aggregates   807.311ms   167.506ms     8.6%     2.170s  832.61 MiB    4.55 GiB
+1790413235 q11    group by a string and count distinct   685.638ms    62.429ms     4.0%  440.000ms  294.88 MiB    4.18 GiB
+1790413235 q12    group by two strings and count distinct   686.664ms    60.522ms     5.1%  550.000ms  305.81 MiB    4.18 GiB
+1790413235 q13    group by a string and top k   685.467ms    60.588ms     2.8%  350.000ms  214.21 MiB    4.04 GiB
+1790413235 q14    group by a string and count distinct   786.287ms   121.459ms     2.1%     1.200s  605.55 MiB    4.48 GiB
+1790413235 q15    group by two columns and top k   707.764ms   104.000ms     3.8%     1.060s  456.44 MiB    4.11 GiB
+1790413235 q16    group by, very high card    43.315ms    20.340ms     0.3%    0.000us   22.14 MiB   24.79 MiB
+1790413235 q17    group by two, very high card   785.258ms    40.513ms     0.1%   20.000ms   83.22 MiB    2.46 GiB
+1790413235 q18    group by two, no ordering   524.983ms    60.552ms     0.2%   40.000ms  105.83 MiB    2.17 GiB
+1790413235 q19    group by with an extract   953.283ms   355.169ms     4.4%     4.570s    2.04 GiB    4.96 GiB
+1790413235 q20    point lookup              83.435ms    20.293ms     0.1%   30.000ms   48.12 MiB  320.03 MiB
+1790413235 q21    substring scan           907.307ms   242.994ms     8.5%     2.780s  618.34 MiB    5.07 GiB
+1790413235 q22    substring scan and group by   988.216ms   324.212ms     6.8%     2.910s  785.83 MiB    5.33 GiB
+1790413235 q23    two substring scans and group by      1.269s   323.715ms     7.3%     1.850s    1.12 GiB    6.73 GiB
+1790413235 q24    select star and top k    366.703ms   120.920ms     1.2%  390.000ms  333.72 MiB    1.34 GiB
+1790413235 q25    top k by a date          183.209ms    40.398ms     0.1%   30.000ms   67.32 MiB  603.00 MiB
+1790413235 q26    top k by a string        765.680ms    80.665ms    25.5%  360.000ms  186.90 MiB    4.08 GiB
+1790413235 q27    top k by two columns     227.757ms    60.515ms    33.2%   70.000ms   90.13 MiB  634.59 MiB
+1790413235 q28    group by with a string length   854.013ms   247.894ms     6.8%     2.260s  512.28 MiB    4.43 GiB
+1790413235 q29    group by a regular expression      1.476s      1.044s     3.3%    11.950s    1.62 GiB    5.63 GiB
+1790413235 q30    ninety sums over one column   647.990ms    40.423ms     5.8%  230.000ms  103.33 MiB    4.00 GiB
+1790413235 q31    group by two and several aggregates   807.847ms   124.074ms     3.0%     1.370s  729.80 MiB    4.75 GiB
+1790413235 q32    group by a high card pair      1.029s   143.962ms    14.1%     1.480s    1.43 GiB    6.15 GiB
+1790413235 q33    group by a high card pair, unfiltered      1.153s   343.979ms     5.9%     4.350s    2.92 GiB    5.90 GiB
+1790413235 q34    group by a long string    43.803ms    20.328ms     0.6%    0.000us   22.06 MiB   24.91 MiB
+1790413235 q35    group by a constant and a long string   725.029ms   123.782ms    30.1%  770.000ms  802.43 MiB    4.04 GiB
+1790413235 q36    group by four expressions    43.379ms    20.327ms     0.2%    0.000us   22.66 MiB   24.79 MiB
+1790413235 q37    date range and group by a URL   102.635ms    40.397ms     0.3%   50.000ms   94.13 MiB  148.91 MiB
+1790413235 q38    date range and group by a title    82.854ms    40.396ms     0.0%   40.000ms   62.43 MiB  107.06 MiB
+1790413235 q39    date range, group by and offset    83.023ms    40.407ms     0.0%   30.000ms   82.14 MiB  113.47 MiB
+1790413235 q40    date range, a case and a wide group by   123.172ms    80.549ms     0.0%  210.000ms  183.54 MiB  182.86 MiB
+1790413235 q41    date range with an IN and a hash    82.691ms    20.339ms     0.3%   30.000ms   51.32 MiB  115.86 MiB
+1790413235 q42    date range and a deep offset    82.625ms    40.395ms     0.2%   20.000ms   45.90 MiB   94.25 MiB
+1790413235 q43    minute buckets over a date range    63.397ms    20.387ms     0.2%   40.000ms   42.34 MiB   86.75 MiB
+1790413235 
+1790413235 total    24.351s cold, 5.593s hot, over 43 queries
+1790413235 cpu      47.980s over the hot runs
+1790413235 peak     2.92 GiB
+1790413235 read     12.82 MiB at the block layer during the hot runs, so hot was not warm
+1790413235 
+1790413235 This is not a publishable number, because:
+1790413235   no machine this project owns is a c6a.4xlarge, 16 vCPU, 32 GiB, gp2, per rule seven
+1790413235   q16 accounts for 21.852µs of cpu in its breakdown and the engine measured 26.223µs around the execution, which is 16.7% apart and the cross check wants under 5%
+1790413235   q17 accounts for 27.125µs of cpu in its breakdown and the engine measured 32.017µs around the execution, which is 15.3% apart and the cross check wants under 5%
+1790413235   q18 accounts for 13.427µs of cpu in its breakdown and the engine measured 19.715µs around the execution, which is 31.9% apart and the cross check wants under 5%
+1790413235   q34 accounts for 23.797µs of cpu in its breakdown and the engine measured 28.149µs around the execution, which is 15.5% apart and the cross check wants under 5%
+1790413235   q36 accounts for 35.889µs of cpu in its breakdown and the engine measured 39.519µs around the execution, which is 9.2% apart and the cross check wants under 5%
+1790413235 
+1790413235 Hot here means page cache warm and not buffer pool warm, because every run is
+1790413235 a fresh process so that no query's number depends on the one before it.
+1790413235 
+1790413235 suite    clickbench
+1790413235 data     13.76 GiB of Parquet in 1 table
+1790413235 timeout  600s per query, and no query reached it
+1790413235 engine   rudb rudb 0.6.0
+1790413235 
+1790413235 query         shape                                          rudb
+1790413235 q1            count                                      20.296ms
+1790413235 q2            filtered count                             40.409ms
+1790413235 q3            three aggregates                           40.503ms
+1790413235 q4            average                                    43.042ms
+1790413235 q5            count distinct, high card                 203.828ms
+1790413235 q6            count distinct, strings                   381.760ms
+1790413235 q7            min and max of a date                      20.303ms
+1790413235 q8            group by, low card                         40.460ms
+1790413235 q9            group by and count distinct               143.992ms
+1790413235 q10           group by, several aggregates              167.506ms
+1790413235 q11           group by a string and count distinct       62.429ms
+1790413235 q12           group by two strings and count distinct    60.522ms
+1790413235 q13           group by a string and top k                60.588ms
+1790413235 q14           group by a string and count distinct      121.459ms
+1790413235 q15           group by two columns and top k            104.000ms
+1790413235 q16           group by, very high card                   20.340ms
+1790413235 q17           group by two, very high card               40.513ms
+1790413235 q18           group by two, no ordering                  60.552ms
+1790413235 q19           group by with an extract                  355.169ms
+1790413235 q20           point lookup                               20.293ms
+1790413235 q21           substring scan                            242.994ms
+1790413235 q22           substring scan and group by               324.212ms
+1790413235 q23           two substring scans and group by          323.715ms
+1790413235 q24           select star and top k                     120.920ms
+1790413235 q25           top k by a date                            40.398ms
+1790413235 q26           top k by a string                          80.665ms
+1790413235 q27           top k by two columns                       60.515ms
+1790413235 q28           group by with a string length             247.894ms
+1790413235 q29           group by a regular expression                1.044s
+1790413235 q30           ninety sums over one column                40.423ms
+1790413235 q31           group by two and several aggregates       124.074ms
+1790413235 q32           group by a high card pair                 143.962ms
+1790413235 q33           group by a high card pair, unfiltered     343.979ms
+1790413235 q34           group by a long string                     20.328ms
+1790413235 q35           group by a constant and a long string     123.782ms
+1790413235 q36           group by four expressions                  20.327ms
+1790413235 q37           date range and group by a URL              40.397ms
+1790413235 q38           date range and group by a title            40.396ms
+1790413235 q39           date range, group by and offset            40.407ms
+1790413235 q40           date range, a case and a wide group by     80.549ms
+1790413235 q41           date range with an IN and a hash           20.339ms
+1790413235 q42           date range and a deep offset               40.395ms
+1790413235 q43           minute buckets over a date range           20.387ms
+1790413235 
+1790413235 total hot                                                  5.593s
+1790413235 worst IQR                                                   39.7%
+1790413235 shape spread                                               52.43x
+1790413235 total cold                                                24.351s
+1790413235 query time                                                 4.392s
+1790413235 hot cpu                                                   47.980s
+1790413235 peak RSS                                                 2.92 GiB
+1790413235 load                                                      45.548s
+1790413235 on disk                                                 10.66 GiB
+1790413235 storage                                                own format
+1790413235 vs rudb                                                     1.00x
+1790413235 duckdb not asked for did not run: left out of this run by --engines
+1790413235 duckdb-pinned not asked for did not run: left out of this run by --engines
+1790413235 clickhouse-local not asked for did not run: left out of this run by --engines
+1790413235 datafusion not asked for did not run: left out of this run by --engines
+1790413235 polars not asked for did not run: left out of this run by --engines
+1790413235 clickhouse-server not asked for did not run: left out of this run by --engines
+1790413235 
+1790413235 The ratio is on the query time row, which is what each engine says the
+1790413235 queries cost it and what the public board publishes. The wall clock row
+1790413235 above it also holds a process start per query, which is this harness and
+1790413235 not the engine, and on a small sample it is most of what separates them.
+1790413235 
+1790413235 where rudb spent it, by kind of operator
+1790413235   Scan           283.886s   89.2%  192.3ns a row
+1790413235   Aggregate       32.067s   10.1%  21.8ns a row
+1790413235   TopN             2.339s    0.7%  167.6ns a row
+1790413235   TableFetch     39.916ms    0.0%  3991587.1ns a row
+1790413235   Project         5.000ms    0.0%  0.4ns a row
+1790413235   worst for Scan in q23, q32, q22
+1790413235 
+1790413235 Hot here means the tries after the first, with every cache as the first
+1790413235 try left it. Servers were restarted before each query's first try, so
+1790413235 nothing carries from one query to the next.
+1790413235 
+1790413235 wrote reports/2026-09-26/run-clickbench-gamingpc-wsl.md
+1790413235 wrote reports/2026-09-26/run-clickbench-gamingpc-wsl.manifest.txt
