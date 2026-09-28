@@ -1,0 +1,29 @@
+{
+  "engine_source_commit": "998cc427fc33d9f96d1f9aebd213954f9e309b14",
+  "rebased_worktree_commit": "1a3e82474d94f4c245f9bfeac3217e167872eefc",
+  "pending_patch_measured": false,
+  "benchmark_base": "28b88eb7e001cfc96118b5f59145cb4da83fe1a0",
+  "harness_commit": "bebe2d9cf52c809e120726e4717b9e549db270d4",
+  "build": "CARGO_INCREMENTAL=0 cargo build --release -p rudb-cli --bin rudb -j8",
+  "binary_hashes": {
+    "duckdb": {
+      "path": "/home/gopher/rudb-bound-header-2026-09-28/bin/duckdb-1.5.5",
+      "sha256": "3d33b1df037cb049155c393778df7853fafb23e9d49d7c9cacdde4dd67155788",
+      "version": "v1.5.5 (Variegata) d8cdaa33fd"
+    },
+    "rudb": {
+      "path": "/home/gopher/rudb-bound-header-2026-09-28/bin/rudb-main-998cc427",
+      "sha256": "44df6e4acb876ac9df04f264328f698dd95752dda44b23278c39303daf6863dc",
+      "version": "rudb 0.8.3"
+    }
+  },
+  "artifacts": {
+    "summary.json": "5b4f06a81f556bd8b206e3b9d91a77036fe8def3d3c7a260e3aad4d01400272b",
+    "correctness.json": "b2fdcfd9ad7f08fcc661cb2c6a019324f3aee7c13a386de0c2710bf939ec228d",
+    "metadata.json": "c9c5ea6ed7069611d874f2260b1dc4fce0a041a4d45f42ecb77204392951c3ad",
+    "raw.jsonl.gz": "7fd7850bf3e4476332650a60decb10b7786a4e38419a2e3ccf0e99139519e311",
+    "outputs.tar.gz": "5e76837fad7882a4e1e8bda7065ad9828240d7058860a46278d790715f413fd8",
+    "per-query.md": "64e5af4ad8c7dbfefc00fe6358b6baf435203105dfca5312e3c6c80dd213e6e7",
+    "native-files.json": "90dc7c6a5ed4ab8781306671a5423874d60d1a63403f47d30532364db02ff025"
+  }
+}

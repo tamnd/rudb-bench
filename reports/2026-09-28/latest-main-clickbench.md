@@ -81,7 +81,7 @@ Every retained output was checked across all four cases and all six repetitions,
 | 1m | 27 | 8 | 8 | 0 |
 | 10m | 32 | 4 | 7 | 0 |
 
-Of 172 size/query combinations, {original} original outputs match and {order} contain the same rows in a different order. The remaining {selection} select different rows. All {selection} match after adding deterministic output-column tie breakers in separate untimed queries. The original SQL, outputs, and differences remain intact. A matching diagnostic does not prove that each originally selected row was correct; no blanket claim of identical original answers is made.
+Of 172 size/query combinations, 108 original outputs match and 21 contain the same rows in a different order. The remaining 43 select different rows. All 43 match after adding deterministic output-column tie breakers in separate untimed queries. The original SQL, outputs, and differences remain intact. A matching diagnostic does not prove that each originally selected row was correct; no blanket claim of identical original answers is made.
 
 ## Remaining performance gaps at 10m
 

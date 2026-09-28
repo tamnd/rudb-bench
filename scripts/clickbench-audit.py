@@ -28,6 +28,28 @@ HELPER = Path(__file__).with_name('measure-child')
 TIMER = re.compile(r"^Run Time \(s\): real ([0-9.]+).*$", re.M)
 
 
+def run_order(cases, run):
+    """Reverse neighboring rounds, rotating after each pair of rounds."""
+    offset = (run // 2) % len(cases)
+    ordered = cases[offset:] + cases[:offset]
+    return ordered if run % 2 == 0 else ordered[::-1]
+
+
+def wait_for_capacity(max_load, timeout):
+    """Wait outside the measured interval; preserve incomplete runs on timeout."""
+    start = time.monotonic()
+    last_notice = start - 30
+    while max_load is not None and os.getloadavg()[0] > max_load:
+        now = time.monotonic()
+        if now - start > timeout:
+            raise RuntimeError('host never reached the required capacity; this run is incomplete')
+        if now - last_notice >= 30:
+            print(f'Waiting: load {os.getloadavg()[0]:.2f}, limit {max_load:.2f}', flush=True)
+            last_notice = now
+        time.sleep(1)
+    return time.monotonic() - start
+
+
 def measure(command, prefix, timeout):
     """Reap this exact child; never subtract cumulative RUSAGE_CHILDREN peaks."""
     prefix = Path(prefix)
@@ -116,7 +138,7 @@ def digest(path):
 
 def render(root, records, sizes, hot):
     lines = ['# ClickBench measurement audit', '',
-             'All 43 SQL queries are attempted on DuckDB native, rudb native, DuckDB Parquet, and rudb Parquet. Five hot repetitions are required for a complete row. A failed repetition invalidates that query; successful fragments are never averaged into a result.', '',
+             f'All 43 SQL queries are attempted on DuckDB native, rudb native, DuckDB Parquet, and rudb Parquet. {hot} hot repetitions are required for a complete row. A failed repetition invalidates that query; successful fragments are never averaged into a result.', '',
              'First execution is not disk-cold: the page cache is not flushed. Each repetition uses a fresh process. Query seconds are the CLI timer, including result rendering; wall and CPU seconds and peak RSS cover the whole child process. CPU and RSS come from wait4 for that child. RSS is the maximum resident set, not allocated bytes or an incremental memory delta. Both native rows open a loaded single-file database. Both Parquet rows query the same source file with native mirroring disabled; metadata-only paths remain available. These are sample results, not official ClickBench scores.', '',
              '| Size | Engine | Load wall (s) | Load CPU (s) | Load peak RSS (MiB) | Native bytes |',
              '| --- | --- | ---: | ---: | ---: | ---: |']
@@ -193,9 +215,13 @@ def main():
     p.add_argument('--timeout', type=float, default=120)
     p.add_argument('--threads', type=int, default=6)
     p.add_argument('--memory-limit', default='4GB')
+    p.add_argument('--max-load', type=float, help='wait before each child until the one-minute load is at most this value')
+    p.add_argument('--idle-timeout', type=float, default=600)
     a = p.parse_args()
     if sys.platform not in ('linux', 'darwin') or a.hot < 5 or a.timeout <= 0 or a.threads < 1:
         p.error('Linux or macOS, at least five hot runs, positive threads and timeout are required')
+    if not math.isfinite(a.idle_timeout) or a.idle_timeout <= 0 or (a.max_load is not None and (not math.isfinite(a.max_load) or a.max_load <= 0)):
+        p.error('capacity limits must be finite and positive')
     root = a.output.resolve()
     root.mkdir(parents=True, exist_ok=True)
     log = (root / 'raw.jsonl').open('x')
@@ -215,6 +241,8 @@ def main():
                 cache='first/unflushed; fresh process for every repetition', hot_runs=a.hot,
                 threads=a.threads, memory_limit=a.memory_limit, stored_answers=False,
                 parquet_mirror=False,
+                max_load=a.max_load, idle_timeout=a.idle_timeout,
+                order='rotate after each pair of rounds; reverse the second round',
                 sql_sha256={f.name: digest(f) for f in (root / 'sql').glob('*.sql')}, datasets={})
     settings_sql = f"SET threads={a.threads}; SET memory_limit='{a.memory_limit.replace(chr(39), chr(39)*2)}'"
     schema = (root / 'sql/schema.sql').read_text()
@@ -230,9 +258,11 @@ def main():
         load_sql = f'CREATE TABLE hits ({schema}); INSERT INTO hits {scan}; CHECKPOINT;'
         for engine, database in databases.items():
             binary = binaries['duckdb'] if engine == 'duckdb-native' else binaries['rudb']
+            idle_wait = wait_for_capacity(a.max_load, a.idle_timeout)
+            load_before = os.getloadavg()
             load = measure([binary, '-batch', str(database), '-c', settings_sql, '-c', load_sql], root / f'{size}-{engine}-load', a.timeout)
             load.update(size=size, engine=engine, phase='load', database_bytes=database.stat().st_size if database.exists() else None,
-                        load_sql=load_sql)
+                        load_sql=load_sql, idle_wait_s=idle_wait, load_before=load_before, load_after=os.getloadavg())
             save(load)
             if load['status'] != 'ok':
                 raise RuntimeError(f'{engine} load failed: {load}')
@@ -248,8 +278,7 @@ def main():
             engines = ['duckdb-native', 'rudb-native', 'duckdb-parquet', 'rudb-parquet']
             failed = set()
             for run in range(a.hot + 1):
-                offset = (q + run) % len(engines)
-                for engine in engines[offset:] + engines[:offset]:
+                for engine in run_order(engines, run + 2*q):
                     if engine in failed:
                         continue
                     binary = binaries['rudb'] if engine.startswith('rudb') else binaries['duckdb']
@@ -263,8 +292,11 @@ def main():
                     if engine.endswith('parquet'):
                         command += ['-c', f'CREATE VIEW hits AS {scan}']
                     command += ['-c', sql]
+                    idle_wait = wait_for_capacity(a.max_load, a.idle_timeout)
+                    load_before = os.getloadavg()
                     r = measure(command, root / f'{size}-{engine}-q{q}-r{run}', a.timeout)
-                    r.update(size=size, engine=engine, query=q, run=run, phase='query', load=os.getloadavg())
+                    r.update(size=size, engine=engine, query=q, run=run, phase='query', load=os.getloadavg(),
+                             idle_wait_s=idle_wait, load_before=load_before, load_after=os.getloadavg())
                     save(r)
                     if r['status'] != 'ok':
                         failed.add(engine)
