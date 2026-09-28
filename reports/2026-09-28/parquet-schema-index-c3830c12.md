@@ -45,3 +45,5 @@ All 184 Parquet crate tests passed at this revision. Strict Clippy passed with a
 ## Evidence
 
 The [evidence archive](parquet-schema-index-c3830c12/evidence.tar.gz) contains all 1,440 stdout, stderr and resource records, raw journals, command metadata, twelve Callgrind files and their outputs, profiler script, and clean build and test logs. The [provenance](parquet-schema-index-c3830c12/provenance.json) records revisions, archive hash, capacity ranges, and recomputed summaries. Binaries and datasets are excluded. The whole-suite main rerun is recorded separately.
+
+The [candidate patch](parquet-schema-index-c3830c12/candidate.patch) is the measured diff from c3830c12 to 2984cfc8. Its SHA-256 is `7d06fc85173de08a0963ec6a9c32c52227d4414c557e12a37d2301c9b00f6049`.
