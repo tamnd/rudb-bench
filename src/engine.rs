@@ -548,11 +548,13 @@ pub fn memory_limit_statement() -> Option<String> {
 
 /// Whether rudb is told not to answer from what it wrote at load time.
 ///
-/// Always, so every rudb query runs after `SET stored_answers = false`. That turns off the whole
-/// table summaries, the value and pair frequencies, the host groups and the run projections, which
-/// ClickBench's rules count as precomputed answers, so rudb reads the rows the way the other
-/// engines do. `RUDB_BENCH_STORED_ANSWERS` is no longer read, so an old command line that sets it
-/// still runs and cannot turn them back on.
+/// Always, so every rudb query runs after `SET stored_answers = false`. Since tamnd/rudb#2020 that
+/// turns off the results rudb keeps for a query shape, which are the host groups and the pair
+/// frequencies, so no query is answered from a result stored at load time. The per column
+/// statistics (row count, null counts, bounds, totals, distinct counts and value frequencies) stay
+/// on, the same way the other engines keep and use their own metadata. The report marks every
+/// query rudb answered from them. `RUDB_BENCH_STORED_ANSWERS` is no longer read, so an old command
+/// line that sets it still runs and cannot turn them back on.
 #[must_use]
 pub fn rudb_stored_answers_off() -> bool {
     true

@@ -1823,7 +1823,8 @@ fn help() {
     println!("                    count, RUDB_BENCH_LOAD_WAIT seconds at most (default 1800).");
     println!("                    RUDB_BENCH_MEMORY sets the one memory budget every engine");
     println!("                    gets, default 80% of RAM. Every rudb query runs after");
-    println!("                    SET stored_answers = false, so no answer comes from the load.");
+    println!("                    SET stored_answers = false, so no answer comes from a result");
+    println!("                    kept at load time. Column statistics stay on.");
     println!("                    RUDB_BENCH_THREADS tells every engine the same thread count,");
     println!("                    for a run pinned to some of the cores with taskset");
     println!("    --sample-file f with --rows, run over this sample file instead of cutting one");

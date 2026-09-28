@@ -1141,14 +1141,16 @@ fn measured(compared: &Comparison, protocol: &crate::report::Protocol) -> String
     let said = if flagged.is_empty() { "no query".to_owned() } else { flagged.join(", ") };
     if crate::engine::rudb_stored_answers_off() {
         out.push_str(&format!(
-            "rudb writes summaries of each column when it loads a table, and it can answer some \
-             queries from those without reading the rows. This run turned that off with `SET \
-             stored_answers = false` before every rudb query, which rudb-bench always does. That \
-             also turns off the value and pair frequencies, the host groups and the run projections \
-             it keeps, so rudb read the rows the way the other engines did. Its metrics said it still answered \
-             from stored summaries for {said}. The per query table marks any such query, and it \
-             also marks q1 to q7, whose shapes (counts, sums, averages, distinct counts and bounds \
-             over the whole table) are the ones a summary can answer. The headline below gives the \
+            "rudb writes statistics of each column when it loads a table (row count, null counts, \
+             bounds, totals, distinct counts and value frequencies), and it can answer some queries \
+             from those without reading the rows. It also used to keep results for a query shape, \
+             the host groups and the pair frequencies. This run set `stored_answers = false` before \
+             every rudb query, which rudb-bench always does, and that turns off those kept results, \
+             so no query was answered from a result stored at load time. The column statistics stay \
+             on, the same way the other engines use their own metadata. Its metrics said it \
+             answered from them for {said}. The per query table marks any such query, and it also \
+             marks q1 to q7, whose shapes (counts, sums, averages, distinct counts and bounds over \
+             the whole table) are the ones the statistics can answer. The headline below gives the \
              ratios both with and without q1 to q7.\n\n"
         ));
     } else {
