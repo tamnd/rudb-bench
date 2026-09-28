@@ -1,0 +1,58 @@
+[
+  {
+    "path": "/tmp/rudb-main-47e25af3-macos/results/main-47e25af3-macos/1k.duckdb",
+    "bytes": 1060864,
+    "sha256": "f48e41482ceb4e7d229b09627fae077b707013e656bd071279d7e728b94424a5",
+    "size": "1k",
+    "engine": "duckdb"
+  },
+  {
+    "path": "/tmp/rudb-main-47e25af3-macos/results/main-47e25af3-macos/1k.rudb",
+    "bytes": 1876635,
+    "sha256": "190d8725a4b27fb76e75199e75284d5876ba8c594c3ae1a27b59fa40e6d57a0c",
+    "size": "1k",
+    "engine": "rudb"
+  },
+  {
+    "path": "/tmp/rudb-main-47e25af3-macos/results/main-47e25af3-macos/10k.duckdb",
+    "bytes": 4730880,
+    "sha256": "1eb052005825293bda9382f2fb5f6c6d3932fb7b5f4864c231df4c1646f5ee4a",
+    "size": "10k",
+    "engine": "duckdb"
+  },
+  {
+    "path": "/tmp/rudb-main-47e25af3-macos/results/main-47e25af3-macos/10k.rudb",
+    "bytes": 7732602,
+    "sha256": "e06da0e48e4b90045e1402d1593f8ca0196833e0254b0c3e460eae95b5492dce",
+    "size": "10k",
+    "engine": "rudb"
+  },
+  {
+    "path": "/tmp/rudb-main-47e25af3-macos/results/main-47e25af3-macos/1m.duckdb",
+    "bytes": 454569984,
+    "sha256": "c7dc3614215b3130be7809404e3147df946bf945a37d14bcce437df6fa57c59b",
+    "size": "1m",
+    "engine": "duckdb"
+  },
+  {
+    "path": "/tmp/rudb-main-47e25af3-macos/results/main-47e25af3-macos/1m.rudb",
+    "bytes": 246771334,
+    "sha256": "60a4da90238b17a6f797b29b0bb69bf7e9e171cb02084f85ded13adf179c1365",
+    "size": "1m",
+    "engine": "rudb"
+  },
+  {
+    "path": "/tmp/rudb-main-47e25af3-macos/results/main-47e25af3-macos/10m.duckdb",
+    "bytes": 2359832576,
+    "sha256": "db83a7cd0318bafab31ba34cc947f23c76ab3ef8bfbc63c24f6d8dcbfca5a043",
+    "size": "10m",
+    "engine": "duckdb"
+  },
+  {
+    "path": "/tmp/rudb-main-47e25af3-macos/results/main-47e25af3-macos/10m.rudb",
+    "bytes": 1469077072,
+    "sha256": "7c264f8dbf02c753247caba0a9cb365e7e9d6d91751eada84bf6fa2984f7239c",
+    "size": "10m",
+    "engine": "rudb"
+  }
+]
