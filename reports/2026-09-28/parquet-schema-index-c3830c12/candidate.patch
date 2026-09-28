@@ -1,0 +1,118 @@
+diff --git a/crates/rudb-parquet/src/metadata.rs b/crates/rudb-parquet/src/metadata.rs
+index c35c7f6d..f899cb1c 100644
+--- a/crates/rudb-parquet/src/metadata.rs
++++ b/crates/rudb-parquet/src/metadata.rs
+@@ -18,6 +18,7 @@
+ //! count and a page longer than the chunk that contains it are all things a corrupt file can say,
+ //! and each one is checked where it is used rather than assumed away here.
+ 
++use std::collections::HashMap;
+ use std::fmt::Write as _;
+ 
+ use rudb_common::bounds::End;
+@@ -372,9 +373,10 @@ impl Metadata {
+         if schema.is_empty() {
+             return Err(Error::io("a parquet footer with no schema in it"));
+         }
++        let columns = SchemaIndex::new(&schema);
+         let row_groups = groups
+             .into_iter()
+-            .map(|group| resolve(group, &schema))
++            .map(|group| resolve(group, &columns))
+             .collect::<Result<Vec<RowGroup>>>()?;
+         Ok(Self { version, rows, schema, row_groups, created_by })
+     }
+@@ -445,20 +447,48 @@ struct RawChunk {
+     offset_index: Option<Region>,
+ }
+ 
++/// Resolve paths once for the schema, rather than search it for every chunk of every row group.
++struct SchemaIndex<'a> {
++    schema: &'a [SchemaColumn],
++    first: HashMap<&'a str, usize>,
++    unique: bool,
++}
++
++impl<'a> SchemaIndex<'a> {
++    fn new(schema: &'a [SchemaColumn]) -> Self {
++        let mut first = HashMap::with_capacity(schema.len());
++        for (at, column) in schema.iter().enumerate() {
++            first.entry(column.name.as_str()).or_insert(at);
++        }
++        let unique = first.len() == schema.len();
++        Self { schema, first, unique }
++    }
++
++    fn column(&self, name: &str, position: usize) -> Option<usize> {
++        // Writers ordinarily put chunks in schema order. Check the name even then, because a
++        // reordered row group must resolve by its path. Repeated names retain the old first-match
++        // behavior rather than claiming an ordinal the path cannot distinguish.
++        if self.unique && self.schema.get(position).is_some_and(|column| column.name == name) {
++            Some(position)
++        } else {
++            self.first.get(name).copied()
++        }
++    }
++}
++
+ /// Matches every chunk of a row group to the schema column it belongs to.
+-fn resolve(group: RawGroup, schema: &[SchemaColumn]) -> Result<RowGroup> {
++fn resolve(group: RawGroup, schema: &SchemaIndex<'_>) -> Result<RowGroup> {
+     let mut columns = Vec::with_capacity(group.columns.len());
+-    for chunk in group.columns {
++    for (position, chunk) in group.columns.into_iter().enumerate() {
+         let [name] = &chunk.path[..] else {
+             return Err(Error::not_implemented(format!(
+                 "a parquet column at path {}, which is nested",
+                 chunk.path.join(".")
+             )));
+         };
+-        let column =
+-            schema.iter().position(|candidate| &candidate.name == name).ok_or_else(|| {
+-                Error::io(format!("a column chunk for {name}, which is not a column"))
+-            })?;
++        let column = schema.column(name, position).ok_or_else(|| {
++            Error::io(format!("a column chunk for {name}, which is not a column"))
++        })?;
+         columns.push(ColumnChunk {
+             column,
+             physical: chunk.physical,
+@@ -1120,7 +1150,7 @@ mod tests {
+     use rudb_common::LogicalType;
+     use rudb_io::{Filesystem, OpenMode, RealFilesystem};
+ 
+-    use super::{Codec, Encoding, Metadata, Outline, Physical};
++    use super::{Codec, Encoding, Metadata, Outline, Physical, SchemaIndex};
+ 
+     /// The file every test here reads.
+     ///
+@@ -1141,6 +1171,29 @@ mod tests {
+         Metadata::read(file.as_ref()).expect("reads the footer")
+     }
+ 
++    #[test]
++    fn chunk_paths_resolve_in_and_out_of_schema_order() {
++        let metadata = read();
++        let index = SchemaIndex::new(&metadata.schema);
++        for (at, column) in metadata.schema.iter().enumerate() {
++            for position in 0..metadata.schema.len() + 2 {
++                assert_eq!(index.column(&column.name, position), Some(at));
++            }
++        }
++        assert_eq!(index.column("not_a_column", 0), None);
++        assert_eq!(index.column(&metadata.schema[0].name.to_uppercase(), 0), None);
++    }
++
++    #[test]
++    fn repeated_schema_names_keep_the_first_path_match() {
++        let mut schema = read().schema;
++        schema[1].name = schema[0].name.clone();
++        let index = SchemaIndex::new(&schema);
++        assert_eq!(index.column(&schema[0].name, 0), Some(0));
++        assert_eq!(index.column(&schema[0].name, 1), Some(0));
++        assert_eq!(index.column(&schema[0].name, schema.len() + 1), Some(0));
++    }
++
+     #[test]
+     fn the_distinct_counts_the_writer_stated_come_back_and_the_ones_it_did_not_are_absent() {
+         // DuckDB states this for the columns it already knew the number for and leaves it off the

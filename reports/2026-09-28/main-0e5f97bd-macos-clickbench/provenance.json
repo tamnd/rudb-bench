@@ -1,0 +1,113 @@
+{
+  "main_revision": "0e5f97bdf437ce41462b79441596c3d848578405",
+  "verified_readings": 5512,
+  "query_children": 5504,
+  "load_children": 8,
+  "aggregates": [
+    {
+      "size": "1k",
+      "format": "native",
+      "duckdb_wall_s": 0.76523,
+      "rudb_wall_s": 0.248534,
+      "wall_ratio": 3.0789751100453056,
+      "duckdb_cpu_s": 0.77218,
+      "rudb_cpu_s": 0.209965,
+      "duckdb_max_rss_mib": 33.78125,
+      "rudb_max_rss_mib": 11.953125
+    },
+    {
+      "size": "1k",
+      "format": "parquet",
+      "duckdb_wall_s": 0.766781,
+      "rudb_wall_s": 0.25055,
+      "wall_ratio": 3.0603911394931154,
+      "duckdb_cpu_s": 0.7765070000000001,
+      "rudb_cpu_s": 0.21260600000000002,
+      "duckdb_max_rss_mib": 32.453125,
+      "rudb_max_rss_mib": 11.546875
+    },
+    {
+      "size": "10k",
+      "format": "native",
+      "duckdb_wall_s": 0.926786,
+      "rudb_wall_s": 0.310059,
+      "wall_ratio": 2.989063371809882,
+      "duckdb_cpu_s": 0.956336,
+      "rudb_cpu_s": 0.27049,
+      "duckdb_max_rss_mib": 38.28125,
+      "rudb_max_rss_mib": 14.671875
+    },
+    {
+      "size": "10k",
+      "format": "parquet",
+      "duckdb_wall_s": 0.946574,
+      "rudb_wall_s": 0.323249,
+      "wall_ratio": 2.928312229890889,
+      "duckdb_cpu_s": 0.972666,
+      "rudb_cpu_s": 0.279051,
+      "duckdb_max_rss_mib": 37.09375,
+      "rudb_max_rss_mib": 14.75
+    },
+    {
+      "size": "1m",
+      "format": "native",
+      "duckdb_wall_s": 1.837202,
+      "rudb_wall_s": 0.589857,
+      "wall_ratio": 3.1146566032106087,
+      "duckdb_cpu_s": 4.602681,
+      "rudb_cpu_s": 1.122177,
+      "duckdb_max_rss_mib": 271.953125,
+      "rudb_max_rss_mib": 82.625
+    },
+    {
+      "size": "1m",
+      "format": "parquet",
+      "duckdb_wall_s": 2.191874,
+      "rudb_wall_s": 1.547823,
+      "wall_ratio": 1.4161011950332822,
+      "duckdb_cpu_s": 5.708959999999999,
+      "rudb_cpu_s": 4.815067,
+      "duckdb_max_rss_mib": 405.28125,
+      "rudb_max_rss_mib": 339.65625
+    },
+    {
+      "size": "10m",
+      "format": "native",
+      "duckdb_wall_s": 7.325699,
+      "rudb_wall_s": 1.602111,
+      "wall_ratio": 4.572528994557805,
+      "duckdb_cpu_s": 30.01201,
+      "rudb_cpu_s": 5.054315,
+      "duckdb_max_rss_mib": 1164.671875,
+      "rudb_max_rss_mib": 279.859375
+    },
+    {
+      "size": "10m",
+      "format": "parquet",
+      "duckdb_wall_s": 9.395097999999999,
+      "rudb_wall_s": 7.451229,
+      "wall_ratio": 1.2608789771459177,
+      "duckdb_cpu_s": 39.080299,
+      "rudb_cpu_s": 35.642443,
+      "duckdb_max_rss_mib": 995.8125,
+      "rudb_max_rss_mib": 804.71875
+    }
+  ],
+  "archive_sha256": "2301dadf74ccd30067888017bcad266e2ab8fd152c9fc6101d222fb6e05736e0",
+  "gated_attempt_sha256": "6cc9ea671fca9f26d6d28e5e046c3a031a97e92a18cc1f159849abc38172655a",
+  "earlier_cutoff_sha256": "997e249df9cb0579a8ae0d2ee41c6c4966376d61f72b06bb5f5f184bda93652c",
+  "linux_failure_sha256": "d4bf3861c06ef9fffec98f1b8ab5ad26d09e5c67c3bebd70c7bacf9f14c12aad",
+  "load_before_range": [
+    6.1982421875,
+    29.05517578125
+  ],
+  "load_after_range": [
+    6.1982421875,
+    29.05517578125
+  ],
+  "stored_answers": false,
+  "parquet_mirror": false,
+  "engine": "first",
+  "capacity_limit": null,
+  "continuation": false
+}
