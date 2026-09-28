@@ -2201,9 +2201,7 @@ impl Rudb {
         self.source_bytes = tables.iter().map(|t| t.bytes).sum();
 
         // One process for every table, so the load is one open and one metrics document per
-        // statement rather than a process start per table. There is no CHECKPOINT after it the way
-        // DuckDB has one, because there is nothing to checkpoint: a native file is durable when the
-        // statement that wrote it returns, and the clock stops after that.
+        // statement rather than a process start per table.
         let mut command = self.runner.command(&binary);
         command.arg("-batch").arg("-csv").arg("-noheader");
         if let Some(path) = self.runner.metrics_path() {
@@ -2218,8 +2216,25 @@ impl Rudb {
         }
         let start = Instant::now();
         let ran = self.runner.go(command, "rudb", None)?;
-        let took = start.elapsed();
         let spent = self.runner.spent();
+        // CHECKPOINT before the clock stops, the way the DuckDB loader does. It used to be left out
+        // on the grounds that a native file is durable when the statement that wrote it returns,
+        // which is true and is not the whole story: CHECKPOINT is also where the statistics
+        // summaries, the text sketches and every graph section are built, so a file that has never
+        // had one is a file the reader has to answer every query the slow way. A corpus loaded
+        // without it reads 10.35 G instructions over TPC-H SF1 against 9.89 G with it, and q13 alone
+        // is twice the work because its `LIKE` walks all 1,500,000 comments instead of the one
+        // percent a sketch would leave. The cost belongs here rather than in the first query, so it
+        // is inside the timed region and its bytes are in the file this sizes.
+        let mut after = self.runner.command(&binary);
+        after.arg("-batch").arg("-csv").arg("-noheader").arg(database);
+        if let Some(statement) = memory_limit_statement() {
+            after.arg("-c").arg(statement);
+        }
+        after.arg("-c").arg("CHECKPOINT");
+        let checkpoint = self.runner.go(after, "rudb", None)?;
+        let spent = spent.and(self.runner.spent());
+        let took = start.elapsed();
 
         let on_disk = std::fs::metadata(database)
             .map(|m| m.len())
@@ -2230,7 +2245,7 @@ impl Rudb {
             on_disk,
             on_disk_is: "its own database file".to_owned(),
             converted: true,
-            cpu: ran.cost.cpu,
+            cpu: add(ran.cost.cpu, checkpoint.cost.cpu),
             // The last statement's document, which is the largest table on every suite here that
             // has more than one. rudb 0.4 writes no document for a `CREATE TABLE ... AS SELECT`, so
             // today this is empty, and it fills in when the load profile carries the budget's peak
