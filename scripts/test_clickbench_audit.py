@@ -15,6 +15,15 @@ spec.loader.exec_module(audit)
 
 @unittest.skipUnless(sys.platform in ('linux', 'darwin'), 'wait4 resource units')
 class MeasurementTests(unittest.TestCase):
+    def test_sql_error_with_zero_exit_does_not_reuse_an_earlier_timer(self):
+        with tempfile.TemporaryDirectory() as d:
+            row = audit.measure([sys.executable, '-c',
+                "import sys; print('Run Time (s): real 0.123'); print('Catalog Error: missing table', file=sys.stderr)"],
+                Path(d) / 'sql-error', 10)
+            self.assertEqual(row['exit_code'], 0)
+            self.assertEqual(row['status'], 'query_error')
+            self.assertIsNone(row['query_s'])
+
     def test_a_measurement_cannot_reenable_the_parquet_mirror(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {'RUDB_PARQUET_MIRROR': '1'}):
             prefix = Path(d) / 'mirror'

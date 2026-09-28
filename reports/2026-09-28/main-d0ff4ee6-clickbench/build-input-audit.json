@@ -1,0 +1,19 @@
+{
+  "source_file_hashes": {
+    "8d09c34b": {
+      "src-main-8d09c34b/crates/rudb/src/database.rs": "e54ce7431107f49018b63f82d4f7367d80a83cee2a699244de329d8dc070dcb6",
+      "src-main-8d09c34b/crates/rudb-qc-gen/src/lib.rs": "4b50d64095d56f632d3ca653f350a1a4f0293dd149cc5a50d4c14f677e7bcdbb"
+    },
+    "d0ff4ee6": {
+      "src-main-d0ff4ee6/crates/rudb/src/database.rs": "de18620447200b31c3ac5b9a16d8b9b9c56baf61f1496f558b0cd82ef5eaffb2",
+      "src-main-d0ff4ee6/crates/rudb-qc-gen/src/lib.rs": "a0e8d862c90985c020d3d56873cd2e0cbf1491822f26242a75f4f007c50b1fed"
+    }
+  },
+  "rejected_binary": {
+    "path": "bin/rejected-d0ff4ee6-reused-cache",
+    "sha256": "522671e679837415ad5dfd4d05134b47d3b3fde24ec9ef96c80fb9ffd62b537f",
+    "reason": "Reused-target build completed in 0.06 seconds without recompiling changed source. Identical to the 8d09c34b binary. Never measured."
+  },
+  "measured_binary_sha256": "b8e3bf1f7e3d950c695297aed1ec546f60ffb1dbe6a59b03d4190314ea996fed",
+  "fresh_target": "target-main-d0ff4ee6"
+}
