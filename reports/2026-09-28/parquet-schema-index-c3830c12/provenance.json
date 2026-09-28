@@ -1,0 +1,152 @@
+{
+  "main_revision": "c3830c12e583ed72468a7d5519da42a406f5db50",
+  "candidate_revision": "2984cfc8d45c0e793fb1340636f233324e1cbcb4",
+  "evidence_sha256": "6b1eee62d6fd975bbee0dbe98e16aeb0df75804299da408aecd4ed0bcd7ff917",
+  "verified_children": 1440,
+  "sizes": {
+    "1k": {
+      "load_before_min": 4.4140625,
+      "load_before_max": 4.4140625,
+      "summary": {
+        "main-native": {
+          "wall_s": 0.001761839,
+          "cpu_s": 0.001729,
+          "peak_rss_bytes": 11583488
+        },
+        "candidate-native": {
+          "wall_s": 0.001747813,
+          "cpu_s": 0.001706,
+          "peak_rss_bytes": 11337728
+        },
+        "duckdb-native": {
+          "wall_s": 0.010153876,
+          "cpu_s": 0.011645,
+          "peak_rss_bytes": 27484160
+        },
+        "main-parquet": {
+          "wall_s": 0.001883781,
+          "cpu_s": 0.001857,
+          "peak_rss_bytes": 11845632
+        },
+        "candidate-parquet": {
+          "wall_s": 0.001867836,
+          "cpu_s": 0.001844,
+          "peak_rss_bytes": 11931648
+        },
+        "duckdb-parquet": {
+          "wall_s": 0.010791556,
+          "cpu_s": 0.012322,
+          "peak_rss_bytes": 27242496
+        }
+      }
+    },
+    "10k": {
+      "load_before_min": 4.380859375,
+      "load_before_max": 4.380859375,
+      "summary": {
+        "main-native": {
+          "wall_s": 0.002055065,
+          "cpu_s": 0.00203,
+          "peak_rss_bytes": 11571200
+        },
+        "candidate-native": {
+          "wall_s": 0.002020632,
+          "cpu_s": 0.00199,
+          "peak_rss_bytes": 11571200
+        },
+        "duckdb-native": {
+          "wall_s": 0.009928983,
+          "cpu_s": 0.01129,
+          "peak_rss_bytes": 27492352
+        },
+        "main-parquet": {
+          "wall_s": 0.00185106,
+          "cpu_s": 0.001825,
+          "peak_rss_bytes": 11845632
+        },
+        "candidate-parquet": {
+          "wall_s": 0.001827327,
+          "cpu_s": 0.001804,
+          "peak_rss_bytes": 11972608
+        },
+        "duckdb-parquet": {
+          "wall_s": 0.010448185,
+          "cpu_s": 0.011938,
+          "peak_rss_bytes": 27246592
+        }
+      }
+    },
+    "1m": {
+      "load_before_min": 4.380859375,
+      "load_before_max": 4.380859375,
+      "summary": {
+        "main-native": {
+          "wall_s": 0.002096288,
+          "cpu_s": 0.002065,
+          "peak_rss_bytes": 11571200
+        },
+        "candidate-native": {
+          "wall_s": 0.002021901,
+          "cpu_s": 0.001997,
+          "peak_rss_bytes": 11337728
+        },
+        "duckdb-native": {
+          "wall_s": 0.010328011,
+          "cpu_s": 0.011686,
+          "peak_rss_bytes": 27713536
+        },
+        "main-parquet": {
+          "wall_s": 0.002683853,
+          "cpu_s": 0.003193,
+          "peak_rss_bytes": 12435456
+        },
+        "candidate-parquet": {
+          "wall_s": 0.002626054,
+          "cpu_s": 0.003091,
+          "peak_rss_bytes": 12652544
+        },
+        "duckdb-parquet": {
+          "wall_s": 0.011818713,
+          "cpu_s": 0.013205,
+          "peak_rss_bytes": 28028928
+        }
+      }
+    },
+    "10m": {
+      "load_before_min": 6.99365234375,
+      "load_before_max": 7.9208984375,
+      "summary": {
+        "main-native": {
+          "wall_s": 0.003363542,
+          "cpu_s": 0.003339,
+          "peak_rss_bytes": 13148160
+        },
+        "candidate-native": {
+          "wall_s": 0.003313093,
+          "cpu_s": 0.003288,
+          "peak_rss_bytes": 12910592
+        },
+        "duckdb-native": {
+          "wall_s": 0.01165658,
+          "cpu_s": 0.013335,
+          "peak_rss_bytes": 28258304
+        },
+        "main-parquet": {
+          "wall_s": 0.113853507,
+          "cpu_s": 0.116212,
+          "peak_rss_bytes": 123879424
+        },
+        "candidate-parquet": {
+          "wall_s": 0.108359681,
+          "cpu_s": 0.111386,
+          "peak_rss_bytes": 124334080
+        },
+        "duckdb-parquet": {
+          "wall_s": 0.257383898,
+          "cpu_s": 0.256612,
+          "peak_rss_bytes": 157523968
+        }
+      }
+    }
+  }
+}
