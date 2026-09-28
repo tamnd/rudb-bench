@@ -24,9 +24,10 @@ for size, data in meta['datasets'].items():
     view = f"CREATE VIEW hits AS SELECT {projection} FROM read_parquet('{source}', binary_as_string=True)"
     for q in range(1, 44):
         engines = ['duckdb-native', 'rudb-native', 'duckdb-parquet', 'rudb-parquet']
-        pair = [next(r for r in raw if r.get('size') == size and r.get('query') == q and r.get('run') == 0 and r['engine'] == e) for e in engines]
-        if any(r['status'] != 'ok' for r in pair):
-            checks.append(dict(size=size, query=q, result='execution failed'))
+        pair = [r for r in raw if r.get('size') == size and r.get('query') == q
+                and r.get('phase') == 'query' and r['engine'] in engines]
+        if len(pair) != len(engines) * (meta['hot_runs'] + 1) or any(r['status'] != 'ok' for r in pair):
+            checks.append(dict(size=size, query=q, result='execution failed or incomplete'))
             continue
         answers = [audit.answer(root/r['stdout']) for r in pair]
         if all(audit.equal(answers[0], answer) for answer in answers[1:]):
@@ -56,11 +57,15 @@ for size, data in meta['datasets'].items():
                 command += [str(root/f'{size}.{suffix}')]
             else:
                 command += ['-c', view]
+            if 'threads' in meta:
+                command += ['-c', f"SET threads={meta['threads']}; SET memory_limit='{meta['memory_limit']}'"]
+            if e.startswith('rudb'):
+                command += ['-c', 'SET stored_answers=false']
             command += ['-c', deterministic]
             r = audit.measure(command, root/f'{size}-{e}-q{q}-verify', 120)
             statuses.append(r['status'])
             outputs.append(audit.answer(root/r['stdout']))
-        result = 'deterministic retest match' if all(status == 'ok' for status in statuses) and all(audit.equal(outputs[0], output) for output in outputs[1:]) else 'UNRESOLVED deterministic retest'
+        result = 'original selections differ; deterministic retest match' if all(status == 'ok' for status in statuses) and all(audit.equal(outputs[0], output) for output in outputs[1:]) else 'UNRESOLVED deterministic retest'
         checks.append(dict(size=size, query=q, result=result, statuses=statuses, sql=deterministic))
         print(size, q, result, flush=True)
 (root/'correctness.json').write_text(json.dumps(checks, indent=2)+'\n')

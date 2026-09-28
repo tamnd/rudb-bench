@@ -1,0 +1,22 @@
+{
+  "rudb_commit": "cd9d493c0df4053cb0e34fc07cd1e8652b77fa76",
+  "rudb_bench_base_commit": "0f2b0af5817fef1c4417a98909e09327bb1df675",
+  "build_command": "CARGO_INCREMENTAL=0 cargo build -q --release -p rudb-cli --bin rudb -j4",
+  "optional_projections_built": false,
+  "machine_model": "Mac16,13",
+  "ram_bytes": 25769803776,
+  "swap_during_run": "vm.swapusage: total = 17920.00M  used = 17259.25M  free = 660.75M  (encrypted)",
+  "input_schema": "Previously normalized DATE and TIMESTAMP columns. Identity SELECT * is the same load projection for both engines.",
+  "previous_measured_commit": "0fc61d7e8ed5fc35f636e3148a31532015285bdb",
+  "reason_for_repeat": "PR #2068 changed aggregate merging during the preceding timed run. Rebased again and repeated the complete suite.",
+  "limitations": "Shared host, warm OS cache, no disk-cold guarantee. Successive runs do not isolate a commit effect.",
+  "query_load_1m_range": [
+    18.02685546875,
+    45.93798828125
+  ],
+  "observed_load_during_10m_loading": [
+    53.72607421875,
+    40.103515625,
+    26.3896484375
+  ]
+}
