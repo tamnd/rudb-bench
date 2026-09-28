@@ -1,4 +1,4 @@
-/* Linux-only resource reader. A small native parent avoids charging the Python
+/* Per-child resource reader. A small native parent avoids charging the Python
  * orchestrator's pre-exec resident pages to small children. It records wait4's
  * per-child counters, not the cumulative RUSAGE_CHILDREN high water mark. */
 #define _GNU_SOURCE
@@ -28,15 +28,27 @@ int main(int argc, char **argv) {
     FILE *out = fopen(argv[1], "w");
     if (!out) { perror("resource report"); return 125; }
     int code = WIFEXITED(status) ? WEXITSTATUS(status) : -WTERMSIG(status);
+#ifdef __APPLE__
+    long long rss = usage.ru_maxrss;
+    const char *io_format = "\"read_bytes\":null,\"write_bytes\":null,";
+#else
+    long long rss = (long long)usage.ru_maxrss * 1024;
+#endif
     fprintf(out, "{\"exit_code\":%d,\"wall_s\":%.9f,\"user_s\":%.6f,\"system_s\":%.6f,"
-        "\"peak_rss_bytes\":%lld,\"read_bytes\":%lld,\"write_bytes\":%lld,"
-        "\"major_faults\":%ld,\"minor_faults\":%ld,"
-        "\"voluntary_switches\":%ld,\"involuntary_switches\":%ld}\n",
+        "\"peak_rss_bytes\":%lld,",
         code, (end.tv_sec-start.tv_sec)+(end.tv_nsec-start.tv_nsec)/1e9,
         usage.ru_utime.tv_sec+usage.ru_utime.tv_usec/1e6,
-        usage.ru_stime.tv_sec+usage.ru_stime.tv_usec/1e6,
-        (long long)usage.ru_maxrss*1024, (long long)usage.ru_inblock*512,
-        (long long)usage.ru_oublock*512, usage.ru_majflt, usage.ru_minflt,
+        usage.ru_stime.tv_sec+usage.ru_stime.tv_usec/1e6, rss);
+#ifdef __APPLE__
+    fputs(io_format, out);
+#else
+    fprintf(out, "\"read_bytes\":%lld,\"write_bytes\":%lld,",
+        (long long)usage.ru_inblock*512, (long long)usage.ru_oublock*512);
+#endif
+    fprintf(out,
+        "\"major_faults\":%ld,\"minor_faults\":%ld,"
+        "\"voluntary_switches\":%ld,\"involuntary_switches\":%ld}\n",
+        usage.ru_majflt, usage.ru_minflt,
         usage.ru_nvcsw, usage.ru_nivcsw);
     if (fclose(out)) return 125;
     return code < 0 ? 128-code : code;

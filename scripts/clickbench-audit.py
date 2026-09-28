@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux ClickBench size ladder with raw wait4 measurements and all 43 queries.
+"""ClickBench size ladder with raw wait4 measurements and all 43 queries.
 
 First means first execution in a fresh process, not a flushed OS page cache.
 Every hot repetition also starts a fresh process. Results are fully rendered.
@@ -38,7 +38,8 @@ def measure(command, prefix, timeout):
     with prefix.with_suffix('.stdout').open('wb') as out, prefix.with_suffix('.stderr').open('wb') as err:
         start = time.perf_counter_ns()
         child = subprocess.Popen([str(HELPER), str(resource_path), *command], stdout=out, stderr=err, start_new_session=True,
-                                 env={**os.environ, 'LC_ALL': 'C', 'TZ': 'UTC'})
+                                 env={**os.environ, 'LC_ALL': 'C', 'TZ': 'UTC',
+                                      'RUDB_PARQUET_MIRROR': '0'})
 
         def watchdog():
             if not done.wait(timeout):
@@ -116,7 +117,7 @@ def digest(path):
 def render(root, records, sizes, hot):
     lines = ['# ClickBench measurement audit', '',
              'All 43 SQL queries are attempted on DuckDB native, rudb native, DuckDB Parquet, and rudb Parquet. Five hot repetitions are required for a complete row. A failed repetition invalidates that query; successful fragments are never averaged into a result.', '',
-             'First execution is not disk-cold: the page cache is not flushed. Each repetition uses a fresh process. Query seconds are the CLI timer, including result rendering; wall and CPU seconds and peak RSS cover the whole child process. CPU and RSS come from Linux wait4 for that child. RSS is the maximum resident set, not allocated bytes or an incremental memory delta. Both native rows open a loaded single-file database. Both Parquet rows read and decode the same source file on every query. These are sample results, not official ClickBench scores.', '',
+             'First execution is not disk-cold: the page cache is not flushed. Each repetition uses a fresh process. Query seconds are the CLI timer, including result rendering; wall and CPU seconds and peak RSS cover the whole child process. CPU and RSS come from wait4 for that child. RSS is the maximum resident set, not allocated bytes or an incremental memory delta. Both native rows open a loaded single-file database. Both Parquet rows query the same source file with native mirroring disabled; metadata-only paths remain available. These are sample results, not official ClickBench scores.', '',
              '| Size | Engine | Load wall (s) | Load CPU (s) | Load peak RSS (MiB) | Native bytes |',
              '| --- | --- | ---: | ---: | ---: | ---: |']
     for size in sizes:
@@ -190,9 +191,11 @@ def main():
     p.add_argument('--sizes', nargs='+', default=['1k', '10k', '100k', '1m'])
     p.add_argument('--hot', type=int, default=5)
     p.add_argument('--timeout', type=float, default=120)
+    p.add_argument('--threads', type=int, default=6)
+    p.add_argument('--memory-limit', default='4GB')
     a = p.parse_args()
-    if sys.platform != 'linux' or a.hot < 5 or a.timeout <= 0:
-        p.error('Linux, at least five hot runs, and a positive timeout are required')
+    if sys.platform not in ('linux', 'darwin') or a.hot < 5 or a.timeout <= 0 or a.threads < 1:
+        p.error('Linux or macOS, at least five hot runs, positive threads and timeout are required')
     root = a.output.resolve()
     root.mkdir(parents=True, exist_ok=True)
     log = (root / 'raw.jsonl').open('x')
@@ -206,11 +209,14 @@ def main():
     binaries = {e: str(Path(getattr(a, e)).resolve()) for e in ['duckdb', 'rudb']}
     meta = dict(start_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                 platform=platform.platform(), cpu_count=os.cpu_count(),
-                helper_sha256=digest(HELPER), cpuinfo=Path('/proc/cpuinfo').read_text(), meminfo=Path('/proc/meminfo').read_text(),
+                helper_sha256=digest(HELPER), cpuinfo=Path('/proc/cpuinfo').read_text() if sys.platform == 'linux' else None, meminfo=Path('/proc/meminfo').read_text() if sys.platform == 'linux' else None,
                 load_start=os.getloadavg(), argv=sys.argv, binaries={e: dict(path=b, sha256=digest(b),
                 version=subprocess.check_output([b, '--version'], text=True).strip()) for e, b in binaries.items()},
                 cache='first/unflushed; fresh process for every repetition', hot_runs=a.hot,
+                threads=a.threads, memory_limit=a.memory_limit, stored_answers=False,
+                parquet_mirror=False,
                 sql_sha256={f.name: digest(f) for f in (root / 'sql').glob('*.sql')}, datasets={})
+    settings_sql = f"SET threads={a.threads}; SET memory_limit='{a.memory_limit.replace(chr(39), chr(39)*2)}'"
     schema = (root / 'sql/schema.sql').read_text()
     projection = (root / 'sql/projection.sql').read_text()
     for size in a.sizes:
@@ -224,25 +230,35 @@ def main():
         load_sql = f'CREATE TABLE hits ({schema}); INSERT INTO hits {scan}; CHECKPOINT;'
         for engine, database in databases.items():
             binary = binaries['duckdb'] if engine == 'duckdb-native' else binaries['rudb']
-            load = measure([binary, '-batch', str(database), '-c', load_sql], root / f'{size}-{engine}-load', a.timeout)
+            load = measure([binary, '-batch', str(database), '-c', settings_sql, '-c', load_sql], root / f'{size}-{engine}-load', a.timeout)
             load.update(size=size, engine=engine, phase='load', database_bytes=database.stat().st_size if database.exists() else None,
                         load_sql=load_sql)
             save(load)
             if load['status'] != 'ok':
                 raise RuntimeError(f'{engine} load failed: {load}')
-        settings = subprocess.check_output([binaries['duckdb'], str(databases['duckdb-native']), '-csv', '-c', "SELECT name,value FROM duckdb_settings() WHERE name IN ('threads','memory_limit','temp_directory','preserve_insertion_order')"], text=True)
+        settings = subprocess.check_output([binaries['duckdb'], str(databases['duckdb-native']), '-csv', '-c', settings_sql, '-c', "SELECT name,value FROM duckdb_settings() WHERE name IN ('threads','memory_limit','temp_directory','preserve_insertion_order')"], text=True)
         meta['datasets'][size]['duckdb_settings'] = settings
+        meta['datasets'][size]['rudb_settings'] = subprocess.check_output(
+            [binaries['rudb'], str(databases['rudb-native']), '-csv', '-c', settings_sql,
+             '-c', 'SET stored_answers=false', '-c',
+             "SELECT current_setting('threads'), current_setting('memory_limit'), current_setting('stored_answers')"],
+            text=True)
         for q in range(1, 44):
             sql = (root / 'sql' / f'q{q}.sql').read_text()
             engines = ['duckdb-native', 'rudb-native', 'duckdb-parquet', 'rudb-parquet']
-            if q % 2 == 0:
-                engines.reverse()
-            for engine in engines:
-                for run in range(a.hot + 1):
+            failed = set()
+            for run in range(a.hot + 1):
+                offset = (q + run) % len(engines)
+                for engine in engines[offset:] + engines[:offset]:
+                    if engine in failed:
+                        continue
                     binary = binaries['rudb'] if engine.startswith('rudb') else binaries['duckdb']
                     command = [binary, '-batch', '-csv', '-noheader']
                     if engine in databases:
                         command += [str(databases[engine])]
+                    command += ['-c', settings_sql]
+                    if engine.startswith('rudb'):
+                        command += ['-c', 'SET stored_answers=false']
                     command += ['-c', '.timer on']
                     if engine.endswith('parquet'):
                         command += ['-c', f'CREATE VIEW hits AS {scan}']
@@ -251,11 +267,11 @@ def main():
                     r.update(size=size, engine=engine, query=q, run=run, phase='query', load=os.getloadavg())
                     save(r)
                     if r['status'] != 'ok':
-                        break
+                        failed.add(engine)
             print(f'{size} q{q}/43 done', flush=True)
         render(root, records, a.sizes, a.hot)
         # Native files stay beside the audit so deterministic retests open the exact timed files.
-    meta.update(end_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), load_end=os.getloadavg(), meminfo_end=Path('/proc/meminfo').read_text())
+    meta.update(end_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), load_end=os.getloadavg(), meminfo_end=Path('/proc/meminfo').read_text() if sys.platform == 'linux' else None)
     (root / 'metadata.json').write_text(json.dumps(meta, indent=2) + '\n')
     log.close()
 
