@@ -26,6 +26,7 @@ import time
 HELPER = Path(__file__).with_name('measure-child')
 
 TIMER = re.compile(r"^Run Time \(s\): real ([0-9.]+).*$", re.M)
+SQL_ERROR = re.compile(r'^(?:[A-Za-z][A-Za-z ]{0,79} )?Error:', re.M)
 
 
 def run_order(cases, run):
@@ -97,6 +98,9 @@ def measure(command, prefix, timeout):
     result['cpu_s'] = measured['user_s'] + measured['system_s'] if measured else None
     if not measured and result['status'] == 'ok':
         result['status'] = 'measurement_error'
+    if result['status'] == 'ok' and SQL_ERROR.search(stderr):
+        result['status'] = 'query_error'
+        result['query_s'] = None
     return result
 
 

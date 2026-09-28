@@ -1,0 +1,38 @@
+{
+  "engine_source_commit": "d0ff4ee61032215b8a469f62ffb2587be6366a3e",
+  "engine_source_archive_sha256": "b0a25270a07639566fcfa623490bd41671c24cf65f2cedb12f64e74fcc5609ae",
+  "benchmark_commit": "6deab90337a16a2eba225bae4ad383063336d209",
+  "rebased_worktrees": {
+    "topology": "5a8b826d58e61747b04dbb86efd0209629b27104",
+    "schema_index": "bdb41e09fe4dbf320b2e5cb5e38ba4b6e1af2810",
+    "bound_header": "b1c6c73a450e792bb073cdd51a0d91e78a0003bb"
+  },
+  "pending_patches_measured": false,
+  "build": "CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=\"$NEW_TARGET_DIR\" cargo build --release -p rudb-cli --bin rudb -j8",
+  "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+  "rudb_engine": "first",
+  "build_target": "/home/gopher/rudb-bound-header-2026-09-28/target-main-d0ff4ee6",
+  "binary_hashes": {
+    "duckdb": {
+      "path": "/home/gopher/rudb-bound-header-2026-09-28/bin/duckdb-1.5.5",
+      "sha256": "3d33b1df037cb049155c393778df7853fafb23e9d49d7c9cacdde4dd67155788",
+      "version": "v1.5.5 (Variegata) d8cdaa33fd"
+    },
+    "rudb": {
+      "path": "/home/gopher/rudb-bound-header-2026-09-28/bin/rudb-main-d0ff4ee6-clean",
+      "sha256": "b8e3bf1f7e3d950c695297aed1ec546f60ffb1dbe6a59b03d4190314ea996fed",
+      "version": "rudb 0.8.4"
+    }
+  },
+  "artifacts": {
+    "build-input-audit.json": "5be1d1dd09a7f814e7dca371815c305901e3facd899c75f8e78d027fa712ded9",
+    "correctness.json": "b2fdcfd9ad7f08fcc661cb2c6a019324f3aee7c13a386de0c2710bf939ec228d",
+    "gated-attempt.tar.gz": "d38e42eda10df56fd352eac9d1af39e5cacd000889a63a92c3e78c41d653100c",
+    "metadata.json": "9355f3583b7aac46375e8c26c89bc661ab55f4dabb5641d48b384a51d74e4691",
+    "native-files.json": "f690a02460d6c5e43aaa90f77538bb278a5875d1e7341f8a05e3285d5ea4a42c",
+    "outputs.tar.gz": "d4ed3643bbd8e466404f7ebad2da9b9e99ca8d29a1e14796f5cf0f13b7f0fb2c",
+    "per-query.md": "ba864fef2f045c4d10236397c8afd581902b2ae0f1054615b8b04fdd684796e7",
+    "raw.jsonl.gz": "2004dbf762e6fa848473a664b89ddbab3c13240b0dd6aca71f4f78a100b4fd7d",
+    "summary.json": "fb6849cef40fc2fc7d2bcc2ec53bc75c4cfc3577dbb555ef6a07d6ae047fed92"
+  }
+}
