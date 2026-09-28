@@ -1,0 +1,32 @@
+{
+  "main-native": {
+    "wall_s": 0.003363542,
+    "cpu_s": 0.003339,
+    "peak_rss_bytes": 13148160
+  },
+  "candidate-native": {
+    "wall_s": 0.003313093,
+    "cpu_s": 0.003288,
+    "peak_rss_bytes": 12910592
+  },
+  "duckdb-native": {
+    "wall_s": 0.01165658,
+    "cpu_s": 0.013335,
+    "peak_rss_bytes": 28258304
+  },
+  "main-parquet": {
+    "wall_s": 0.113853507,
+    "cpu_s": 0.116212,
+    "peak_rss_bytes": 123879424
+  },
+  "candidate-parquet": {
+    "wall_s": 0.108359681,
+    "cpu_s": 0.111386,
+    "peak_rss_bytes": 124334080
+  },
+  "duckdb-parquet": {
+    "wall_s": 0.257383898,
+    "cpu_s": 0.256612,
+    "peak_rss_bytes": 157523968
+  }
+}
