@@ -475,9 +475,8 @@ pub trait Engine {
     /// layer.
     ///
     /// Both runs of an attribution set the rule explicitly, one on and one off, rather than the
-    /// first run taking the default. Which way a default points is a decision that moves: rudb has
-    /// `statistics` on and `graph_sections` off today and the second of those is expected to flip,
-    /// and a result that silently changed meaning on the day it flipped would be worse than no
+    /// first run taking the default. Which way a default points is a decision that moves: rudb had
+    /// `graph_sections` off until tamnd/rudb#760 was measured and has it on now, and a result that silently changed meaning on the day it flipped would be worse than no
     /// result. Setting both ends means the table says what it measured whatever the default is.
     ///
     /// Setting the same rule twice replaces the first, so the two runs of one attribution do not
@@ -544,6 +543,29 @@ pub trait Engine {
 #[must_use]
 pub fn memory_limit_statement() -> Option<String> {
     crate::machine::memory_budget().map(|b| format!("SET memory_limit = '{}MiB'", b >> 20))
+}
+
+/// The relationships a suite's schema declares, as the `SET` that hands them to rudb's CHECKPOINT.
+///
+/// A Parquet file carries no foreign key, so a table built from one has none, and a CHECKPOINT that
+/// knows of no relationship writes no graph section (spec/graph/02 section 2.5). Declaring them
+/// with `graph_links` in the session that checkpoints is the path that spec gives for this case.
+/// Only TPC-H today, because its specification publishes every foreign key and these are exactly
+/// those, the composite one to `partsupp` included. Nothing is declared in the query session, so
+/// the planner is not handed the relationships and what they buy is what the stored sections let
+/// the scan skip. The other engines load the same tables without constraints, which is the
+/// DuckDB and ClickHouse default and costs them nothing, because neither reads a foreign key to
+/// make a scan smaller.
+#[must_use]
+pub fn graph_links(suite: &str) -> Option<&'static str> {
+    (suite == "tpch").then_some(
+        "SET graph_links = 'nation(n_regionkey) -> region(r_regionkey), supplier(s_nationkey) -> \
+         nation(n_nationkey), customer(c_nationkey) -> nation(n_nationkey), partsupp(ps_partkey) \
+         -> part(p_partkey), partsupp(ps_suppkey) -> supplier(s_suppkey), orders(o_custkey) -> \
+         customer(c_custkey), lineitem(l_orderkey) -> orders(o_orderkey), lineitem(l_partkey) -> \
+         part(p_partkey), lineitem(l_suppkey) -> supplier(s_suppkey), lineitem(l_partkey, \
+         l_suppkey) -> partsupp(ps_partkey, ps_suppkey)'",
+    )
 }
 
 /// Whether rudb is told not to answer from what it wrote at load time.
@@ -2231,6 +2253,9 @@ impl Rudb {
         if let Some(statement) = memory_limit_statement() {
             after.arg("-c").arg(statement);
         }
+        if let Some(links) = graph_links(self.suite) {
+            after.arg("-c").arg(links);
+        }
         after.arg("-c").arg("CHECKPOINT");
         let checkpoint = self.runner.go(after, "rudb", None)?;
         let spent = spent.and(self.runner.spent());
@@ -2483,7 +2508,7 @@ mod tests {
 
     use super::{
         Ability, Duckdb, Engine, Loaded, PINNED, POLARS_SCRIPT, Reported, Rudb, Runner, elapsed,
-        explained, on_path, rule, run_time, seconds, took,
+        explained, graph_links, on_path, rule, run_time, seconds, took,
     };
     use crate::data::Table;
     use crate::memory::Spent;
@@ -2840,6 +2865,21 @@ mod tests {
 
     /// A bare word on the right of a `SET` is a column reference, so `SET statistics = off` is the
     /// binder looking for a column called off rather than the switch anybody meant.
+    /// Every table the TPC-H links name is a table the suite loads, and no other suite gets any.
+    #[test]
+    fn only_tpch_declares_links_and_each_names_a_loaded_table() {
+        let links = graph_links("tpch").unwrap();
+        assert!(!links.contains("  "), "{links}");
+        for table in
+            ["nation", "region", "supplier", "customer", "part", "partsupp", "orders", "lineitem"]
+        {
+            assert!(links.contains(&format!("{table}(")), "{table}");
+        }
+        assert_eq!(links.matches("->").count(), 10);
+        assert_eq!(graph_links("clickbench"), None);
+        assert_eq!(graph_links("tpcds"), None);
+    }
+
     #[test]
     fn a_rule_is_set_to_a_quoted_word_because_an_unquoted_one_is_a_column() {
         assert_eq!(rule("statistics", true), "SET statistics = 'on'");
