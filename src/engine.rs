@@ -550,14 +550,27 @@ pub fn memory_limit_statement() -> Option<String> {
 /// A Parquet file carries no foreign key, so a table built from one has none, and a CHECKPOINT that
 /// knows of no relationship writes no graph section (spec/graph/02 section 2.5). Declaring them
 /// with `graph_links` in the session that checkpoints is the path that spec gives for this case.
-/// Only TPC-H today, because its specification publishes every foreign key and these are exactly
-/// those, the composite one to `partsupp` included. Nothing is declared in the query session, so
+/// TPC-H's are the foreign keys its specification publishes, the composite one to `partsupp`
+/// included. JOB's schema declares none, so its are the fifteen the JOB paper's `fkindexes.sql`
+/// indexes, each from a child's id column to the `id` of the table it names. Nothing is declared in the query session, so
 /// the planner is not handed the relationships and what they buy is what the stored sections let
 /// the scan skip. The other engines load the same tables without constraints, which is the
 /// DuckDB and ClickHouse default and costs them nothing, because neither reads a foreign key to
 /// make a scan smaller.
 #[must_use]
 pub fn graph_links(suite: &str) -> Option<&'static str> {
+    if suite == "job" {
+        return Some(
+            "SET graph_links = 'cast_info(movie_id) -> title(id), cast_info(person_id) -> \
+             name(id), cast_info(person_role_id) -> char_name(id), movie_info(movie_id) -> \
+             title(id), movie_info_idx(movie_id) -> title(id), movie_companies(movie_id) -> \
+             title(id), movie_companies(company_id) -> company_name(id), movie_keyword(movie_id) \
+             -> title(id), movie_keyword(keyword_id) -> keyword(id), movie_link(movie_id) -> \
+             title(id), movie_link(linked_movie_id) -> title(id), complete_cast(movie_id) -> \
+             title(id), aka_name(person_id) -> name(id), aka_title(movie_id) -> title(id), \
+             person_info(person_id) -> name(id)'",
+        );
+    }
     (suite == "tpch").then_some(
         "SET graph_links = 'nation(n_regionkey) -> region(r_regionkey), supplier(s_nationkey) -> \
          nation(n_nationkey), customer(c_nationkey) -> nation(n_nationkey), partsupp(ps_partkey) \
@@ -2865,9 +2878,9 @@ mod tests {
 
     /// A bare word on the right of a `SET` is a column reference, so `SET statistics = off` is the
     /// binder looking for a column called off rather than the switch anybody meant.
-    /// Every table the TPC-H links name is a table the suite loads, and no other suite gets any.
+    /// Every table the TPC-H and JOB links name is a table the suite loads, and no other suite gets any.
     #[test]
-    fn only_tpch_declares_links_and_each_names_a_loaded_table() {
+    fn only_tpch_and_job_declare_links_and_each_names_a_loaded_table() {
         let links = graph_links("tpch").unwrap();
         assert!(!links.contains("  "), "{links}");
         for table in
@@ -2876,6 +2889,15 @@ mod tests {
             assert!(links.contains(&format!("{table}(")), "{table}");
         }
         assert_eq!(links.matches("->").count(), 10);
+        let links = graph_links("job").unwrap();
+        assert!(!links.contains("  "), "{links}");
+        let named = links.trim_start_matches("SET graph_links = '").trim_end_matches('\'');
+        for side in named.split(", ").flat_map(|link| link.split(" -> ")) {
+            let (table, column) = side.trim_end_matches(')').split_once('(').unwrap();
+            assert!(crate::suite::JOB_TABLES.contains(&table), "{side}");
+            assert!(column == "id" || column.ends_with("_id"), "{side}");
+        }
+        assert_eq!(links.matches("->").count(), 15);
         assert_eq!(graph_links("clickbench"), None);
         assert_eq!(graph_links("tpcds"), None);
     }
