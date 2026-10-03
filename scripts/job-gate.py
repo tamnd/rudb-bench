@@ -6,7 +6,7 @@
 `load` builds both databases for one configuration in DIR from the 21 CSVs, the same SQL for both
 engines: JOB's schema.sql, one COPY per table, and fkindexes.sql in the indexed configuration. rudb
 is then handed the fifteen relationships and checkpointed, inside its timed region, the way the
-DuckDB load ends with a checkpoint too. The two load times go in DIR/load.tsv.
+DuckDB load ends with a checkpoint too. The two load times go in DIR/load-CONFIG.json.
 
 `run` times the 113 queries the way section 14.3 says. For each query the two engines take turns,
 the one going first alternating, and a turn is: drop the page cache, record every file in DIR with
@@ -246,4 +246,5 @@ def main():
         run(config, d, sys.argv[4], threads, only)
 
 
-main()
+if __name__ == '__main__':
+    main()
