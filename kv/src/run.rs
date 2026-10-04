@@ -77,7 +77,36 @@ fn prepare(session: &mut dyn Session, texts: &Texts) -> Result<Prepared, String>
     let read = session.prepare(&texts.read)?;
     let update = texts.update.iter().map(|text| session.prepare(text)).collect::<Result<_, _>>()?;
     let insert = session.prepare(&texts.insert)?;
+    point_plans(&*session, texts, read, &update, insert)?;
     Ok(Prepared { read, update, insert })
+}
+
+/// Checks each statement runs as the point plan it should, for an engine that names its plans, as
+/// the YCSB spec's document 03 asks. A statement that falls back to the full pipeline would give a
+/// slow number for a reason nobody would look for, so the run stops here with the reason instead.
+fn point_plans(
+    session: &dyn Session,
+    texts: &Texts,
+    read: usize,
+    update: &[usize],
+    insert: usize,
+) -> Result<(), String> {
+    let mut wanted = vec![(read, texts.read.as_str(), "POINT Lookup")];
+    wanted.extend(
+        update.iter().zip(&texts.update).map(|(&at, text)| (at, text.as_str(), "UpdateOne")),
+    );
+    wanted.push((insert, texts.insert.as_str(), "InsertOne"));
+    for (statement, text, plan) in wanted {
+        match session.explain(statement) {
+            Some(runs) if !runs.starts_with(plan) => {
+                return Err(format!(
+                    "{text} runs as {runs} and not as {plan}, so it is not measured"
+                ));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Runs one statement, retrying what the engine says to retry.
