@@ -126,8 +126,8 @@ pub(crate) trait Backend: Sync {
     /// Whether the level asked for was set, or a sentence saying why it could not be.
     fn level(&self) -> Result<(), String>;
 
-    /// A sentence the header carries when the level was accepted and not actually set, which is
-    /// rudb until it has `commit_sync`.
+    /// A sentence the header carries when the level was accepted and not actually set. No backend
+    /// does that now, and one that cannot set a level refuses it instead.
     fn level_note(&self) -> Option<&'static str> {
         None
     }

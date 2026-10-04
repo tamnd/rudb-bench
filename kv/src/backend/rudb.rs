@@ -6,7 +6,7 @@
 
 use rudb::{Connection, Database, Prepared, QueryResult, Value};
 
-use super::{Backend, Failed, Session, Values};
+use super::{Backend, Failed, Level, Session, Values};
 
 /// The opened database.
 #[derive(Debug)]
@@ -15,8 +15,12 @@ pub(crate) struct RudbBackend {
 }
 
 impl RudbBackend {
-    pub(crate) fn open(file: &str) -> Result<Self, String> {
+    /// Opens `file` with every commit waiting for `level`, which rudb calls `commit_sync`.
+    pub(crate) fn open(file: &str, level: Level) -> Result<Self, String> {
         let database = Database::open(file).map_err(|error| error.to_string())?;
+        database
+            .execute(&format!("SET commit_sync = '{}'", level.name()))
+            .map_err(|error| format!("setting commit_sync: {error}"))?;
         Ok(Self { database })
     }
 }
@@ -43,12 +47,9 @@ impl Backend for RudbBackend {
             .to_string()
     }
 
+    /// `commit_sync` takes the three levels by the same names, and `open` set it.
     fn level(&self) -> Result<(), String> {
         Ok(())
-    }
-
-    fn level_note(&self) -> Option<&'static str> {
-        Some("rudb has no commit_sync setting before W3, so the run is at its default")
     }
 
     fn connect(&self) -> Result<Box<dyn Session + '_>, String> {
