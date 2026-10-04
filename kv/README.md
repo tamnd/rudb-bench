@@ -16,3 +16,5 @@ Backends:
 - `rudb` needs `--features rudb`. To build against a checkout instead of crates.io, add `--config 'patch.crates-io.rudb.path="<checkout>/crates/rudb"'`.
 
 `--level full|os|none` picks the durability level. A backend that cannot set the level refuses, and results are only ever compared at the same level.
+
+`--mix` takes `read`, `update`, `insert` and `scan` parts, so workload E is `--mix scan=95,insert=5`. A scan starts at a drawn key and reads 1 to 100 rows in key order, and every row it returns is checked like a read. `--distribution uniform|zipfian|latest` picks how keys are drawn: zipfian is YCSB's scrambled zipfian, and latest makes the newest rows the hot ones, as in workload D. Inserts during a run take the next record number, and reads only draw rows whose inserts have finished.
