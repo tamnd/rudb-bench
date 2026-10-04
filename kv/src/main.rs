@@ -27,12 +27,12 @@ use backend::postgres::PostgresBackend;
 use backend::sqlite::SqliteBackend;
 use backend::{Backend, Level};
 use run::{Loop, Plan};
-use workload::Mix;
+use workload::{Distribution, Mix};
 
 const USAGE: &str = "\
 usage: rudb-bench-kv --backend null|sqlite|duckdb|postgres|rudb --target <file or conninfo>
                      [--load] [--records N] [--mix read=50,update=50] [--clients N]
-                     [--loop closed|open] [--rate OPS] [--poisson] [--warmup 10s] [--window 60s]
+                     [--distribution uniform|zipfian|latest] [--loop closed|open] [--rate OPS] [--poisson] [--warmup 10s] [--window 60s]
                      [--seed N] [--level full|os|none] [--card <card line>] [--unpinned]
                      [--service 100us] [--stall 100ms/10s]
 
@@ -80,6 +80,7 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
             records: 10_000,
             clients: 1,
             mix: Mix::parse("read=50,update=50")?,
+            distribution: Distribution::Uniform,
             mode: Loop::Closed,
             warmup: Duration::from_secs(1),
             window: Duration::from_secs(5),
@@ -104,6 +105,9 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
                 arguments.plan.records = value()?.parse().map_err(|_| "--records is a count")?;
             }
             "--mix" => arguments.plan.mix = Mix::parse(&value()?)?,
+            "--distribution" => {
+                arguments.plan.distribution = Distribution::parse(&value()?)?;
+            }
             "--clients" => {
                 arguments.plan.clients = value()?.parse().map_err(|_| "--clients is a count")?;
             }
@@ -198,11 +202,12 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
         }
     };
     println!(
-        "kv 1 backend={} version={} workload={} records={} clients={} {mode} seed={:#x} \
-         level={} warmup_s={} window_s={} pinned={}",
+        "kv 1 backend={} version={} workload={} distribution={} records={} clients={} {mode} \
+         seed={:#x} level={} warmup_s={} window_s={} pinned={}",
         backend.name(),
         backend.version().replace(' ', "_"),
         plan.mix.text(),
+        plan.distribution.name(),
         plan.records,
         plan.clients,
         plan.seed,

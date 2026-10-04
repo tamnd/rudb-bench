@@ -42,6 +42,8 @@ pub struct RunPlan {
     pub clients: usize,
     /// `read=50,update=50`.
     pub mix: String,
+    /// `uniform`, `zipfian` or `latest`.
+    pub distribution: String,
     pub pace: Pace,
     pub warmup: Duration,
     pub window: Duration,
@@ -67,6 +69,8 @@ impl RunPlan {
             self.clients.to_string(),
             "--mix".to_string(),
             self.mix.clone(),
+            "--distribution".to_string(),
+            self.distribution.clone(),
             "--warmup".to_string(),
             format!("{}s", self.warmup.as_secs_f64()),
             "--window".to_string(),
@@ -485,6 +489,7 @@ mod tests {
             records: 1000,
             clients: 2,
             mix: "read=95,update=5".to_string(),
+            distribution: "zipfian".to_string(),
             pace: Pace::Open { rate: 5000.0, poisson: true },
             warmup: Duration::from_secs(1),
             window: Duration::from_millis(1500),
@@ -494,6 +499,7 @@ mod tests {
         };
         let words = plan.arguments().join(" ");
         assert!(words.contains("--window 1.5s"), "{words}");
+        assert!(words.contains("--distribution zipfian"), "{words}");
         assert!(words.contains("--load"));
         assert!(words.contains("--loop open --rate 5000 --poisson"), "{words}");
         assert!(words.ends_with("--card card fsync_us=40"), "{words}");
