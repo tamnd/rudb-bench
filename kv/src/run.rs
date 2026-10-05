@@ -11,14 +11,18 @@
 //! intended time it writes out what it has for that second and starts again, so no operation is
 //! split between two seconds and no client ever waits for another.
 
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
-use std::sync::Barrier;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Barrier, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use rudb_bench::histogram::Histogram;
 
 use crate::backend::{Backend, Failed, Session, Values};
-use crate::workload::{FIELDS, Mix, Op, Rng, Texts, key, value, well_formed};
+use crate::workload::{
+    Chooser, Distribution, FIELDS, MAX_SCAN, Mix, Op, Rng, Texts, key, value, well_formed,
+};
 
 /// When a client starts its operations.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -36,6 +40,7 @@ pub(crate) struct Plan {
     pub(crate) records: u64,
     pub(crate) clients: usize,
     pub(crate) mix: Mix,
+    pub(crate) distribution: Distribution,
     pub(crate) mode: Loop,
     pub(crate) warmup: Duration,
     pub(crate) window: Duration,
@@ -55,9 +60,9 @@ pub(crate) struct Client {
     pub(crate) finals: Vec<Histogram>,
     /// Start minus intended start, over the window, open loop only.
     pub(crate) lateness: Histogram,
-    pub(crate) retries: [u64; 3],
-    pub(crate) failed: [u64; 3],
-    /// Reads that came back with a value that was not the row or the field asked for.
+    pub(crate) retries: [u64; Op::COUNT],
+    pub(crate) failed: [u64; Op::COUNT],
+    /// Reads and scans that came back with a value that was not the row or the field asked for.
     pub(crate) bad: u64,
     pub(crate) reads: u64,
     /// `(second, op, operations, late, histogram line)` for every second the client did anything.
@@ -71,31 +76,36 @@ struct Prepared {
     read: usize,
     update: Vec<usize>,
     insert: usize,
+    /// Only when the mix scans, so an engine is never asked to prepare what it will not run.
+    scan: Option<usize>,
 }
 
-fn prepare(session: &mut dyn Session, texts: &Texts) -> Result<Prepared, String> {
+fn prepare(session: &mut dyn Session, texts: &Texts, mix: &Mix) -> Result<Prepared, String> {
     let read = session.prepare(&texts.read)?;
     let update = texts.update.iter().map(|text| session.prepare(text)).collect::<Result<_, _>>()?;
     let insert = session.prepare(&texts.insert)?;
-    point_plans(&*session, texts, read, &update, insert)?;
-    Ok(Prepared { read, update, insert })
+    let scan = if mix.has(Op::Scan) { Some(session.prepare(&texts.scan)?) } else { None };
+    let prepared = Prepared { read, update, insert, scan };
+    point_plans(&*session, texts, &prepared)?;
+    Ok(prepared)
 }
 
 /// Checks each statement runs as the point plan it should, for an engine that names its plans, as
 /// the YCSB spec's document 03 asks. A statement that falls back to the full pipeline would give a
 /// slow number for a reason nobody would look for, so the run stops here with the reason instead.
-fn point_plans(
-    session: &dyn Session,
-    texts: &Texts,
-    read: usize,
-    update: &[usize],
-    insert: usize,
-) -> Result<(), String> {
-    let mut wanted = vec![(read, texts.read.as_str(), "POINT Lookup")];
+fn point_plans(session: &dyn Session, texts: &Texts, prepared: &Prepared) -> Result<(), String> {
+    let mut wanted = vec![(prepared.read, texts.read.as_str(), "POINT Lookup")];
     wanted.extend(
-        update.iter().zip(&texts.update).map(|(&at, text)| (at, text.as_str(), "UpdateOne")),
+        prepared
+            .update
+            .iter()
+            .zip(&texts.update)
+            .map(|(&at, text)| (at, text.as_str(), "UpdateOne")),
     );
-    wanted.push((insert, texts.insert.as_str(), "InsertOne"));
+    wanted.push((prepared.insert, texts.insert.as_str(), "InsertOne"));
+    if let Some(scan) = prepared.scan {
+        wanted.push((scan, texts.scan.as_str(), "Range"));
+    }
     for (statement, text, plan) in wanted {
         match session.explain(statement) {
             Some(runs) if !runs.starts_with(plan) => {
@@ -212,6 +222,54 @@ pub(crate) fn load(
     Ok(started.elapsed())
 }
 
+/// The rows inserted during the run, shared by every client, YCSB's acknowledged counter.
+///
+/// An insert takes the next record number, so the inserted keys follow the loaded ones without a
+/// gap, and says when it is done. A read only draws below the first number not yet done, so it
+/// never asks for a row that is still going in and counts it as a bad read.
+#[derive(Debug)]
+pub(crate) struct Inserted {
+    next: AtomicU64,
+    /// Every record number below this is done.
+    done: AtomicU64,
+    /// Done numbers above `done`, which wait for the ones before them.
+    ahead: Mutex<BTreeSet<u64>>,
+}
+
+impl Inserted {
+    pub(crate) fn new(records: u64) -> Self {
+        Self {
+            next: AtomicU64::new(records),
+            done: AtomicU64::new(records),
+            ahead: Mutex::new(BTreeSet::new()),
+        }
+    }
+
+    fn take(&self) -> u64 {
+        self.next.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Says `n` is done, whether or not it went in, as YCSB does.
+    fn finish(&self, n: u64) {
+        let mut ahead = self.ahead.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut done = self.done.load(Ordering::Acquire);
+        if n != done {
+            ahead.insert(n);
+            return;
+        }
+        done += 1;
+        while ahead.remove(&done) {
+            done += 1;
+        }
+        self.done.store(done, Ordering::Release);
+    }
+
+    /// The rows a read can draw from.
+    fn rows(&self) -> u64 {
+        self.done.load(Ordering::Acquire)
+    }
+}
+
 /// Sleeps most of the way to `until` and spins the rest, because a sleep alone wakes tens of
 /// microseconds late and that would be charged to the engine as latency.
 fn wait_until(until: Instant) {
@@ -232,15 +290,16 @@ fn wait_until(until: Instant) {
 /// One client's run.
 struct Running<'p> {
     plan: &'p Plan,
+    inserted: &'p Inserted,
     client: usize,
     rng: Rng,
+    chooser: Chooser,
     out: Values,
     result: Client,
     /// The second of intended time the interval histograms are for.
     second: u64,
     interval: Vec<Histogram>,
-    interval_late: [u64; 3],
-    inserted: u64,
+    interval_late: [u64; Op::COUNT],
     version: u64,
 }
 
@@ -259,7 +318,7 @@ impl Running<'_> {
                 histogram.reset();
             }
         }
-        self.interval_late = [0; 3];
+        self.interval_late = [0; Op::COUNT];
     }
 
     /// Does one operation and says whether it got through.
@@ -267,7 +326,7 @@ impl Running<'_> {
         let retries = &mut self.result.retries[op.index()];
         let outcome = match op {
             Op::Read => {
-                let row_key = key(self.rng.below(self.plan.records));
+                let row_key = key(self.chooser.next(&mut self.rng, self.inserted.rows()));
                 let outcome = attempt(session, prepared.read, &[&row_key], &mut self.out, retries);
                 if outcome.is_ok() {
                     self.result.reads += 1;
@@ -282,7 +341,7 @@ impl Running<'_> {
                 outcome
             }
             Op::Update => {
-                let row_key = key(self.rng.below(self.plan.records));
+                let row_key = key(self.chooser.next(&mut self.rng, self.inserted.rows()));
                 let field = self.rng.below(FIELDS as u64) as usize;
                 self.version += 1;
                 let version = (self.client as u64) << 40 | self.version;
@@ -290,17 +349,31 @@ impl Running<'_> {
                 attempt(session, prepared.update[field], &[&new, &row_key], &mut self.out, retries)
             }
             Op::Insert => {
-                // Past the loaded records, and never the same key from two clients.
-                let n = self.plan.records
-                    + self.client as u64
-                    + self.inserted * self.plan.clients as u64;
-                self.inserted += 1;
+                let n = self.inserted.take();
                 let row_key = key(n);
                 let fields: Vec<String> =
                     (0..FIELDS).map(|field| value(&row_key, field, 0)).collect();
                 let mut parameters: Vec<&str> = vec![&row_key];
                 parameters.extend(fields.iter().map(String::as_str));
-                attempt(session, prepared.insert, &parameters, &mut self.out, retries)
+                let outcome =
+                    attempt(session, prepared.insert, &parameters, &mut self.out, retries);
+                self.inserted.finish(n);
+                outcome
+            }
+            Op::Scan => {
+                let start = key(self.chooser.next(&mut self.rng, self.inserted.rows()));
+                let length = 1 + self.rng.below(MAX_SCAN);
+                let statement = prepared.scan.expect("a mix that scans prepares the scan");
+                let limit = length.to_string();
+                let outcome =
+                    attempt(session, statement, &[&start, &limit], &mut self.out, retries);
+                if outcome.is_ok() {
+                    self.result.reads += 1;
+                    if !self.scanned(&start, length) {
+                        self.result.bad += 1;
+                    }
+                }
+                outcome
             }
         };
         match outcome {
@@ -313,6 +386,29 @@ impl Running<'_> {
                 false
             }
         }
+    }
+
+    /// Whether a scan from `start` of at most `length` rows came back as one: the start row first,
+    /// since it is there, then rows in key order, each of whole fields of its own.
+    fn scanned(&self, start: &str, length: u64) -> bool {
+        let width = FIELDS + 1;
+        let rows = self.out.len() / width;
+        if self.out.len() % width != 0 || rows == 0 || rows as u64 > length {
+            return false;
+        }
+        if self.out.get(0) != start.as_bytes() {
+            return false;
+        }
+        (0..rows).all(|row| {
+            let at = row * width;
+            let row_key = self.out.get(at);
+            let ordered = row == 0 || self.out.get(at - width) < row_key;
+            let Ok(text) = std::str::from_utf8(row_key) else {
+                return false;
+            };
+            ordered
+                && (0..FIELDS).all(|field| well_formed(text, field, self.out.get(at + 1 + field)))
+        })
     }
 
     fn run(mut self, session: &mut dyn Session, prepared: &Prepared, t0: Instant) -> Client {
@@ -390,35 +486,38 @@ pub(crate) fn run(backend: &dyn Backend, plan: &Plan) -> Result<Outcome, String>
     let mut sessions = Vec::with_capacity(plan.clients);
     for _ in 0..plan.clients {
         let mut session = backend.connect()?;
-        let prepared = prepare(&mut *session, &texts)?;
+        let prepared = prepare(&mut *session, &texts, &plan.mix)?;
         sessions.push((session, prepared));
     }
     let barrier = Barrier::new(plan.clients + 1);
+    let inserted = Inserted::new(plan.records);
     std::thread::scope(|scope| {
         let barrier = &barrier;
+        let inserted = &inserted;
         let handles: Vec<_> = sessions
             .into_iter()
             .enumerate()
             .map(|(client, (mut session, prepared))| {
                 let running = Running {
                     plan,
+                    inserted,
                     client,
                     rng: Rng::new(plan.seed ^ (client as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)),
+                    chooser: Chooser::new(plan.distribution, plan.records),
                     out: Values::default(),
                     result: Client {
-                        finals: vec![Histogram::new(); 3],
+                        finals: vec![Histogram::new(); Op::COUNT],
                         lateness: Histogram::new(),
-                        retries: [0; 3],
-                        failed: [0; 3],
+                        retries: [0; Op::COUNT],
+                        failed: [0; Op::COUNT],
                         bad: 0,
                         reads: 0,
                         intervals: Vec::new(),
                         error: None,
                     },
                     second: 0,
-                    interval: vec![Histogram::new(); 3],
-                    interval_late: [0; 3],
-                    inserted: 0,
+                    interval: vec![Histogram::new(); Op::COUNT],
+                    interval_late: [0; Op::COUNT],
                     version: 0,
                 };
                 scope.spawn(move || {
