@@ -191,17 +191,20 @@ def filter_columns():
 
 def coded(config, d):
     """Each string filter column's parts: (column, parts not answered on codes, parts on the
-    table's dictionary, parts). A part is answered on codes when it is coded against the table's
-    dictionary, whose ranks order its codes, or when it is compressed text, whose pages answer a
-    LIKE and an equality on their codes. The writer drops the dictionary of a column whose values
-    are nearly all different and demotes one that outgrows its budget, so not every filter column
-    has one, and condition 7 asks only that none is read as plain strings."""
+    table's dictionary, parts). A part is answered on codes when it is coded against the
+    table's dictionary, whose ranks order its codes, when it is coded against a dictionary of
+    its own, which the reader hands on as codes over the part's values, or when it is
+    compressed text, whose pages answer a LIKE and an equality on their codes. The writer drops
+    the dictionary of a column whose values are nearly all different and demotes one that
+    outgrows its budget, so not every filter column has one, and condition 7 asks only that
+    none is read as plain strings."""
     _, rudb = databases(config, d)
     lines = ['.mode list', '.separator |', '.headers off']
     for t, c in filter_columns():
         lines.append(f"SELECT '{t}.{c}', sum(CASE WHEN compression LIKE 'TABLE DICT%' OR "
-                     f"compression LIKE 'FSST%' THEN 0 ELSE 1 END), sum(CASE WHEN compression "
-                     f"LIKE 'TABLE DICT%' THEN 1 ELSE 0 END), count(*) FROM "
+                     f"compression LIKE 'DICT%' OR compression LIKE 'FSST%' THEN 0 ELSE 1 "
+                     f"END), sum(CASE WHEN compression LIKE 'TABLE DICT%' THEN 1 ELSE 0 END), "
+                     f"count(*) FROM "
                      f"pragma_storage_info('{t}') WHERE column_name = '{c}';")
     p = subprocess.run([RUDB, '-readonly', rudb], input='\n'.join(lines) + '\n',
                        capture_output=True, text=True, timeout=600)
