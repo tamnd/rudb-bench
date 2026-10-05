@@ -18,11 +18,17 @@ checked against DuckDB's, every run against the first.
 The verdict lines at the end are the eight conditions of 15.1. The ones a configuration other than
 plain is not gated on are printed and not judged.
 
+Condition 7 reads three things off rudb. The EXPLAIN before the runs must hold no estimate taken from
+a default. An EXPLAIN ANALYZE after the runs, outside the timer, must say every consistent reduction
+kept its key sets as bitmaps, with no keys hashed. And every string column a query compares with a
+constant must be stored on codes in every part, either against the table's dictionary or as
+compressed text, which pragma_storage_info says.
+
 Environment: JOB_DUCKDB, JOB_RUDB (binaries), JOB_CSV (the CSV directory), JOB_QUERIES (the query
 directory, default queries/job beside this script), JOB_RUDB_SET (statements sent to rudb only
 before every query, on top of what the configuration sends).
 """
-import json, os, re, subprocess, statistics, sys, time
+import json, os, re, shutil, subprocess, statistics, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 QUERIES = os.environ.get('JOB_QUERIES', os.path.join(HERE, '..', 'queries', 'job'))
@@ -103,7 +109,9 @@ def load(config, d):
     for name, binary, db, tail in (('duckdb', DUCKDB, duck, 'CHECKPOINT;\n'),
                                    ('rudb', RUDB, rudb, LINKS + ';\nCHECKPOINT;\n')):
         for p in (db, db + '.wal'):
-            if os.path.exists(p):
+            if os.path.isdir(p):
+                shutil.rmtree(p)
+            elif os.path.exists(p):
                 os.remove(p)
         subprocess.run(['sh', '-c', 'sync'])
         start = time.monotonic()
@@ -135,9 +143,12 @@ def turn(engine, config, d, sql, threads):
             pre.append("SET \"plan.consistent\" = false;")
         pre += [s.strip() + ';' for s in os.environ.get('JOB_RUDB_SET', '').split(';') if s.strip()]
     mark = f"SELECT '{MARK}';"
+    # rudb is asked for EXPLAIN ANALYZE once more after the timed runs, for the counters of
+    # condition 7, which reads them off the plan text.
+    analyze = [f'EXPLAIN ANALYZE {sql};', mark] if engine == 'rudb' else []
     script = '\n'.join(pre + ['.mode list', '.separator |', '.nullvalue NULL', '.headers off',
                               mark, f'EXPLAIN {sql};', mark, '.timer on'] + [f'{sql};'] * RUNS
-                       + ['.timer off', mark, f'EXPLAIN {sql};', mark]) + '\n'
+                       + ['.timer off', mark, f'EXPLAIN {sql};', mark] + analyze) + '\n'
     subprocess.run(['sh', '-c', 'sync; echo 3 > /proc/sys/vm/drop_caches'])
     before = files(d)
     try:
@@ -151,14 +162,55 @@ def turn(engine, config, d, sql, threads):
     times = [float(m.group(1)) * 1e3 for line in (out + '\n' + err).splitlines()
              if (m := re.match(r'Run Time \(s\): real ([\d.]+)', line))]
     parts = out.split(MARK + '\n')
-    if len(parts) != 5 or len(times) != RUNS:
+    if len(parts) != 5 + bool(analyze) or len(times) != RUNS:
         return {'error': f'{len(times)} runs: ' + err.strip()[-300:].replace('\n', ' ')}
     plan_before, middle, plan_after = parts[1], parts[2], parts[3]
     rows = [line for line in middle.splitlines() if not line.startswith('Run Time')]
     n = len(rows) // RUNS if rows else 0
     answers = [tuple(rows[i * n:(i + 1) * n]) for i in range(RUNS)] if n else [()] * RUNS
+    analyzed = parts[4] if analyze else ''
     return {'times': times, 'answer': answers[0], 'stable': len(set(answers)) == 1,
-            'plan_stable': plan_before == plan_after, 'grown': grown}
+            'plan_stable': plan_before == plan_after, 'grown': grown,
+            'defaults': plan_before.count('estimated from default'),
+            'sets': 'key sets' in analyzed, 'hashed': 'keys hashed' in analyzed}
+
+
+def filter_columns():
+    """The (table, column) pairs the 113 queries compare with a string, by their aliases."""
+    got = set()
+    for q in names():
+        sql = open(os.path.join(QUERIES, q + '.sql')).read()
+        alias = {a: t for t, a in re.findall(r'\b(\w+)\s+AS\s+(\w+)', sql, re.I)}
+        compared = (r"\b(\w+)\.(\w+)\s*(?:NOT\s+)?(?:=|<>|!=|<=|>=|<|>|LIKE\b|IN\b|BETWEEN\b)"
+                    r"\s*\(?\s*'")
+        for a, c in re.findall(compared, sql, re.I):
+            if a in alias:
+                got.add((alias[a], c))
+    return sorted(got)
+
+
+def coded(config, d):
+    """Each string filter column's parts: (column, parts not answered on codes, parts on the
+    table's dictionary, parts). A part is answered on codes when it is coded against the table's
+    dictionary, whose ranks order its codes, or when it is compressed text, whose pages answer a
+    LIKE and an equality on their codes. The writer drops the dictionary of a column whose values
+    are nearly all different and demotes one that outgrows its budget, so not every filter column
+    has one, and condition 7 asks only that none is read as plain strings."""
+    _, rudb = databases(config, d)
+    lines = ['.mode list', '.separator |', '.headers off']
+    for t, c in filter_columns():
+        lines.append(f"SELECT '{t}.{c}', sum(CASE WHEN compression LIKE 'TABLE DICT%' OR "
+                     f"compression LIKE 'FSST%' THEN 0 ELSE 1 END), sum(CASE WHEN compression "
+                     f"LIKE 'TABLE DICT%' THEN 1 ELSE 0 END), count(*) FROM "
+                     f"pragma_storage_info('{t}') WHERE column_name = '{c}';")
+    p = subprocess.run([RUDB, '-readonly', rudb], input='\n'.join(lines) + '\n',
+                       capture_output=True, text=True, timeout=600)
+    got = []
+    for line in p.stdout.splitlines():
+        cells = line.split('|')
+        if len(cells) == 4 and all(x.isdigit() for x in cells[1:]):
+            got.append((cells[0], int(cells[1]), int(cells[2]), int(cells[3])))
+    return got
 
 
 def names():
@@ -170,6 +222,7 @@ def run(config, d, out, threads, only):
     rows, worst = [], (0.0, '')
     total = {'duckdb': 0.0, 'rudb': 0.0}
     wrong, unstable, grew, slower, over = [], [], [], [], []
+    defaulted, hashed, reported = [], [], 0
     with open(out, 'w') as f:
         f.write('query\tduck_cold\tduck_hot\tduck_iqr\trudb_cold\trudb_hot\trudb_iqr\tratio\tcheck\n')
         for at, q in enumerate(names()):
@@ -196,6 +249,13 @@ def run(config, d, out, threads, only):
             if got['rudb']['grown'] or got['duckdb']['grown']:
                 notes.append('grew ' + ','.join(got['rudb']['grown'] + got['duckdb']['grown']))
                 grew.append(q)
+            if got['rudb']['defaults']:
+                notes.append(f"default {got['rudb']['defaults']}")
+                defaulted.append(q)
+            if got['rudb']['hashed']:
+                notes.append('hashed')
+                hashed.append(q)
+            reported += got['rudb']['sets']
             if ratio > 1:
                 slower.append(q)
             if ratio > 1 / 3:
@@ -216,6 +276,17 @@ def run(config, d, out, threads, only):
           f"({worst[1]})")
     load_at = os.path.join(d, f'load-{config if config != "norule" else "plain"}.json')
     took = json.load(open(load_at)) if os.path.exists(load_at) else None
+    columns = coded(config, d)
+    plain = [c for c, bad, _, parts in columns if bad or not parts]
+    for c, bad, dictionary, parts in columns:
+        print(f'column {c}: {parts} parts, {dictionary} on the table dictionary, '
+              f'{bad} not on codes')
+    counters = [f'default in {" ".join(defaulted)}' if defaulted else '',
+                f'hashed in {" ".join(hashed)}' if hashed else '',
+                'no key sets reported' if not reported else '',
+                f'plain strings in {" ".join(plain)}' if plain else '',
+                'no filter column measured' if not columns else '']
+    counters = '; '.join(x for x in counters if x)
     verdict = [
         ('1 answers equal DuckDB', not wrong, ' '.join(wrong)),
         ('2 hot total at most a tenth', ratio <= 0.1, f'{ratio:.3f}'),
@@ -223,7 +294,9 @@ def run(config, d, out, threads, only):
         ('4 no query slower', not slower, ' '.join(slower)),
         ('5 plans and answers identical across runs', not unstable, ' '.join(unstable)),
         ('6 no file grew or appeared', not grew, ' '.join(grew)),
-        ('7 counter assertions', None, 'not yet reported by the engine'),
+        ('7 counter assertions', not counters,
+         counters or f'no default, {reported} reductions all dense, {len(columns)} filter '
+                     'columns on codes'),
         ('8 load no slower than DuckDB', took and took['rudb'] <= took['duckdb'],
          f"rudb {took['rudb']:.1f} s, duckdb {took['duckdb']:.1f} s" if took else 'no load'),
     ]
