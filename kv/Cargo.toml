@@ -21,7 +21,7 @@ rudb = ["dep:rudb"]
 
 [dependencies]
 rudb-bench = { path = ".." }
-rudb = { version = "0.4", optional = true }
+rudb = { version = "0.8.23", optional = true }
 
 [lints.rust]
 missing_debug_implementations = "warn"

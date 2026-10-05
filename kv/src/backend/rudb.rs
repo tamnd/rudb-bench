@@ -100,4 +100,8 @@ impl Session for RudbSession {
     fn batch(&mut self, sql: &str) -> Result<(), Failed> {
         self.connection.execute(sql).map(|_| ()).map_err(failed)
     }
+
+    fn explain(&self, statement: usize) -> Option<String> {
+        Some(self.statements[statement].explain())
+    }
 }

@@ -153,6 +153,12 @@ pub(crate) trait Session: Send {
     /// Runs statements that were not prepared, which is setup and transaction control.
     fn batch(&mut self, sql: &str) -> Result<(), Failed>;
 
+    /// What a prepared statement runs as, for an engine that can say: rudb names its point plans,
+    /// and the driver refuses to measure a statement that would go through its full pipeline.
+    fn explain(&self, _statement: usize) -> Option<String> {
+        None
+    }
+
     fn begin(&mut self) -> Result<(), Failed> {
         self.batch("BEGIN")
     }
