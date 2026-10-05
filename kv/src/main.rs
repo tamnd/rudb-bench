@@ -188,7 +188,7 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
         }
         "postgres" => Box::new(PostgresBackend::open(&arguments.target, arguments.level)?),
         #[cfg(feature = "rudb")]
-        "rudb" => Box::new(backend::rudb::RudbBackend::open(&arguments.target)?),
+        "rudb" => Box::new(backend::rudb::RudbBackend::open(&arguments.target, arguments.level)?),
         #[cfg(not(feature = "rudb"))]
         "rudb" => return Err("this driver was built without --features rudb".to_string()),
         other => return Err(format!("there is no backend {other:?}")),
