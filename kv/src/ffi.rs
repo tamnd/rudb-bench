@@ -178,6 +178,7 @@ struct SqliteApi {
         *mut *const c_char,
     ) -> c_int,
     bind_text: unsafe extern "C" fn(Handle, c_int, *const c_char, c_int, isize) -> c_int,
+    bind_int64: unsafe extern "C" fn(Handle, c_int, i64) -> c_int,
     step: unsafe extern "C" fn(Handle) -> c_int,
     reset: unsafe extern "C" fn(Handle) -> c_int,
     finalize: unsafe extern "C" fn(Handle) -> c_int,
@@ -211,6 +212,7 @@ impl Sqlite {
             free: bind!(library, "sqlite3_free"),
             prepare_v2: bind!(library, "sqlite3_prepare_v2"),
             bind_text: bind!(library, "sqlite3_bind_text"),
+            bind_int64: bind!(library, "sqlite3_bind_int64"),
             step: bind!(library, "sqlite3_step"),
             reset: bind!(library, "sqlite3_reset"),
             finalize: bind!(library, "sqlite3_finalize"),
@@ -339,11 +341,18 @@ impl SqliteConnection<'_> {
         for (at, value) in parameters.iter().enumerate() {
             let length =
                 c_int::try_from(value.len()).map_err(|_| Failed::Error("too long".into()))?;
-            // SAFETY: the statement is prepared and reset, the index is from one, and the text is
-            // bound as SQLITE_STATIC (0), which is sound because `parameters` outlives the step
-            // and the reset below, after which sqlite no longer reads it.
-            let status = unsafe {
-                (api.bind_text)(handle, at as c_int + 1, value.as_ptr().cast(), length, 0)
+            // An integer written the one way an integer is written goes in as an integer. Text has
+            // no affinity in an expression, so `CASE ?5 WHEN 1` would never match the text `1`.
+            let integer = value.parse::<i64>().ok().filter(|n| n.to_string() == *value);
+            let status = match integer {
+                // SAFETY: the statement is prepared and reset, and the index is from one.
+                Some(n) => unsafe { (api.bind_int64)(handle, at as c_int + 1, n) },
+                // SAFETY: as above, and the text is bound as SQLITE_STATIC (0), which is sound
+                // because `parameters` outlives the step and the reset below, after which sqlite
+                // no longer reads it.
+                None => unsafe {
+                    (api.bind_text)(handle, at as c_int + 1, value.as_ptr().cast(), length, 0)
+                },
             };
             if status != SQLITE_OK {
                 // SAFETY: as above.

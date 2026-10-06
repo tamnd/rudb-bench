@@ -132,6 +132,18 @@ pub(crate) trait Backend: Sync {
         None
     }
 
+    /// A statement written with `$1`, `$2` parameters, as this engine wants it written. The TPC-C
+    /// text is written that way, and only SQLite needs it changed.
+    fn numbered(&self, text: &str) -> String {
+        text.to_string()
+    }
+
+    /// Whether what is written stays written, so the checks after a run have something to check.
+    /// Only the null backend keeps nothing.
+    fn keeps_rows(&self) -> bool {
+        true
+    }
+
     /// A new connection, for one client thread.
     fn connect(&self) -> Result<Box<dyn Session + '_>, String>;
 }
@@ -161,6 +173,11 @@ pub(crate) trait Session: Send {
 
     fn begin(&mut self) -> Result<(), Failed> {
         self.batch("BEGIN")
+    }
+
+    /// Starts a transaction that only reads, which only SQLite starts differently.
+    fn begin_read(&mut self) -> Result<(), Failed> {
+        self.begin()
     }
 
     fn commit(&mut self) -> Result<(), Failed> {
