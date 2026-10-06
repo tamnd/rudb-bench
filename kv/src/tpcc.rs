@@ -33,6 +33,9 @@ pub(crate) struct Settings {
     pub(crate) level: Level,
     pub(crate) pinned: bool,
     pub(crate) card: Option<String>,
+    /// Whether every transaction begins `ISOLATION LEVEL SERIALIZABLE` rather than at the
+    /// engine's default level.
+    pub(crate) serializable: bool,
 }
 
 /// The share of any type's transactions that may fail before the run is invalid, 0.1%.
@@ -68,7 +71,7 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
     let warehouses = settings.warehouses;
     println!(
         "tpcc 1 backend={} version={} warehouses={warehouses} terminals={terminals} loop=closed \
-         seed={:#x} c_load={} c_run={} c_id={} c_item={} level={} warmup_s={} window_s={} pinned={} \
+         seed={:#x} c_load={} c_run={} c_id={} c_item={} level={} isolation={} warmup_s={} window_s={} pinned={} \
          boundary={}",
         backend.name(),
         backend.version().replace(' ', "_"),
@@ -78,6 +81,7 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
         constants.c_id,
         constants.c_item,
         settings.level.name(),
+        if settings.serializable { "serializable" } else { "default" },
         settings.warmup.as_secs_f64(),
         settings.window.as_secs_f64(),
         if settings.pinned { "yes" } else { "no" },
@@ -128,12 +132,12 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
     for _ in 0..terminals {
         let mut session = backend.connect()?;
         let prepared = terminal::prepare(&mut *session, backend)?;
-        runners.push(Runner::new(session, prepared));
+        runners.push(Runner::new(session, prepared, settings.serializable));
     }
     let mut monitor = {
         let mut session = backend.connect()?;
         let prepared = terminal::prepare(&mut *session, backend)?;
-        Runner::new(session, prepared)
+        Runner::new(session, prepared, settings.serializable)
     };
 
     let seconds = settings.window.as_secs_f64().ceil() as usize;

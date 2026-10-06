@@ -36,7 +36,7 @@ usage: rudb-bench-kv [--mode ycsb|tpcc] --backend null|sqlite|duckdb|postgres|ru
                      [--load] [--warehouses N] [--terminals N] [--records N] [--mix read=50,update=50] [--clients N]
                      [--distribution uniform|zipfian|latest] [--loop closed|open] [--rate OPS] [--poisson] [--warmup 10s] [--window 60s]
                      [--seed N] [--level full|os|none] [--card <card line>] [--unpinned]
-                     [--service 100us] [--stall 100ms/10s] [--shim none|unix]
+                     [--service 100us] [--stall 100ms/10s] [--shim none|unix] [--isolation default|serializable]
 
 The libraries come from RUDB_BENCH_LIBSQLITE, RUDB_BENCH_LIBDUCKDB and RUDB_BENCH_LIBPQ.
 --service and --stall make the null backend a fake engine with a known stall.
@@ -44,7 +44,9 @@ The libraries come from RUDB_BENCH_LIBSQLITE, RUDB_BENCH_LIBDUCKDB and RUDB_BENC
 statement pays the round trip PostgreSQL pays.
 --unpinned lets DuckDB run with a library that is not the pin, and marks the run pinned=no.
 --mode tpcc runs the TPC-C suite on --warehouses warehouses with --terminals terminals (the same as
---clients), closed loop. --load creates and loads its nine tables first.";
+--clients), closed loop. --load creates and loads its nine tables first. --isolation serializable
+begins each of its transactions ISOLATION LEVEL SERIALIZABLE, and SQLite, which is serializable
+anyway, as it begins them otherwise.";
 
 /// The two suites the driver runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +70,7 @@ struct Arguments {
     service: Duration,
     stall: Option<(Duration, Duration)>,
     shim: bool,
+    serializable: bool,
 }
 
 /// `100us`, `5ms`, `10s`, or a bare number of seconds.
@@ -110,6 +113,7 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
         service: Duration::ZERO,
         stall: None,
         shim: false,
+        serializable: false,
     };
     let mut rate = None;
     let mut open = false;
@@ -181,6 +185,17 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
                     "unix" => true,
                     "none" => false,
                     other => return Err(format!("--shim is none or unix, not {other:?}")),
+                };
+            }
+            "--isolation" => {
+                arguments.serializable = match value()?.as_str() {
+                    "serializable" => true,
+                    "default" => false,
+                    other => {
+                        return Err(format!(
+                            "--isolation is default or serializable, not {other:?}"
+                        ));
+                    }
                 };
             }
             "--help" | "-h" => return Err(USAGE.to_string()),
@@ -265,6 +280,7 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
             level: arguments.level,
             pinned,
             card: arguments.card.clone(),
+            serializable: arguments.serializable,
         };
         return tpcc::drive(&*backend, &settings);
     }
@@ -380,5 +396,12 @@ mod tests {
         assert!(parse(words("--mode tpch --backend null")).is_err());
         assert!(parse(words("--backend null --shim unix")).unwrap().shim);
         assert!(parse(words("--backend null --shim tcp")).is_err());
+        assert!(
+            parse(words("--mode tpcc --backend null --isolation serializable"))
+                .unwrap()
+                .serializable
+        );
+        assert!(!parse(words("--mode tpcc --backend null")).unwrap().serializable);
+        assert!(parse(words("--backend null --isolation snapshot")).is_err());
     }
 }
