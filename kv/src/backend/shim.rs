@@ -82,6 +82,10 @@ impl<B: Backend + Send + 'static> Backend for Shim<B> {
         self.inner.keeps_rows()
     }
 
+    fn analytic_threads(&self, threads: usize) -> Option<String> {
+        self.inner.analytic_threads(threads)
+    }
+
     fn connect(&self) -> Result<Box<dyn Session + '_>, String> {
         let (ours, theirs) = UnixStream::pair().map_err(|error| format!("socketpair: {error}"))?;
         let inner = Arc::clone(&self.inner);

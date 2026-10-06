@@ -59,6 +59,11 @@ impl Backend for PostgresBackend {
         Ok(())
     }
 
+    /// PostgreSQL counts the workers besides the session's own process.
+    fn analytic_threads(&self, threads: usize) -> Option<String> {
+        Some(format!("SET max_parallel_workers_per_gather = {}", threads.saturating_sub(1)))
+    }
+
     fn connect(&self) -> Result<Box<dyn Session + '_>, String> {
         let mut connection = self.pq.connect(&self.conninfo)?;
         let synchronous = if self.level == Level::None { "off" } else { "on" };

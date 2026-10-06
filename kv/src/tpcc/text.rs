@@ -2,8 +2,9 @@
 //! spec's documents 02 and 03 write it. Parameters are `$1`, `$2` and so on, and a backend whose
 //! engine numbers them some other way rewrites them through `Backend::numbered`.
 
-/// The nine tables, in the order they are created and loaded.
-pub(crate) const TABLES: [&str; 9] = [
+/// The nine tables of TPC-C and the three CH-benCHmark adds, in the order they are created and
+/// loaded.
+pub(crate) const TABLES: [&str; 12] = [
     "warehouse",
     "district",
     "customer",
@@ -13,10 +14,14 @@ pub(crate) const TABLES: [&str; 9] = [
     "order_line",
     "item",
     "stock",
+    "region",
+    "nation",
+    "supplier",
 ];
 
-/// The schema of the spec's section 2.1, one statement a table, in the order of [`TABLES`].
-pub(crate) const SCHEMA: [&str; 9] = [
+/// The schema of the spec's section 2.1 and of document 09 section 9.2, one statement a table, in
+/// the order of [`TABLES`].
+pub(crate) const SCHEMA: [&str; 12] = [
     "CREATE TABLE warehouse (
   w_id INTEGER NOT NULL, w_name VARCHAR(10), w_street_1 VARCHAR(20), w_street_2 VARCHAR(20),
   w_city VARCHAR(20), w_state CHAR(2), w_zip CHAR(9), w_tax DECIMAL(4,4), w_ytd DECIMAL(12,2),
@@ -59,6 +64,15 @@ pub(crate) const SCHEMA: [&str; 9] = [
   s_dist_09 CHAR(24), s_dist_10 CHAR(24), s_ytd INTEGER, s_order_cnt INTEGER,
   s_remote_cnt INTEGER, s_data VARCHAR(50),
   PRIMARY KEY (s_w_id, s_i_id))",
+    "CREATE TABLE region (
+  r_regionkey INTEGER PRIMARY KEY, r_name VARCHAR(55) NOT NULL, r_comment VARCHAR(152) NOT NULL)",
+    "CREATE TABLE nation (
+  n_nationkey INTEGER PRIMARY KEY, n_name VARCHAR(25) NOT NULL, n_regionkey INTEGER NOT NULL,
+  n_comment VARCHAR(152) NOT NULL)",
+    "CREATE TABLE supplier (
+  su_suppkey INTEGER PRIMARY KEY, su_name VARCHAR(25) NOT NULL, su_address VARCHAR(40) NOT NULL,
+  su_nationkey INTEGER NOT NULL, su_phone VARCHAR(15) NOT NULL, su_acctbal DECIMAL(12,2) NOT NULL,
+  su_comment VARCHAR(101) NOT NULL)",
 ];
 
 /// The two secondary indexes, each created after the load as its own timed statement.

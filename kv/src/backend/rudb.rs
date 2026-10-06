@@ -56,6 +56,10 @@ impl Backend for RudbBackend {
         Ok(())
     }
 
+    fn analytic_threads(&self, threads: usize) -> Option<String> {
+        Some(format!("SET threads = {threads}"))
+    }
+
     fn connect(&self) -> Result<Box<dyn Session + '_>, String> {
         Ok(Box::new(RudbSession { connection: self.database.connect(), statements: Vec::new() }))
     }
