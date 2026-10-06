@@ -212,9 +212,9 @@ dependencies = [
 
 [[package]]
 name = "rudb"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09f4face77e719e423622747d5beeced1f492a0b0b82c3c3399efa230b48bc22"
+checksum = "1194192d1e321376b7a7f86ecfd3736e0a50940dd24bbe82573b86deef2a90ea"
 dependencies = [
  "iana-time-zone",
  "rudb-arrow",
@@ -232,6 +232,7 @@ dependencies = [
  "rudb-parse",
  "rudb-pipeline",
  "rudb-plan",
+ "rudb-qc",
  "rudb-seam",
  "rudb-storage",
  "rudb-txn",
@@ -240,9 +241,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-arrow"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca2bd41003311fd195433fa60c4b2f309d4177c9ed55df3e54f18644fd7ba391"
+checksum = "ab89fd81b9c4f8baafb1ce6047f7061696c25d4eeef0f20fc24c71dceb4bc9c6"
 dependencies = [
  "rudb-common",
  "rudb-vector",
@@ -262,9 +263,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-bind"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18191221241db916bac6e351507e4b293adf5922809597af547345709516092d"
+checksum = "af536393bf61f09918d57705954a3625508595db83dcaefd15b3f3463d3d2a55"
 dependencies = [
  "rudb-catalog",
  "rudb-common",
@@ -278,9 +279,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-catalog"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba8361b23cb2533fb1f82d4101ccada42ffdd086c4dc0cb7171e1b7afd0f1d4d"
+checksum = "3dcbd981c29cb0a8c2bb4cfc3c31222a2e917a187d8d7dda69a8cf6fa993ca40"
 dependencies = [
  "rudb-common",
  "rudb-encoding",
@@ -293,9 +294,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-common"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8f267831520c20b764dd193fdae051557ca3d93ab24c42a8cb51b389745f398"
+checksum = "e9579e2a9fd957786c37d4962db7a52bbcf37a3220c9e937774f6512d9969de7"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -303,18 +304,18 @@ dependencies = [
 
 [[package]]
 name = "rudb-compress"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4260f89c8e94b9fc802612896077f07ffd78b05153cdfa781f967b7536568a64"
+checksum = "8baf35bb68c417f633d9d25d0eabd7d12c522defe25f8ce2356b4ffdc6dc5c3b"
 dependencies = [
  "rudb-common",
 ]
 
 [[package]]
 name = "rudb-csv"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2d628cbcc479f65a37a65b6aed94c6a427bb13fb28b7af6ad7d0b256528a5d3"
+checksum = "a75d22e8ebab13250bada7e9ed6b9d060857532451a5eddd90632d804acbe67a"
 dependencies = [
  "rudb-common",
  "rudb-io",
@@ -324,9 +325,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-encoding"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6608e4d003ea02c12bf1bba4d56f45f22caf780fc5be8597e6e7f37834ca7140"
+checksum = "3e5ebabbdd975d9123b2af2f20c725f9bce25d295aa77d9975217704b4a00ec1"
 dependencies = [
  "rudb-common",
  "rudb-vector",
@@ -334,9 +335,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-exec"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23d5d2402e1a90d8d8b0a2a62a04db0cdb839a71a5bf2a4cb50b6b4d6965c820"
+checksum = "fbe75cb04c30c0557ec4cd2d8de7d655ddf1d83504a2972904d4fdbe97dd3afd"
 dependencies = [
  "rudb-catalog",
  "rudb-common",
@@ -345,7 +346,6 @@ dependencies = [
  "rudb-functions",
  "rudb-graph",
  "rudb-io",
- "rudb-jit",
  "rudb-kernels",
  "rudb-metrics",
  "rudb-native",
@@ -362,14 +362,13 @@ dependencies = [
 
 [[package]]
 name = "rudb-functions"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9c84cf416ab57846900c2472f79ccfcb5c8a5520f821615d6097cf703f5a54c"
+checksum = "a46b39b6049bf12e058f5d71732e993dd5d2caee416945ced2f829ffe25a3bf3"
 dependencies = [
  "rudb-common",
  "rudb-csv",
  "rudb-io",
- "rudb-ir",
  "rudb-kernels",
  "rudb-parquet",
  "rudb-parse",
@@ -378,9 +377,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-graph"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcc14456a2e97f1e1527ee7de571416a14a407a8cc36db39d64b566bc08e4603"
+checksum = "c9fb9dfba9701af44682829d52a5ab571359ba0e31075903f763f564c8936c7f"
 dependencies = [
  "rudb-common",
  "rudb-encoding",
@@ -388,41 +387,20 @@ dependencies = [
 
 [[package]]
 name = "rudb-io"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "509a8accc7e7c212650bcb2222070809bf5389c6c8aa8f58bd23e82cf0b041d7"
+checksum = "8aa2db6af77d4ee383ec878f6a1f15b76484056e2f688e08279d1ea0bb51c64e"
 dependencies = [
  "rudb-common",
-]
-
-[[package]]
-name = "rudb-ir"
-version = "0.4.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "115d00d29e55c26c42a18d916b2e6e87cec8db15da00f50bce0cf6c172f880c9"
-dependencies = [
- "rudb-common",
- "rudb-vector",
-]
-
-[[package]]
-name = "rudb-jit"
-version = "0.4.32"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b238032f9fad048762e072e43c0778baf460fe08958d50e15c187d96a537f875"
-dependencies = [
- "rudb-common",
- "rudb-ir",
- "rudb-kernels",
- "rudb-vector",
 ]
 
 [[package]]
 name = "rudb-kernels"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4061a6f156c25409a781bb24210f22c6eada24562bfb07d669dd616c4fe46e4d"
+checksum = "46f25fd0c6be464e9ee16a230cdffa560554848e4c6b5367d3ba60f04657109e"
 dependencies = [
+ "libm",
  "memchr",
  "rudb-common",
  "rudb-encoding",
@@ -432,18 +410,18 @@ dependencies = [
 
 [[package]]
 name = "rudb-metrics"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f6317672027c6126f9e94df0c924d042fc13eae9849f96cdd7339e4be801dd9"
+checksum = "4fb97526a2b5e719fdca1de0093b7d03ca9140b6279e49f8ee7d150e8d386ef0"
 dependencies = [
  "rudb-common",
 ]
 
 [[package]]
 name = "rudb-native"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b70e1f5c860fa14a7f23d4b6e15c8a05a161df0784e7aab02ea3678b2d3e167e"
+checksum = "95a4e1149206fbadbf9c596777a9f22912029a0974480a06009b0d01ce03ce47"
 dependencies = [
  "rudb-common",
  "rudb-encoding",
@@ -457,9 +435,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-opt"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13928db9bce84a4902df137a1ce5a20efaae4c70bb260ab3fd23a6dc8f7a9fc2"
+checksum = "6f3c97e970a7b2f7dd3853194bbe0c4b5218a7b16b38ce3e1880cff9eb7d7396"
 dependencies = [
  "libm",
  "rudb-bind",
@@ -474,9 +452,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-parquet"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1824a38098cbbb44edb7061f37f31856e0aae7096b90c6ca42afb80f66f40078"
+checksum = "74a561fef03d05d5e9fcc5582bc217841a6e961610de9f35c4880331c0f8a1ea"
 dependencies = [
  "rudb-common",
  "rudb-compress",
@@ -487,18 +465,18 @@ dependencies = [
 
 [[package]]
 name = "rudb-parse"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2fb08e15209b0abfc3e2b0577b3f11b92942c634fd71e0aea259378995c08ab"
+checksum = "45545433f1c18e63f6f68c87b972d1e3f3480fb27f3c7a0e167b5b0e2741ee11"
 dependencies = [
  "rudb-common",
 ]
 
 [[package]]
 name = "rudb-pipeline"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25dd9bb62c9ad9120bacd787b2403b302a8b12b727e068437aed3ec6a63ffbf9"
+checksum = "8654f1f2e646ef5f0e1288f9edbeb31ebe91d777e77dd4fa13725abcd782b5fb"
 dependencies = [
  "rudb-common",
  "rudb-metrics",
@@ -508,37 +486,136 @@ dependencies = [
 
 [[package]]
 name = "rudb-plan"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "069c9ddf3647a91054c49bd4ec8813b377daa851ad367ce2154fd65253ad984e"
+checksum = "ae2c4047ff1f5a62bcbef3c5fdfee4e78124038c1d466cde95b25c28f1b1a4ea"
 dependencies = [
  "rudb-common",
  "rudb-seam",
 ]
 
 [[package]]
-name = "rudb-regex"
-version = "0.4.32"
+name = "rudb-qc"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffa66cbc1b676066ead872ac32beeda9392892532d75788ca8e96444c89aaf37"
+checksum = "bc8a886666bcbef51f361e6bcd01653b219a4350730089ef4aa94202f2dec018"
+dependencies = [
+ "rudb-catalog",
+ "rudb-common",
+ "rudb-exec",
+ "rudb-kernels",
+ "rudb-pipeline",
+ "rudb-plan",
+ "rudb-qc-direct",
+ "rudb-qc-gen",
+ "rudb-qc-interp",
+ "rudb-qc-ir",
+ "rudb-qc-pipe",
+ "rudb-qc-plan",
+ "rudb-qc-rt",
+ "rudb-seam",
+ "rudb-vector",
+]
+
+[[package]]
+name = "rudb-qc-direct"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9fac84a726883ea85fb482fc9fd5112ed1b29a81d469edcde09847bf42efb451"
+dependencies = [
+ "rudb-qc-ir",
+]
+
+[[package]]
+name = "rudb-qc-gen"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9e7a1fdfb4eb8f3ed3a5efed18a3d1456a5dc34c846e0441e968b11c41affce"
+dependencies = [
+ "rudb-common",
+ "rudb-kernels",
+ "rudb-plan",
+ "rudb-qc-ir",
+ "rudb-qc-pipe",
+ "rudb-qc-plan",
+ "rudb-qc-rt",
+ "rudb-vector",
+]
+
+[[package]]
+name = "rudb-qc-interp"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d462c4f718f6137211560c3b854a9f1699d259b33db0b22cd0a86d0989cc0f9d"
+dependencies = [
+ "rudb-qc-ir",
+]
+
+[[package]]
+name = "rudb-qc-ir"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85fd038dbda47019b108d3bcf15cf748c2e3c98c907ef76cb95553c89d38dcb4"
+
+[[package]]
+name = "rudb-qc-pipe"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1ff610bf2661381ca338c7115275729741611b0c56b9fa0b8200a41301a3907"
+dependencies = [
+ "rudb-common",
+ "rudb-plan",
+ "rudb-qc-ir",
+ "rudb-qc-plan",
+ "rudb-qc-rt",
+]
+
+[[package]]
+name = "rudb-qc-plan"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1a497266494cea49723ff86bbf7b02fc17f0f36cdbf37892eda597133cda905"
+dependencies = [
+ "rudb-common",
+ "rudb-plan",
+]
+
+[[package]]
+name = "rudb-qc-rt"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60cf041c586f299cc9f4302b3bb31b7905f25b353e841c50f21ba23179c0d917"
+dependencies = [
+ "memchr",
+ "rudb-common",
+ "rudb-qc-interp",
+ "rudb-qc-ir",
+ "rudb-regex",
+]
+
+[[package]]
+name = "rudb-regex"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40df07bb7c867550e649ffa52cf0ab5e5edb5c8fdfa5a29f03ccdd8c0b4a0d23"
 dependencies = [
  "rudb-common",
 ]
 
 [[package]]
 name = "rudb-seam"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b871424cb4bfedc829c0d4d7ef991c301d1985b02c69efe21b98dae6bb3763d"
+checksum = "875f14525f2aee611ca237281f3e988a2e500346363228e5db3f7fd48a731746"
 dependencies = [
  "rudb-common",
 ]
 
 [[package]]
 name = "rudb-stats"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1feb615ed37429efc0bce2bc5e937680427231ddda1313a472577a8de89c5c39"
+checksum = "0e6924922a9fe04aca86a6d6b93c15cc0ec992727bf8ea85f42b2406e61d480e"
 dependencies = [
  "rudb-common",
  "rudb-encoding",
@@ -546,9 +623,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-storage"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21e051b68e5f30930d212f8b7debce20d7572595fcf29076f42e4594a66a87fa"
+checksum = "0aa514bf501274ff9f9ae37c38ec89ffa82a154123d04d637c22cc1ef7e00863"
 dependencies = [
  "libm",
  "rudb-common",
@@ -559,9 +636,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-txn"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8a7fdee218a7e1cfea93d91e055bf53c511c8692c403846067e6de259d32606"
+checksum = "b278155e00efa547b2ea8b230aac19accc885a7043d25485bc6571fb90356f7d"
 dependencies = [
  "rudb-common",
  "rudb-io",
@@ -570,9 +647,9 @@ dependencies = [
 
 [[package]]
 name = "rudb-vector"
-version = "0.4.32"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b29ffe6eb00a1ff34d602e3b387ebdd3066e0358f97ddfb56b3c6ecbabb4ec56"
+checksum = "d729d9c1850f60bece1bf866aa8bcf6c33ec948a789d80b5e7a5f0e253fb950c"
 dependencies = [
  "rudb-common",
 ]

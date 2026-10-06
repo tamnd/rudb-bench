@@ -3,7 +3,9 @@
 # `unsafe`. Everything native lives here, behind `src/ffi.rs`.
 #
 # The rudb backend is behind a feature. It takes rudb from crates.io, and a run against a checkout
-# overrides that with `--config 'patch.crates-io.rudb.path="<RUDB_PATH>/crates/rudb"'`.
+# overrides that with `--config 'patch.crates-io.rudb.path="<RUDB_PATH>/crates/rudb"'`. The
+# requirement names only the minor series, so that it resolves against what crates.io has and a
+# checkout of any 0.8 patch still overrides it.
 [package]
 name = "rudb-bench-kv"
 version = "0.0.1"
@@ -21,7 +23,7 @@ rudb = ["dep:rudb"]
 
 [dependencies]
 rudb-bench = { path = ".." }
-rudb = { version = "0.8.23", optional = true }
+rudb = { version = "0.8", optional = true }
 
 [lints.rust]
 missing_debug_implementations = "warn"
