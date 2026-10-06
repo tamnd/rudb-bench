@@ -2,6 +2,7 @@
 
 use super::{Backend, Failed, Level, Session, Values, library};
 use crate::ffi::{Sqlite, SqliteConnection};
+use crate::tpcc::text::question_numbered;
 
 /// The library and the file every connection opens.
 #[derive(Debug)]
@@ -50,6 +51,10 @@ impl Backend for SqliteBackend {
         Ok(())
     }
 
+    fn numbered(&self, text: &str) -> String {
+        question_numbered(text)
+    }
+
     fn connect(&self) -> Result<Box<dyn Session + '_>, String> {
         let mut connection = self.sqlite.open(&self.file)?;
         let synchronous = match self.level {
@@ -95,5 +100,10 @@ impl Session for SqliteSession<'_> {
     /// write when another connection wrote in between.
     fn begin(&mut self) -> Result<(), Failed> {
         self.0.batch("BEGIN IMMEDIATE")
+    }
+
+    /// A deferred `BEGIN`, so a transaction that only reads runs beside the writer under WAL.
+    fn begin_read(&mut self) -> Result<(), Failed> {
+        self.0.batch("BEGIN")
     }
 }

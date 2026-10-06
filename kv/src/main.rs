@@ -16,6 +16,7 @@
 mod backend;
 mod ffi;
 mod run;
+mod tpcc;
 mod workload;
 
 use std::process::ExitCode;
@@ -30,19 +31,30 @@ use run::{Loop, Plan};
 use workload::{Distribution, Mix};
 
 const USAGE: &str = "\
-usage: rudb-bench-kv --backend null|sqlite|duckdb|postgres|rudb --target <file or conninfo>
-                     [--load] [--records N] [--mix read=50,update=50] [--clients N]
+usage: rudb-bench-kv [--mode ycsb|tpcc] --backend null|sqlite|duckdb|postgres|rudb --target <file or conninfo>
+                     [--load] [--warehouses N] [--terminals N] [--records N] [--mix read=50,update=50] [--clients N]
                      [--distribution uniform|zipfian|latest] [--loop closed|open] [--rate OPS] [--poisson] [--warmup 10s] [--window 60s]
                      [--seed N] [--level full|os|none] [--card <card line>] [--unpinned]
                      [--service 100us] [--stall 100ms/10s]
 
 The libraries come from RUDB_BENCH_LIBSQLITE, RUDB_BENCH_LIBDUCKDB and RUDB_BENCH_LIBPQ.
 --service and --stall make the null backend a fake engine with a known stall.
---unpinned lets DuckDB run with a library that is not the pin, and marks the run pinned=no.";
+--unpinned lets DuckDB run with a library that is not the pin, and marks the run pinned=no.
+--mode tpcc runs the TPC-C suite on --warehouses warehouses with --terminals terminals (the same as
+--clients), closed loop. --load creates and loads its nine tables first.";
+
+/// The two suites the driver runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Ycsb,
+    Tpcc,
+}
 
 /// Everything on the command line.
 #[derive(Debug)]
 struct Arguments {
+    mode: Mode,
+    warehouses: u64,
     backend: String,
     target: String,
     load: bool,
@@ -73,6 +85,8 @@ fn duration(text: &str) -> Result<Duration, String> {
 
 fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
     let mut arguments = Arguments {
+        mode: Mode::Ycsb,
+        warehouses: 1,
         backend: String::new(),
         target: String::new(),
         load: false,
@@ -98,6 +112,16 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
     while let Some(word) = words.next() {
         let mut value = || words.next().ok_or_else(|| format!("{word} wants a value"));
         match word.as_str() {
+            "--mode" => {
+                arguments.mode = match value()?.as_str() {
+                    "ycsb" => Mode::Ycsb,
+                    "tpcc" => Mode::Tpcc,
+                    other => return Err(format!("--mode is ycsb or tpcc, not {other:?}")),
+                };
+            }
+            "--warehouses" => {
+                arguments.warehouses = value()?.parse().map_err(|_| "--warehouses is a count")?;
+            }
             "--backend" => arguments.backend = value()?,
             "--target" => arguments.target = value()?,
             "--load" => arguments.load = true,
@@ -108,7 +132,7 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
             "--distribution" => {
                 arguments.plan.distribution = Distribution::parse(&value()?)?;
             }
-            "--clients" => {
+            "--clients" | "--terminals" => {
                 arguments.plan.clients = value()?.parse().map_err(|_| "--clients is a count")?;
             }
             "--loop" => {
@@ -154,8 +178,11 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
     if arguments.backend.is_empty() {
         return Err(USAGE.to_string());
     }
-    if arguments.plan.clients == 0 || arguments.plan.records == 0 {
-        return Err("--clients and --records have to be at least one".to_string());
+    if arguments.plan.clients == 0 || arguments.plan.records == 0 || arguments.warehouses == 0 {
+        return Err("--clients, --records and --warehouses have to be at least one".to_string());
+    }
+    if open && arguments.mode == Mode::Tpcc {
+        return Err("the tpcc mode runs a closed loop only for now".to_string());
     }
     if open {
         let rate = rate.filter(|rate| *rate > 0.0).ok_or("an open loop wants --rate")?;
@@ -195,6 +222,27 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
     };
     backend.level()?;
     let plan = &arguments.plan;
+    if arguments.mode == Mode::Tpcc {
+        if arguments.backend == "duckdb" {
+            return Err(
+                "the duckdb backend reads VARCHAR results only, so tpcc does not run on it \
+                        yet"
+                .to_string(),
+            );
+        }
+        let settings = tpcc::Settings {
+            warehouses: arguments.warehouses,
+            terminals: plan.clients,
+            warmup: plan.warmup,
+            window: plan.window,
+            seed: plan.seed,
+            load: arguments.load,
+            level: arguments.level,
+            pinned,
+            card: arguments.card.clone(),
+        };
+        return tpcc::drive(&*backend, &settings);
+    }
     let mode = match plan.mode {
         Loop::Closed => "mode=closed".to_string(),
         Loop::Open { rate, poisson } => {
@@ -293,5 +341,16 @@ mod tests {
         assert_eq!(arguments.plan.mode, Loop::Open { rate: 5000.0, poisson: false });
         assert_eq!(arguments.stall, Some((Duration::from_millis(100), Duration::from_secs(10))));
         assert!(parse(words("--backend null --stall 10s/1s")).is_err());
+    }
+
+    #[test]
+    fn the_tpcc_mode_takes_warehouses_and_terminals() {
+        let arguments =
+            parse(words("--mode tpcc --backend null --warehouses 4 --terminals 8")).unwrap();
+        assert_eq!(arguments.mode, Mode::Tpcc);
+        assert_eq!((arguments.warehouses, arguments.plan.clients), (4, 8));
+        assert!(parse(words("--mode tpcc --backend null --warehouses 0")).is_err());
+        assert!(parse(words("--mode tpcc --backend null --loop open --rate 10")).is_err());
+        assert!(parse(words("--mode tpch --backend null")).is_err());
     }
 }
