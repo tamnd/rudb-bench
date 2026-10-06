@@ -33,6 +33,10 @@ impl Backend for PostgresBackend {
         format!("{} libpq={}", dotted(self.server), dotted(self.pq.library_version()))
     }
 
+    fn boundary(&self) -> &'static str {
+        "unix_socket"
+    }
+
     fn placeholder(&self) -> Placeholder {
         Placeholder::Dollar
     }

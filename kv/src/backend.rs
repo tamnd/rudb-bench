@@ -10,6 +10,7 @@ pub(crate) mod null;
 pub(crate) mod postgres;
 #[cfg(feature = "rudb")]
 pub(crate) mod rudb;
+pub(crate) mod shim;
 pub(crate) mod sqlite;
 
 use std::fmt;
@@ -114,6 +115,13 @@ pub(crate) trait Backend: Sync {
 
     /// The exact version of the library or server, which goes next to every number.
     fn version(&self) -> String;
+
+    /// How a statement reaches the engine: `in_process` for a library called on the client's
+    /// thread, `unix_socket` for a server, and `unix_shim` for a library behind the shim. The
+    /// report labels every number with it.
+    fn boundary(&self) -> &'static str {
+        "in_process"
+    }
 
     /// How its parameters are written.
     fn placeholder(&self) -> Placeholder {

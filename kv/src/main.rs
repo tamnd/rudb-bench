@@ -25,6 +25,7 @@ use std::time::Duration;
 use backend::duckdb::DuckdbBackend;
 use backend::null::NullBackend;
 use backend::postgres::PostgresBackend;
+use backend::shim::Shim;
 use backend::sqlite::SqliteBackend;
 use backend::{Backend, Level};
 use run::{Loop, Plan};
@@ -35,10 +36,12 @@ usage: rudb-bench-kv [--mode ycsb|tpcc] --backend null|sqlite|duckdb|postgres|ru
                      [--load] [--warehouses N] [--terminals N] [--records N] [--mix read=50,update=50] [--clients N]
                      [--distribution uniform|zipfian|latest] [--loop closed|open] [--rate OPS] [--poisson] [--warmup 10s] [--window 60s]
                      [--seed N] [--level full|os|none] [--card <card line>] [--unpinned]
-                     [--service 100us] [--stall 100ms/10s]
+                     [--service 100us] [--stall 100ms/10s] [--shim none|unix]
 
 The libraries come from RUDB_BENCH_LIBSQLITE, RUDB_BENCH_LIBDUCKDB and RUDB_BENCH_LIBPQ.
 --service and --stall make the null backend a fake engine with a known stall.
+--shim unix puts rudb or the null backend behind a socketpair and a thread per session, so every
+statement pays the round trip PostgreSQL pays.
 --unpinned lets DuckDB run with a library that is not the pin, and marks the run pinned=no.
 --mode tpcc runs the TPC-C suite on --warehouses warehouses with --terminals terminals (the same as
 --clients), closed loop. --load creates and loads its nine tables first.";
@@ -64,6 +67,7 @@ struct Arguments {
     unpinned: bool,
     service: Duration,
     stall: Option<(Duration, Duration)>,
+    shim: bool,
 }
 
 /// `100us`, `5ms`, `10s`, or a bare number of seconds.
@@ -105,6 +109,7 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
         unpinned: false,
         service: Duration::ZERO,
         stall: None,
+        shim: false,
     };
     let mut rate = None;
     let mut open = false;
@@ -171,6 +176,13 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
                 }
                 arguments.stall = Some((length, every));
             }
+            "--shim" => {
+                arguments.shim = match value()?.as_str() {
+                    "unix" => true,
+                    "none" => false,
+                    other => return Err(format!("--shim is none or unix, not {other:?}")),
+                };
+            }
             "--help" | "-h" => return Err(USAGE.to_string()),
             other => return Err(format!("{other:?} is not an option\n\n{USAGE}")),
         }
@@ -201,6 +213,19 @@ fn written() -> Option<u64> {
 fn drive(arguments: &Arguments) -> Result<(), String> {
     let mut pinned = true;
     let backend: Box<dyn Backend> = match arguments.backend.as_str() {
+        "null" if arguments.shim => {
+            Box::new(Shim::new(NullBackend::new(arguments.service, arguments.stall)))
+        }
+        #[cfg(feature = "rudb")]
+        "rudb" if arguments.shim => Box::new(Shim::new(backend::rudb::RudbBackend::open(
+            &arguments.target,
+            arguments.level,
+        )?)),
+        _ if arguments.shim => {
+            return Err(
+                "--shim unix is for the rudb and null backends, which run in process".to_string()
+            );
+        }
         "null" => Box::new(NullBackend::new(arguments.service, arguments.stall)),
         "sqlite" => {
             let backend = SqliteBackend::open(&arguments.target, arguments.level)?;
@@ -251,7 +276,7 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
     };
     println!(
         "kv 1 backend={} version={} workload={} distribution={} records={} clients={} {mode} \
-         seed={:#x} level={} warmup_s={} window_s={} pinned={}",
+         seed={:#x} level={} warmup_s={} window_s={} pinned={} boundary={}",
         backend.name(),
         backend.version().replace(' ', "_"),
         plan.mix.text(),
@@ -263,6 +288,7 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
         plan.warmup.as_secs_f64(),
         plan.window.as_secs_f64(),
         if pinned { "yes" } else { "no" },
+        backend.boundary(),
     );
     if let Some(note) = backend.level_note() {
         println!("note {note}");
@@ -352,5 +378,7 @@ mod tests {
         assert!(parse(words("--mode tpcc --backend null --warehouses 0")).is_err());
         assert!(parse(words("--mode tpcc --backend null --loop open --rate 10")).is_err());
         assert!(parse(words("--mode tpch --backend null")).is_err());
+        assert!(parse(words("--backend null --shim unix")).unwrap().shim);
+        assert!(parse(words("--backend null --shim tcp")).is_err());
     }
 }

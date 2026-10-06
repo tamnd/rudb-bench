@@ -15,6 +15,8 @@ Backends:
 - `sqlite`, `duckdb` and `postgres` load their libraries at run time from `RUDB_BENCH_LIBSQLITE`, `RUDB_BENCH_LIBDUCKDB` and `RUDB_BENCH_LIBPQ`. DuckDB refuses to run unless the library is the pinned v2.0 build, and `--unpinned` lets it run anyway but marks the output `pinned=no`.
 - `rudb` needs `--features rudb`. To build against a checkout instead of crates.io, add `--config 'patch.crates-io.rudb.path="<checkout>/crates/rudb"'`.
 
+`--shim unix` puts `rudb` (or `null`) behind a socket. Each session gets a `socketpair` with a thread on the other end that owns the engine's session, and every statement is one round trip through the kernel, which is what PostgreSQL pays per statement. This is the shim of engine-v4 section 13.8 and the YCSB spec's section 4.10. It exists only for the comparison with PostgreSQL. The header line says `boundary=in_process`, `unix_socket` (PostgreSQL) or `unix_shim`, and the number to cite for a claim about the engine is the shim one.
+
 `--level full|os|none` picks the durability level. A backend that cannot set the level refuses, and results are only ever compared at the same level.
 
 `--mix` takes `read`, `update`, `insert` and `scan` parts, so workload E is `--mix scan=95,insert=5`. A scan starts at a drawn key and reads 1 to 100 rows in key order, and every row it returns is checked like a read. `--distribution uniform|zipfian|latest` picks how keys are drawn: zipfian is YCSB's scrambled zipfian, and latest makes the newest rows the hot ones, as in workload D. Inserts during a run take the next record number, and reads only draw rows whose inserts have finished.

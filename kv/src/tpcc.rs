@@ -68,7 +68,8 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
     let warehouses = settings.warehouses;
     println!(
         "tpcc 1 backend={} version={} warehouses={warehouses} terminals={terminals} loop=closed \
-         seed={:#x} c_load={} c_run={} c_id={} c_item={} level={} warmup_s={} window_s={} pinned={}",
+         seed={:#x} c_load={} c_run={} c_id={} c_item={} level={} warmup_s={} window_s={} pinned={} \
+         boundary={}",
         backend.name(),
         backend.version().replace(' ', "_"),
         settings.seed,
@@ -80,6 +81,7 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
         settings.warmup.as_secs_f64(),
         settings.window.as_secs_f64(),
         if settings.pinned { "yes" } else { "no" },
+        backend.boundary(),
     );
     if let Some(note) = backend.level_note() {
         println!("note {note}");
