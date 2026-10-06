@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use rudb_bench::histogram::Histogram;
 
 use super::data::{self, LOADED_AT};
+use super::fresh::{self, Acks, Judged};
 use super::terminal::Clock;
 use crate::backend::{Backend, Session, Values};
 use crate::workload::Rng;
@@ -51,6 +52,9 @@ pub(crate) const QUERIES: [&str; 22] = [
 /// The view Q15 reads, which each stream makes once under a name of its own in place of
 /// `revenue0`, so two streams do not make and drop one view between them.
 pub(crate) const Q15_VIEW: &str = r#"CREATE view revenue0 (supplier_no, total_revenue) AS SELECT mod((s_w_id * s_i_id),10000) as supplier_no, sum(ol_amount) as total_revenue FROM order_line, stock WHERE ol_i_id = s_i_id AND ol_supply_w_id = s_w_id AND ol_delivery_d >= '2007-01-02 00:00:00.000000' GROUP BY supplier_no"#;
+
+/// The read that tells a snapshot's freshness, section 9.6.
+const DISTRICT_READ: &str = "SELECT d_w_id, d_id, d_next_o_id FROM district";
 
 /// The year the benchmark's dates were written against, section 9.2.
 const REFERENCE_YEAR: i32 = 2012;
@@ -140,6 +144,16 @@ pub(crate) struct Ran {
     pub(crate) passes: u64,
     /// The first error of each query that failed, and how many times it did.
     pub(crate) errors: Vec<(usize, String, u64)>,
+    /// The freshness of each query judged, section 9.6, in microseconds.
+    pub(crate) stale: Histogram,
+    /// The queries judged that missed an order acknowledged before their snapshot started.
+    pub(crate) late: u64,
+    /// The queries judged that saw an order acknowledged after their snapshot started.
+    pub(crate) ahead: u64,
+    /// The orders those saw early, summed over them.
+    pub(crate) ahead_orders: u64,
+    /// The most by which such an order's acknowledgement came after the snapshot started.
+    pub(crate) lead: Duration,
 }
 
 impl Ran {
@@ -149,7 +163,20 @@ impl Ran {
             rows: vec![0; QUERIES.len()],
             passes: 0,
             errors: Vec::new(),
+            stale: Histogram::new(),
+            late: 0,
+            ahead: 0,
+            ahead_orders: 0,
+            lead: Duration::ZERO,
         }
+    }
+
+    fn judged(&mut self, judged: Judged) {
+        self.stale.record(judged.stale.as_micros().try_into().unwrap_or(u64::MAX));
+        self.late += u64::from(judged.stale > Duration::ZERO);
+        self.ahead += u64::from(judged.ahead > 0);
+        self.ahead_orders += judged.ahead;
+        self.lead = self.lead.max(judged.lead);
     }
 
     fn failed(&mut self, query: usize, message: String) {
@@ -168,6 +195,8 @@ pub(crate) struct Stream<'s> {
     view: String,
     rng: Rng,
     out: Values,
+    /// The acknowledgements and the district read, when the stream judges freshness.
+    fresh: Option<(&'s Acks, usize)>,
 }
 
 impl std::fmt::Debug for Stream<'_> {
@@ -198,7 +227,28 @@ impl<'s> Stream<'s> {
             .map_err(|failed| format!("making the view {name} failed: {failed}"))?;
         let statements = queries.iter().map(|text| session.prepare(text)).collect();
         let rng = data::stream(seed, 300, stream as u64, 0);
-        Ok(Self { session, statements, view: name, rng, out: Values::default() })
+        Ok(Self { session, statements, view: name, rng, out: Values::default(), fresh: None })
+    }
+
+    /// Judges the freshness of each query [`Self::run`] runs against `acks`, section 9.6, and
+    /// tells `acks` the orders there already. An error leaves the stream as it was.
+    pub(crate) fn judging(&mut self, acks: &'s Acks) -> Result<(), String> {
+        let read = self.session.prepare(DISTRICT_READ)?;
+        acks.there(&self.districts(read)?);
+        self.fresh = Some((acks, read));
+        Ok(())
+    }
+
+    /// Each district's `(d_w_id, d_id, d_next_o_id)`.
+    fn districts(&mut self, read: usize) -> Result<Vec<(u64, u64, u64)>, String> {
+        self.out.clear();
+        self.session
+            .execute(read, &[], &mut self.out)
+            .map_err(|failed| format!("reading the districts failed: {failed}"))?;
+        let values: Vec<&[u8]> = (0..self.out.len()).map(|at| self.out.get(at)).collect();
+        fresh::rows(&values).ok_or_else(|| {
+            format!("the district read returned {} values, not three numbers a row", values.len())
+        })
     }
 
     /// Why each query that could not be prepared could not.
@@ -210,11 +260,11 @@ impl<'s> Stream<'s> {
             .collect()
     }
 
-    /// Runs query `query` once and, if `counted`, records how long it took. A query that could not
-    /// be prepared is not run.
-    fn once(&mut self, query: usize, counted: bool, ran: &mut Ran) {
+    /// Runs query `query` once and, if `counted`, records how long it took, and says whether it
+    /// ran. A query that could not be prepared is not run.
+    fn once(&mut self, query: usize, counted: bool, ran: &mut Ran) -> bool {
         let Ok(statement) = self.statements[query] else {
-            return;
+            return false;
         };
         self.out.clear();
         let started = Instant::now();
@@ -226,7 +276,42 @@ impl<'s> Stream<'s> {
                 ran.rows[query] = rows;
             }
             Ok(_) => {}
-            Err(failed) => ran.failed(query, failed.message().to_string()),
+            Err(failed) => {
+                ran.failed(query, failed.message().to_string());
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Runs query `query` once as [`Self::once`] does, and when the stream judges freshness, in a
+    /// transaction of its own that reads the districts first, section 9.6.
+    fn judged(&mut self, query: usize, counted: bool, ran: &mut Ran) {
+        let Some((acks, read)) = self.fresh else {
+            self.once(query, counted, ran);
+            return;
+        };
+        if self.statements[query].is_err() {
+            return;
+        }
+        if let Err(failed) = self.session.begin_snapshot() {
+            ran.failed(query, format!("starting the snapshot failed: {failed}"));
+            return;
+        }
+        let sent = Instant::now();
+        let rows = self.districts(read);
+        let got = Instant::now();
+        let judged = rows.map(|rows| acks.judge(&rows, sent, got, Instant::now()));
+        let ended = if self.once(query, counted, ran) && judged.is_ok() {
+            self.session.commit()
+        } else {
+            self.session.rollback()
+        };
+        match (judged, ended) {
+            (Err(why), _) => ran.failed(query, why),
+            (_, Err(failed)) => ran.failed(query, format!("ending the snapshot failed: {failed}")),
+            (Ok(judged), Ok(())) if counted => ran.judged(judged),
+            (Ok(_), Ok(())) => {}
         }
     }
 
@@ -246,7 +331,7 @@ impl<'s> Stream<'s> {
                     break 'passes;
                 }
                 let counted = clock.measured().is_some_and(|opened| Instant::now() >= opened);
-                self.once(query, counted, &mut ran);
+                self.judged(query, counted, &mut ran);
             }
             if clock.measured().is_some() {
                 ran.passes += 1;
@@ -260,7 +345,7 @@ impl<'s> Stream<'s> {
         let mut ran = Ran::new();
         for query in 0..QUERIES.len() {
             for _ in 0..runs {
-                self.once(query, true, &mut ran);
+                let _ = self.once(query, true, &mut ran);
             }
         }
         ran.passes = runs as u64;
@@ -283,8 +368,8 @@ fn geometric_mean(values: &[f64]) -> f64 {
 }
 
 /// The report lines of the analytic side, a `ch query` line a query, a `ch error` line for each
-/// query that failed, and a `ch summary`. `window` is how long the streams ran, for the queries an
-/// hour, or `None` for the reference.
+/// query that failed, a `ch summary`, and a `ch freshness` when queries were judged. `window` is
+/// how long the streams ran, for the queries an hour, or `None` for the reference.
 pub(crate) fn report(streams: &[Ran], window: Option<Duration>, out: &mut String) {
     let mut medians = Vec::new();
     let mut hourly = Vec::new();
@@ -346,6 +431,26 @@ pub(crate) fn report(streams: &[Ran], window: Option<Duration>, out: &mut String
             write!(out, " qph={qph:.1} qph_per_stream={:.1}", qph / streams.len().max(1) as f64);
     }
     out.push('\n');
+    let mut stale = Histogram::new();
+    for ran in streams {
+        stale.merge(&ran.stale);
+    }
+    if stale.count() > 0 {
+        let ms = |micros: u64| micros as f64 / 1e3;
+        let _ = writeln!(
+            out,
+            "ch freshness judged={} late={} stale_median_ms={:.2} stale_p99_ms={:.2} \
+             stale_max_ms={:.2} ahead={} ahead_orders={} lead_max_ms={:.2}",
+            stale.count(),
+            streams.iter().map(|ran| ran.late).sum::<u64>(),
+            ms(stale.quantile(0.5)),
+            ms(stale.quantile(0.99)),
+            ms(stale.max()),
+            streams.iter().map(|ran| ran.ahead).sum::<u64>(),
+            streams.iter().map(|ran| ran.ahead_orders).sum::<u64>(),
+            streams.iter().map(|ran| ran.lead).max().unwrap_or_default().as_secs_f64() * 1e3,
+        );
+    }
 }
 
 /// The rows of `region` as BenchBase's `region_gen.tbl` has them, with the blanks that pad each
@@ -685,5 +790,26 @@ mod tests {
         assert!(lines[1].starts_with("ch query=Q2 n=0 "), "{}", lines[1]);
         assert_eq!(lines[22], "ch error query=Q4 times=3 message=\"no ascii\"");
         assert!(lines[23].starts_with("ch summary streams=2 passes=0 answered=1 geomean_ms=2.00 "));
+    }
+
+    #[test]
+    fn the_freshness_line_comes_once_a_query_was_judged() {
+        let mut one = Ran::new();
+        let mut two = Ran::new();
+        one.judged(Judged::default());
+        two.judged(Judged {
+            stale: Duration::from_millis(4),
+            ahead: 3,
+            lead: Duration::from_micros(1_500),
+        });
+        two.judged(Judged::default());
+        let mut out = String::new();
+        report(&[one, two], Some(Duration::from_secs(60)), &mut out);
+        let last = out.lines().last().unwrap_or_default();
+        assert!(last.starts_with("ch freshness judged=3 late=1 stale_median_ms=0.00 "), "{last}");
+        assert!(last.ends_with(" ahead=1 ahead_orders=3 lead_max_ms=1.50"), "{last}");
+        let mut out = String::new();
+        report(&[Ran::new()], None, &mut out);
+        assert!(!out.contains("ch freshness"), "{out}");
     }
 }

@@ -12,6 +12,7 @@
 mod ch;
 mod checks;
 mod data;
+mod fresh;
 mod terminal;
 pub(crate) mod text;
 
@@ -206,11 +207,14 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
         }
     }
 
+    // The streams judge each query's freshness against the New-Orders the terminals were told
+    // had committed, document 09 section 9.6.
+    let acks = (settings.analytic > 0).then(|| fresh::Acks::new(warehouses));
     let mut runners = Vec::with_capacity(terminals);
     for _ in 0..terminals {
         let mut session = backend.connect()?;
         let prepared = terminal::prepare(&mut *session, backend)?;
-        runners.push(Runner::new(session, prepared, settings.serializable));
+        runners.push(Runner::new(session, prepared, settings.serializable).acking(acks.as_ref()));
     }
     let mut monitor = {
         let mut session = backend.connect()?;
@@ -220,7 +224,16 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
     if settings.analytic > 0 {
         println!("{}", ch_line(settings.analytic, settings.analytic_threads));
     }
-    let streams = open_streams(backend, settings.analytic, settings)?;
+    let mut streams = open_streams(backend, settings.analytic, settings)?;
+    if let Some(acks) = &acks {
+        for (at, stream) in streams.iter_mut().enumerate() {
+            if let Err(why) = stream.judging(acks)
+                && at == 0
+            {
+                println!("ch unjudged message={why:?}");
+            }
+        }
+    }
 
     let seconds = settings.window.as_secs_f64().ceil() as usize;
     let stop = AtomicBool::new(false);
