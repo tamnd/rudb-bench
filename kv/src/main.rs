@@ -37,7 +37,7 @@ usage: rudb-bench-kv [--mode ycsb|tpcc|ch] --backend null|sqlite|duckdb|postgres
                      [--distribution uniform|zipfian|latest] [--loop closed|open] [--rate OPS] [--poisson] [--warmup 10s] [--window 60s]
                      [--seed N] [--level full|os|none] [--card <card line>] [--unpinned]
                      [--service 100us] [--stall 100ms/10s] [--shim none|unix] [--isolation default|serializable]
-                     [--analytic N] [--analytic-threads N] [--forgotten] [--runs N]
+                     [--analytic N] [--analytic-threads N] [--forgotten] [--runs N] [--visibility durable|committed]
 
 The libraries come from RUDB_BENCH_LIBSQLITE, RUDB_BENCH_LIBDUCKDB and RUDB_BENCH_LIBPQ.
 --service and --stall make the null backend a fake engine with a known stall.
@@ -53,7 +53,9 @@ take --analytic-threads threads, 2 unless set.
 --forgotten opens a transaction that reads once as the window opens and leaves it open to the end,
 and prints the throughput of each ten seconds, to see what the writers do while it holds undo.
 --mode ch runs each of the 22 CH-benCHmark queries --runs times, 5 unless set, on one session over
-the tables as they are, or as --load loads them, which is the reference a mixed run is compared with.";
+the tables as they are, or as --load loads them, which is the reference a mixed run is compared with.
+--visibility committed has rudb show a commit's rows to other sessions once it is ordered, before it
+is durable. durable, the default, is when every engine shows them, and only rudb takes the other.";
 
 /// The two suites the driver runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -83,6 +85,8 @@ struct Arguments {
     analytic_threads: usize,
     forgotten: bool,
     runs: usize,
+    /// Whether `--visibility committed` asked for a commit's rows to show before it is durable.
+    committed: bool,
 }
 
 /// `100us`, `5ms`, `10s`, or a bare number of seconds.
@@ -128,6 +132,7 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
         serializable: false,
         analytic: 0,
         analytic_threads: 2,
+        committed: false,
         forgotten: false,
         runs: 5,
     };
@@ -223,6 +228,15 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
                     value()?.parse().map_err(|_| "--analytic-threads is a count")?;
             }
             "--forgotten" => arguments.forgotten = true,
+            "--visibility" => {
+                arguments.committed = match value()?.as_str() {
+                    "committed" => true,
+                    "durable" => false,
+                    other => {
+                        return Err(format!("--visibility is durable or committed, not {other:?}"));
+                    }
+                };
+            }
             "--runs" => arguments.runs = value()?.parse().map_err(|_| "--runs is a count")?,
             "--help" | "-h" => return Err(USAGE.to_string()),
             other => return Err(format!("{other:?} is not an option\n\n{USAGE}")),
@@ -298,6 +312,7 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
         other => return Err(format!("there is no backend {other:?}")),
     };
     backend.level()?;
+    backend.visibility(arguments.committed)?;
     let plan = &arguments.plan;
     if arguments.mode != Mode::Ycsb {
         if arguments.backend == "duckdb" && arguments.mode == Mode::Tpcc {
@@ -321,6 +336,7 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
             analytic: arguments.analytic,
             analytic_threads: arguments.analytic_threads,
             forgotten: arguments.forgotten,
+            committed: arguments.committed,
         };
         if arguments.mode == Mode::Ch {
             return tpcc::reference(&*backend, &settings, arguments.runs);
@@ -446,6 +462,13 @@ mod tests {
         );
         assert!(!parse(words("--mode tpcc --backend null")).unwrap().serializable);
         assert!(parse(words("--backend null --isolation snapshot")).is_err());
+        assert!(
+            parse(words("--mode tpcc --backend null --visibility committed")).unwrap().committed
+        );
+        assert!(
+            !parse(words("--mode tpcc --backend null --visibility durable")).unwrap().committed
+        );
+        assert!(parse(words("--backend null --visibility eventual")).is_err());
     }
 
     #[test]
