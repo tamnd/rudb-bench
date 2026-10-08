@@ -4,6 +4,7 @@ Reports are grouped by the UTC date when the measurement was taken or the analys
 
 | Date | Reports |
 | --- | --- |
+| 2026-10-08 | [JOB, the J7 gate](2026-10-08/job-gate.md) |
 | 2026-09-25 | [JOB, the J0 baseline](2026-09-25/job-baseline.md) |
 | 2026-09-24 | [JOB, the reduced SQL on DuckDB](2026-09-24/job-reduced-prototype.md) |
 | 2026-09-23 | [certified composite TopN](2026-09-23/certified-composite-topn.md), [threaded LIKE profile and 1M/10M DuckDB comparison](2026-09-23/threaded-like-profile.md), [native gram signatures and updated 1M/10M comparison](2026-09-23/native-gram-sieve.md), [Q22 late phrase fetch and updated 1M/10M comparison](2026-09-23/q22-late-phrase-fetch.md) |
