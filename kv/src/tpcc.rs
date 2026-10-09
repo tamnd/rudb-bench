@@ -1,10 +1,15 @@
 //! The `tpcc` mode: the spec's TPC-C suite, documents 02 to 05, closed loop.
 //!
-//! It loads the nine tables if asked, opens one session per terminal with every statement of the
+//! It loads the twelve tables if asked, opens one session per terminal with every statement of the
 //! five transactions prepared, runs the terminals for a warmup and a window, counts New-Orders
 //! twice (once in the driver, once from `sum(d_next_o_id)` by a monitor session), and then runs the
 //! checks of document 05 against what is left in the database.
+//!
+//! With `--analytic N` it is the mixed run of CH-benCHmark, document 09 section 9.5: `N` streams run
+//! the 22 analytic queries over and over beside the terminals. [`reference`] is the analytic run on
+//! its own, section 9.4.
 
+mod ch;
 mod checks;
 mod data;
 mod terminal;
@@ -36,6 +41,10 @@ pub(crate) struct Settings {
     /// Whether every transaction begins `ISOLATION LEVEL SERIALIZABLE` rather than at the
     /// engine's default level.
     pub(crate) serializable: bool,
+    /// How many CH-benCHmark analytic streams run beside the terminals.
+    pub(crate) analytic: usize,
+    /// How many threads each analytic stream's queries may take.
+    pub(crate) analytic_threads: usize,
 }
 
 /// The share of any type's transactions that may fail before the run is invalid, 0.1%.
@@ -62,6 +71,89 @@ fn spread(values: &[u64]) -> (f64, f64) {
     let variance = values.iter().map(|v| (*v as f64 - mean).powi(2)).sum::<f64>() / n;
     let cv = if mean > 0.0 { variance.sqrt() / mean } else { 0.0 };
     (mean, cv)
+}
+
+/// The line that says how the analytic side runs and with which texts.
+fn ch_line(streams: usize, threads: usize) -> String {
+    format!(
+        "ch streams={streams} threads={threads} texts_sha256={} benchbase={} shift_years={}",
+        ch::texts_sha256(),
+        ch::BENCHBASE,
+        ch::shift_years(),
+    )
+}
+
+/// Prints what the load took.
+fn print_load(loaded: &data::Loaded, sessions: usize) {
+    println!(
+        "load method=insert statement_rows=500 transaction=unit sessions={sessions} create_s={:.3}",
+        loaded.create.as_secs_f64()
+    );
+    let mut total = loaded.create;
+    for (table, rows, took) in &loaded.tables {
+        total += *took;
+        println!("load table={table} rows={rows} took_s={:.3}", took.as_secs_f64());
+    }
+    for (index, took) in &loaded.indexes {
+        total += *took;
+        println!("load index={index} took_s={:.3}", took.as_secs_f64());
+    }
+    println!("load total_s={:.3}", total.as_secs_f64());
+}
+
+/// Opens `count` analytic streams and prints the queries the engine could not prepare, once.
+fn open_streams<'b>(
+    backend: &'b dyn Backend,
+    count: usize,
+    settings: &Settings,
+) -> Result<Vec<ch::Stream<'b>>, String> {
+    let mut streams = Vec::with_capacity(count);
+    for at in 0..count {
+        let stream = ch::Stream::open(backend, at, settings.analytic_threads, settings.seed)?;
+        if at == 0 {
+            for (query, why) in stream.unprepared() {
+                println!("ch unprepared query=Q{} message={why:?}", query + 1);
+            }
+        }
+        streams.push(stream);
+    }
+    Ok(streams)
+}
+
+/// The analytic reference of document 09 section 9.4: each of the 22 queries `runs` times in turn
+/// on one session, over the tables as they are, after loading them if asked.
+pub(crate) fn reference(
+    backend: &dyn Backend,
+    settings: &Settings,
+    runs: usize,
+) -> Result<(), String> {
+    println!(
+        "ch 1 backend={} version={} warehouses={} runs={runs} seed={:#x} level={} boundary={}",
+        backend.name(),
+        backend.version().replace(' ', "_"),
+        settings.warehouses,
+        settings.seed,
+        settings.level.name(),
+        backend.boundary(),
+    );
+    match &settings.card {
+        Some(card) => println!("card {}", card.strip_prefix("card ").unwrap_or(card)),
+        None => println!("card none"),
+    }
+    if settings.load {
+        let loaded = data::load(backend, settings.seed, settings.warehouses, settings.terminals)?;
+        print_load(&loaded, settings.terminals);
+    }
+    println!("{}", ch_line(1, settings.analytic_threads));
+    let mut streams = open_streams(backend, 1, settings)?;
+    let started = Instant::now();
+    let ran = streams.remove(0).each(runs);
+    let mut report = String::new();
+    ch::report(&[ran], None, &mut report);
+    print!("{report}");
+    println!("ch took_s={:.3}", started.elapsed().as_secs_f64());
+    println!("end");
+    Ok(())
 }
 
 /// Runs the mode and prints its report.
@@ -99,21 +191,7 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
     let mut loaded_lines = None;
     if settings.load {
         let loaded = data::load(backend, settings.seed, warehouses, terminals)?;
-        println!(
-            "load method=insert statement_rows=500 transaction=unit sessions={terminals} \
-             create_s={:.3}",
-            loaded.create.as_secs_f64()
-        );
-        let mut total = loaded.create;
-        for (table, rows, took) in &loaded.tables {
-            total += *took;
-            println!("load table={table} rows={rows} took_s={:.3}", took.as_secs_f64());
-        }
-        for (index, took) in &loaded.indexes {
-            total += *took;
-            println!("load index={index} took_s={:.3}", took.as_secs_f64());
-        }
-        println!("load total_s={:.3}", total.as_secs_f64());
+        print_load(&loaded, terminals);
         let lines = data::loaded_lines(settings.seed, warehouses);
         loaded_lines = Some(lines);
         if keeps_rows {
@@ -139,13 +217,17 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
         let prepared = terminal::prepare(&mut *session, backend)?;
         Runner::new(session, prepared, settings.serializable)
     };
+    if settings.analytic > 0 {
+        println!("{}", ch_line(settings.analytic, settings.analytic_threads));
+    }
+    let streams = open_streams(backend, settings.analytic, settings)?;
 
     let seconds = settings.window.as_secs_f64().ceil() as usize;
     let stop = AtomicBool::new(false);
-    let barrier = Barrier::new(terminals + 1);
+    let barrier = Barrier::new(terminals + streams.len() + 1);
     let start = Instant::now() + Duration::from_millis(20);
     let clock = Clock::new(start, settings.window);
-    let (tallies, usage, orders) = std::thread::scope(|scope| -> Result<_, String> {
+    let (tallies, usage, orders, analytic) = std::thread::scope(|scope| -> Result<_, String> {
         let handles: Vec<_> = runners
             .into_iter()
             .enumerate()
@@ -167,6 +249,16 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
                 })
             })
             .collect();
+        let streams: Vec<_> = streams
+            .into_iter()
+            .map(|stream| {
+                let (stop, barrier, clock) = (&stop, &barrier, &clock);
+                scope.spawn(move || {
+                    barrier.wait();
+                    stream.run(clock, stop)
+                })
+            })
+            .collect();
         barrier.wait();
         sleep_until(start + settings.warmup, &stop);
         let at_window = crate::ffi::usage();
@@ -180,7 +272,12 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
             .into_iter()
             .map(|handle| handle.join().map_err(|_| "a terminal panicked".to_string()))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok((tallies, (at_window, at_end), first.and_then(|first| last.map(|last| (first, last)))))
+        let analytic = streams
+            .into_iter()
+            .map(|handle| handle.join().map_err(|_| "an analytic stream panicked".to_string()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let orders = first.and_then(|first| last.map(|last| (first, last)));
+        Ok((tallies, (at_window, at_end), orders, analytic))
     })?;
     drop(monitor);
 
@@ -298,6 +395,9 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
         effects.skipped,
         tally.rolled_back[Kind::NewOrder.index()],
     );
+    if !analytic.is_empty() {
+        ch::report(&analytic, Some(settings.window), &mut report);
+    }
     print!("{report}");
     let (at_window, at_end) = usage;
     let cpu = (at_end.user.saturating_sub(at_window.user)

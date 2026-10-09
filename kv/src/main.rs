@@ -32,11 +32,12 @@ use run::{Loop, Plan};
 use workload::{Distribution, Mix};
 
 const USAGE: &str = "\
-usage: rudb-bench-kv [--mode ycsb|tpcc] --backend null|sqlite|duckdb|postgres|rudb --target <file or conninfo>
+usage: rudb-bench-kv [--mode ycsb|tpcc|ch] --backend null|sqlite|duckdb|postgres|rudb --target <file or conninfo>
                      [--load] [--warehouses N] [--terminals N] [--records N] [--mix read=50,update=50] [--clients N]
                      [--distribution uniform|zipfian|latest] [--loop closed|open] [--rate OPS] [--poisson] [--warmup 10s] [--window 60s]
                      [--seed N] [--level full|os|none] [--card <card line>] [--unpinned]
                      [--service 100us] [--stall 100ms/10s] [--shim none|unix] [--isolation default|serializable]
+                     [--analytic N] [--analytic-threads N] [--runs N]
 
 The libraries come from RUDB_BENCH_LIBSQLITE, RUDB_BENCH_LIBDUCKDB and RUDB_BENCH_LIBPQ.
 --service and --stall make the null backend a fake engine with a known stall.
@@ -44,15 +45,20 @@ The libraries come from RUDB_BENCH_LIBSQLITE, RUDB_BENCH_LIBDUCKDB and RUDB_BENC
 statement pays the round trip PostgreSQL pays.
 --unpinned lets DuckDB run with a library that is not the pin, and marks the run pinned=no.
 --mode tpcc runs the TPC-C suite on --warehouses warehouses with --terminals terminals (the same as
---clients), closed loop. --load creates and loads its nine tables first. --isolation serializable
-begins each of its transactions ISOLATION LEVEL SERIALIZABLE, and SQLite, which is serializable
-anyway, as it begins them otherwise.";
+--clients), closed loop. --load creates and loads its twelve tables first, the nine of TPC-C and the
+three CH-benCHmark adds. --isolation serializable begins each of its transactions ISOLATION LEVEL
+SERIALIZABLE, and SQLite, which is serializable anyway, as it begins them otherwise.
+--analytic N runs N CH-benCHmark analytic streams beside the terminals, each letting its queries
+take --analytic-threads threads, 2 unless set.
+--mode ch runs each of the 22 CH-benCHmark queries --runs times, 5 unless set, on one session over
+the tables as they are, or as --load loads them, which is the reference a mixed run is compared with.";
 
 /// The two suites the driver runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Ycsb,
     Tpcc,
+    Ch,
 }
 
 /// Everything on the command line.
@@ -71,6 +77,9 @@ struct Arguments {
     stall: Option<(Duration, Duration)>,
     shim: bool,
     serializable: bool,
+    analytic: usize,
+    analytic_threads: usize,
+    runs: usize,
 }
 
 /// `100us`, `5ms`, `10s`, or a bare number of seconds.
@@ -114,6 +123,9 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
         stall: None,
         shim: false,
         serializable: false,
+        analytic: 0,
+        analytic_threads: 2,
+        runs: 5,
     };
     let mut rate = None;
     let mut open = false;
@@ -125,7 +137,8 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
                 arguments.mode = match value()?.as_str() {
                     "ycsb" => Mode::Ycsb,
                     "tpcc" => Mode::Tpcc,
-                    other => return Err(format!("--mode is ycsb or tpcc, not {other:?}")),
+                    "ch" => Mode::Ch,
+                    other => return Err(format!("--mode is ycsb, tpcc or ch, not {other:?}")),
                 };
             }
             "--warehouses" => {
@@ -198,6 +211,14 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
                     }
                 };
             }
+            "--analytic" => {
+                arguments.analytic = value()?.parse().map_err(|_| "--analytic is a count")?;
+            }
+            "--analytic-threads" => {
+                arguments.analytic_threads =
+                    value()?.parse().map_err(|_| "--analytic-threads is a count")?;
+            }
+            "--runs" => arguments.runs = value()?.parse().map_err(|_| "--runs is a count")?,
             "--help" | "-h" => return Err(USAGE.to_string()),
             other => return Err(format!("{other:?} is not an option\n\n{USAGE}")),
         }
@@ -208,8 +229,14 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
     if arguments.plan.clients == 0 || arguments.plan.records == 0 || arguments.warehouses == 0 {
         return Err("--clients, --records and --warehouses have to be at least one".to_string());
     }
-    if open && arguments.mode == Mode::Tpcc {
-        return Err("the tpcc mode runs a closed loop only for now".to_string());
+    if arguments.runs == 0 || arguments.analytic_threads == 0 {
+        return Err("--runs and --analytic-threads have to be at least one".to_string());
+    }
+    if open && arguments.mode != Mode::Ycsb {
+        return Err("the tpcc and ch modes run a closed loop only for now".to_string());
+    }
+    if arguments.analytic > 0 && arguments.mode != Mode::Tpcc {
+        return Err("--analytic runs streams beside the tpcc mode's terminals".to_string());
     }
     if open {
         let rate = rate.filter(|rate| *rate > 0.0).ok_or("an open loop wants --rate")?;
@@ -262,8 +289,8 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
     };
     backend.level()?;
     let plan = &arguments.plan;
-    if arguments.mode == Mode::Tpcc {
-        if arguments.backend == "duckdb" {
+    if arguments.mode != Mode::Ycsb {
+        if arguments.backend == "duckdb" && arguments.mode == Mode::Tpcc {
             return Err(
                 "the duckdb backend reads VARCHAR results only, so tpcc does not run on it \
                         yet"
@@ -281,7 +308,12 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
             pinned,
             card: arguments.card.clone(),
             serializable: arguments.serializable,
+            analytic: arguments.analytic,
+            analytic_threads: arguments.analytic_threads,
         };
+        if arguments.mode == Mode::Ch {
+            return tpcc::reference(&*backend, &settings, arguments.runs);
+        }
         return tpcc::drive(&*backend, &settings);
     }
     let mode = match plan.mode {
@@ -403,5 +435,18 @@ mod tests {
         );
         assert!(!parse(words("--mode tpcc --backend null")).unwrap().serializable);
         assert!(parse(words("--backend null --isolation snapshot")).is_err());
+    }
+
+    #[test]
+    fn the_analytic_streams_run_beside_the_terminals_and_the_reference_alone() {
+        let arguments =
+            parse(words("--mode tpcc --backend null --analytic 2 --analytic-threads 4")).unwrap();
+        assert_eq!((arguments.analytic, arguments.analytic_threads), (2, 4));
+        let arguments = parse(words("--mode ch --backend null --runs 3")).unwrap();
+        assert_eq!((arguments.mode, arguments.runs, arguments.analytic_threads), (Mode::Ch, 3, 2));
+        assert!(parse(words("--mode ch --backend null --runs 0")).is_err());
+        assert!(parse(words("--mode tpcc --backend null --analytic-threads 0")).is_err());
+        assert!(parse(words("--mode ch --backend null --analytic 1")).is_err());
+        assert!(parse(words("--backend null --analytic 1")).is_err());
     }
 }

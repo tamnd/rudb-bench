@@ -76,14 +76,14 @@ pub(crate) fn last_name(n: u64) -> String {
 }
 
 /// A random alphanumeric string of `low` to `high` characters.
-fn alphanumeric(rng: &mut Rng, low: u64, high: u64) -> String {
+pub(crate) fn alphanumeric(rng: &mut Rng, low: u64, high: u64) -> String {
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     let length = uniform(rng, low, high);
     (0..length).map(|_| char::from(ALPHABET[rng.below(ALPHABET.len() as u64) as usize])).collect()
 }
 
 /// A random string of `length` digits.
-fn digits(rng: &mut Rng, length: u64) -> String {
+pub(crate) fn digits(rng: &mut Rng, length: u64) -> String {
     (0..length).map(|_| char::from(b'0' + rng.below(10) as u8)).collect()
 }
 
@@ -362,7 +362,7 @@ struct Unit {
 /// The units of table `table`.
 fn units(table: usize, warehouses: u64) -> Vec<Unit> {
     match TABLES[table] {
-        "item" => vec![Unit { table, w: 0, d: 0 }],
+        "item" | "region" | "nation" | "supplier" => vec![Unit { table, w: 0, d: 0 }],
         "warehouse" | "district" | "stock" => {
             (1..=warehouses).map(|w| Unit { table, w, d: 0 }).collect()
         }
@@ -384,6 +384,9 @@ fn generate(seed: u64, unit: Unit, emit: &mut dyn FnMut(&[Lit])) {
         "new_order" => new_order(w, d, emit),
         "order_line" => order_line(seed, w, d, emit),
         "item" => item(seed, emit),
+        "region" => super::ch::region(emit),
+        "nation" => super::ch::nation(emit),
+        "supplier" => super::ch::supplier(seed, emit),
         _ => stock(seed, w, emit),
     }
 }
@@ -473,7 +476,7 @@ pub(crate) struct Loaded {
     pub(crate) create: Duration,
 }
 
-/// Creates the nine tables, loads them a table at a time over `sessions` sessions, and then
+/// Creates the twelve tables, loads them a table at a time over `sessions` sessions, and then
 /// creates the two indexes.
 pub(crate) fn load(
     backend: &dyn Backend,

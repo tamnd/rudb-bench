@@ -152,6 +152,12 @@ pub(crate) trait Backend: Sync {
         true
     }
 
+    /// The statement that lets an analytic session's queries take `threads` threads, for the
+    /// CH-benCHmark streams, or `None` for an engine that has no such setting.
+    fn analytic_threads(&self, _threads: usize) -> Option<String> {
+        None
+    }
+
     /// A new connection, for one client thread.
     fn connect(&self) -> Result<Box<dyn Session + '_>, String>;
 }
