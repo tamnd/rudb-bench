@@ -62,7 +62,8 @@ JOB_COUNTS.
 Environment: JOB_DUCKDB, JOB_RUDB (binaries), JOB_CSV (the CSV directory), JOB_QUERIES (the query
 directory, default queries/job beside this script), JOB_COUNTS (the `truecounts` file `perror`
 reads), JOB_RUDB_SET (statements sent to rudb only before every query, on top of what the
-configuration sends).
+configuration sends), JOB_EVICT (set to `files` on a machine other people use, so the cold run
+evicts only the two database files from the page cache rather than dropping all of it).
 """
 import itertools, json, os, re, shutil, subprocess, statistics, sys, tempfile, time
 
@@ -72,6 +73,7 @@ DUCKDB = os.environ.get('JOB_DUCKDB', 'duckdb')
 RUDB = os.environ.get('JOB_RUDB', 'rudb')
 CSV = os.environ.get('JOB_CSV', '')
 COUNTS = os.environ.get('JOB_COUNTS', '')
+EVICT = os.environ.get('JOB_EVICT', '')
 CONFIGS = ('plain', 'indexed', 'clustered', 'norule')
 LINKS = ("SET graph_links = 'cast_info(movie_id) -> title(id), cast_info(person_id) -> name(id), "
          "cast_info(person_role_id) -> char_name(id), movie_info(movie_id) -> title(id), "
@@ -186,7 +188,13 @@ def turn(engine, config, d, sql, threads):
     script = '\n'.join(pre + ['.mode list', '.separator |', '.nullvalue NULL', '.headers off',
                               mark, f'EXPLAIN {sql};', mark, '.timer on'] + [f'{sql};'] * RUNS
                        + ['.timer off', mark, f'EXPLAIN {sql};', mark] + analyze) + '\n'
-    subprocess.run(['sh', '-c', 'sync; echo 3 > /proc/sys/vm/drop_caches'])
+    if EVICT == 'files':
+        for path in (duck, rudb):
+            fd = os.open(path, os.O_RDONLY)
+            os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+            os.close(fd)
+    else:
+        subprocess.run(['sh', '-c', 'sync; echo 3 > /proc/sys/vm/drop_caches'])
     before = files(d)
     try:
         p = subprocess.run([binary, '-readonly', db], input=script, capture_output=True, text=True,
@@ -531,14 +539,14 @@ def query_graph(sql):
     aliases = {}
     for item in m.group(1).split(','):
         words = item.split()
-        aliases[words[-1]] = words[0]
+        aliases[words[-1].strip('"')] = words[0]
     pairs, filters = [], {a: [] for a in aliases}
     for c in conjuncts(m.group(2)):
-        j = re.fullmatch(r'\(?\s*(\w+)\.(\w+)\s*=\s*(\w+)\.(\w+)\s*\)?', c)
+        j = re.fullmatch(r'\(?\s*"?(\w+)"?\.(\w+)\s*=\s*"?(\w+)"?\.(\w+)\s*\)?', c)
         if j and j.group(1) != j.group(3):
             pairs.append(((j.group(1), j.group(2)), (j.group(3), j.group(4))))
             continue
-        used = set(re.findall(r'\b(\w+)\.\w+', re.sub(r"'(?:[^']|'')*'", "''", c))) & set(aliases)
+        used = set(re.findall(r'\b(\w+)"?\.\w+', re.sub(r"'(?:[^']|'')*'", "''", c))) & set(aliases)
         if len(used) != 1:
             raise ValueError(f'a condition on {len(used)} aliases: {c}')
         filters[used.pop()].append(c)
@@ -599,7 +607,7 @@ def counting_sql(aliases, pairs, filters, s):
             if a not in s:
                 continue
             if i in keys[a]:
-                local[a].append(f'{a}.{keys[a][i]} = {a}.{column}')
+                local[a].append(f'"{a}".{keys[a][i]} = "{a}".{column}')
             else:
                 keys[a][i] = column
     # The GYO reduction leaves nothing exactly when the aliases are acyclic.
@@ -629,11 +637,11 @@ def counting_sql(aliases, pairs, filters, s):
             near[b].append(a)
 
     def node(a, parent):
-        joined = f'{aliases[a]} AS {a}'
+        joined = f'{aliases[a]} AS "{a}"'
         weights = []
         for child in near[a]:
             if child != parent:
-                on = ' AND '.join(f'{a}.{keys[a][k]} = m_{child}.k{k}'
+                on = ' AND '.join(f'"{a}".{keys[a][k]} = m_{child}.k{k}'
                                   for k in sorted(keys[a].keys() & keys[child].keys()))
                 joined += f' JOIN ({node(child, a)}) AS m_{child} ON {on}'
                 weights.append(f'm_{child}.w')
@@ -642,8 +650,8 @@ def counting_sql(aliases, pairs, filters, s):
             counted = f"coalesce(sum({' * '.join(weights)}), 0)" if weights else 'count(*)'
             return f'SELECT {counted} FROM {joined}{where}'
         by = sorted(keys[a].keys() & keys[parent].keys())
-        columns = ', '.join(f'{a}.{keys[a][k]} AS k{k}' for k in by)
-        group = ', '.join(f'{a}.{keys[a][k]}' for k in by)
+        columns = ', '.join(f'"{a}".{keys[a][k]} AS k{k}' for k in by)
+        group = ', '.join(f'"{a}".{keys[a][k]}' for k in by)
         counted = f"sum({' * '.join(weights)})" if weights else 'count(*)::DOUBLE'
         return f'SELECT {columns}, {counted} AS w FROM {joined}{where} GROUP BY {group}'
     return node(s[0], None)
@@ -712,7 +720,7 @@ def join_tree(engine, config, d, sql, threads):
             while at < len(lines) and len(lines[at]) - len(lines[at].lstrip()) == depth + 2:
                 child, at = walk(at, depth + 2)
                 children.append(child)
-            get = re.match(r'Get \S+\.(\w+) AS (\w+) ', line)
+            get = re.match(r'Get \S+\.(\w+) AS "?(\w+)"? ', line)
             if get:
                 return ('scan', get.group(1), get.group(2), None), at
             join = re.match(r'Join (\w+)', line)
