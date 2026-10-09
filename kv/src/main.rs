@@ -15,6 +15,7 @@
 
 mod backend;
 mod ffi;
+mod index;
 mod run;
 mod tpcc;
 mod workload;
@@ -32,7 +33,7 @@ use run::{Loop, Plan};
 use workload::{Distribution, Mix};
 
 const USAGE: &str = "\
-usage: rudb-bench-kv [--mode ycsb|tpcc|ch] --backend null|sqlite|duckdb|postgres|rudb --target <file or conninfo>
+usage: rudb-bench-kv [--mode ycsb|tpcc|ch|index] --backend null|sqlite|duckdb|postgres|rudb --target <file or conninfo>
                      [--load] [--warehouses N] [--terminals N] [--records N] [--mix read=50,update=50] [--clients N]
                      [--distribution uniform|zipfian|latest] [--loop closed|open] [--rate OPS] [--poisson] [--warmup 10s] [--window 60s]
                      [--seed N] [--level full|os|none] [--card <card line>] [--unpinned]
@@ -55,7 +56,9 @@ and prints the throughput of each ten seconds, to see what the writers do while 
 --mode ch runs each of the 22 CH-benCHmark queries --runs times, 5 unless set, on one session over
 the tables as they are, or as --load loads them, which is the reference a mixed run is compared with.
 --visibility committed has rudb show a commit's rows to other sessions once it is ordered, before it
-is durable. durable, the default, is when every engine shows them, and only rudb takes the other.";
+is durable. durable, the default, is when every engine shows them, and only rudb takes the other.
+--mode index is the W4 index gate: it loads --records rows into a table without a key and into one
+with a primary key, --runs times each, and says whether the key added at most a tenth.";
 
 /// The two suites the driver runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +66,7 @@ enum Mode {
     Ycsb,
     Tpcc,
     Ch,
+    Index,
 }
 
 /// Everything on the command line.
@@ -147,7 +151,10 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
                     "ycsb" => Mode::Ycsb,
                     "tpcc" => Mode::Tpcc,
                     "ch" => Mode::Ch,
-                    other => return Err(format!("--mode is ycsb, tpcc or ch, not {other:?}")),
+                    "index" => Mode::Index,
+                    other => {
+                        return Err(format!("--mode is ycsb, tpcc, ch or index, not {other:?}"));
+                    }
                 };
             }
             "--warehouses" => {
@@ -314,6 +321,9 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
     backend.level()?;
     backend.visibility(arguments.committed)?;
     let plan = &arguments.plan;
+    if arguments.mode == Mode::Index {
+        return index::gate(&*backend, plan.records, arguments.runs);
+    }
     if arguments.mode != Mode::Ycsb {
         if arguments.backend == "duckdb" && arguments.mode == Mode::Tpcc {
             return Err(
