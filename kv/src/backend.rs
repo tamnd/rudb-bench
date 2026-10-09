@@ -183,6 +183,12 @@ pub(crate) trait Session: Send {
         self.batch("BEGIN")
     }
 
+    /// Starts a transaction at `ISOLATION LEVEL SERIALIZABLE`, for `--isolation serializable`.
+    /// `writes` says whether it is one that writes, for an engine that starts those differently.
+    fn begin_serializable(&mut self, _writes: bool) -> Result<(), Failed> {
+        self.batch("BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+    }
+
     /// Starts a transaction that only reads, which only SQLite starts differently.
     fn begin_read(&mut self) -> Result<(), Failed> {
         self.begin()

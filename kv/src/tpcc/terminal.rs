@@ -335,6 +335,7 @@ pub(crate) fn prepare(
 pub(crate) struct Runner<'s> {
     session: Box<dyn Session + 's>,
     prepared: Prepared,
+    serializable: bool,
     out: Values,
     texts: Vec<String>,
 }
@@ -346,12 +347,22 @@ impl std::fmt::Debug for Runner<'_> {
 }
 
 impl<'s> Runner<'s> {
-    pub(crate) fn new(session: Box<dyn Session + 's>, prepared: Prepared) -> Self {
-        Self { session, prepared, out: Values::default(), texts: Vec::new() }
+    pub(crate) fn new(
+        session: Box<dyn Session + 's>,
+        prepared: Prepared,
+        serializable: bool,
+    ) -> Self {
+        Self { session, prepared, serializable, out: Values::default(), texts: Vec::new() }
     }
 
     fn begin(&mut self, kind: Kind) -> Result<(), Failed> {
-        if kind.writes() { self.session.begin() } else { self.session.begin_read() }
+        if self.serializable {
+            self.session.begin_serializable(kind.writes())
+        } else if kind.writes() {
+            self.session.begin()
+        } else {
+            self.session.begin_read()
+        }
     }
 
     fn execute(&mut self, statement: usize, parameters: &[&dyn Display]) -> Result<u64, Failed> {

@@ -106,4 +106,9 @@ impl Session for SqliteSession<'_> {
     fn begin_read(&mut self) -> Result<(), Failed> {
         self.0.batch("BEGIN")
     }
+
+    /// SQLite has one writer at a time and is serializable whatever it is asked for.
+    fn begin_serializable(&mut self, writes: bool) -> Result<(), Failed> {
+        if writes { self.begin() } else { self.begin_read() }
+    }
 }

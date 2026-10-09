@@ -25,10 +25,14 @@ impl RudbBackend {
     }
 }
 
-/// Whether an error is a write-write conflict a client retries.
+/// Whether an error is a write-write conflict or a serialization failure, which a client retries.
 fn failed(error: impl ToString) -> Failed {
     let message = error.to_string();
-    if message.contains("onflict") { Failed::Retry(message) } else { Failed::Error(message) }
+    if message.contains("onflict") || message.contains("could not serialize") {
+        Failed::Retry(message)
+    } else {
+        Failed::Error(message)
+    }
 }
 
 impl Backend for RudbBackend {
