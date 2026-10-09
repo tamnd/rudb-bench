@@ -331,6 +331,18 @@ def joins(kind):
 
 
 def graded(engine, config, d, sql, threads):
+    """What `graded_once` finds, asked up to three times. A document cut short does not parse, and
+    on a shared machine with a nearly full disk that happens to a run now and then, so the query is
+    run again rather than ending every query after it. `None` if no run left one that parses."""
+    for _ in range(3):
+        try:
+            return graded_once(engine, config, d, sql, threads)
+        except ValueError:
+            continue
+    return None
+
+
+def graded_once(engine, config, d, sql, threads):
     """(kind, estimated, produced, top) for every operator one engine had an estimate for, where
     top says it is a join with no join above it."""
     duck, rudb = databases(config, d)
