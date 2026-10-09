@@ -416,17 +416,17 @@ fn maybe(text: &str) -> Option<&str> {
 
 /// What the engine said about its own execution, on one line.
 ///
-/// Fourteen fixed fields, in the order they are read back. Only rudb writes one, so the line is
+/// Seventeen fixed fields, in the order they are read back. Only rudb writes one, so the line is
 /// absent for every other engine rather than being fourteen dashes.
 ///
-/// The build, the planning and the three row counts are last rather than beside the numbers they
-/// belong with, because each was added after the line existed and a file written before it is a
-/// file somebody still wants to open. Appending is what keeps that true, and it costs the reader a
-/// default per field rather than a migration.
+/// The build, the planning, the three row counts and the three q-error fields are last rather than
+/// beside the numbers they belong with, because each was added after the line existed and a file
+/// written before it is a file somebody still wants to open. Appending is what keeps that true, and
+/// it costs the reader a default per field rather than a migration.
 fn inside(i: &Internal) -> String {
     let dash = || "-".to_owned();
     format!(
-        "{} {} {} {} {} {} {} {} {} {} {} {} {} {}",
+        "{} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {} {}",
         micros(i.accounting.accounted),
         micros(i.accounting.measured),
         i.accounting.process.map_or_else(dash, |d| micros(d).to_string()),
@@ -440,7 +440,10 @@ fn inside(i: &Internal) -> String {
         micros(i.planning),
         i.flow.map_or_else(dash, |f| f.intermediate.to_string()),
         i.flow.map_or_else(dash, |f| f.result.to_string()),
-        i.miscounted
+        i.miscounted,
+        i.flow.map_or_else(dash, |f| f.estimated.to_string()),
+        i.flow.map_or_else(dash, |f| f.q_median.to_string()),
+        i.flow.map_or_else(dash, |f| f.q_worst.to_string())
     )
 }
 
@@ -466,9 +469,14 @@ fn uninside(text: &str) -> Result<Internal, String> {
         field.parse::<u64>().map_err(|_| format!("{field} is not a number"))
     };
     let flow = match (maybe(field(11)), maybe(field(12))) {
-        (Some(intermediate), Some(result)) => {
-            Some(Flow { intermediate: number(intermediate)?, result: number(result)? })
-        }
+        // A file from before the q-errors has no fields there, which reads as zero estimates.
+        (Some(intermediate), Some(result)) => Some(Flow {
+            intermediate: number(intermediate)?,
+            result: number(result)?,
+            estimated: number(field(14))?,
+            q_median: number(field(15))?,
+            q_worst: number(field(16))?,
+        }),
         _ => None,
     };
     Ok(Internal {
@@ -839,7 +847,13 @@ mod tests {
                 pipelines: 2,
                 operators: 4,
                 reference_impls: 4,
-                flow: Some(Flow { intermediate: 1_200_000, result: 2 }),
+                flow: Some(Flow {
+                    intermediate: 1_200_000,
+                    result: 2,
+                    estimated: 3,
+                    q_median: 14,
+                    q_worst: 2_200,
+                }),
                 miscounted: 0,
             }),
             spend: vec![

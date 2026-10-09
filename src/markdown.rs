@@ -676,6 +676,12 @@ fn inside(result: &SuiteResult) -> String {
                     Some(ratio) => format!("{ratio:.1}x"),
                     None => "not read".to_owned(),
                 },
+                match i.flow {
+                    Some(flow) if flow.estimated > 0 => {
+                        format!("{}, worst {}", tenths(flow.q_median), tenths(flow.q_worst))
+                    }
+                    _ => "not read".to_owned(),
+                },
                 format!("{} of {}", i.reference_impls, i.operators),
             ])
         })
@@ -698,6 +704,7 @@ fn inside(result: &SuiteResult) -> String {
             "outside",
             "held",
             "moved",
+            "q-error",
             "reference",
         ],
         &rows,
@@ -724,11 +731,49 @@ fn inside(result: &SuiteResult) -> String {
          intermediate row the plan built divided by the rows it returned, which is the one column \
          here that does not move when the kernels get faster: a suite that gets thirty percent \
          quicker on a rewritten hash table reports thirty percent everywhere else and nothing at \
-         all here, and when this falls it is because the plans changed. `reference` is how many \
-         operators ran the reference implementation of their seam, which is the slow path kept for \
-         differential testing.\n\n",
+         all here, and when this falls it is because the plans changed. `q-error` is how far the \
+         plan's row estimates were from the rows each operator produced, as the middle one and the \
+         worst one over the operators it had an estimate for, where one is exact and ten is out by \
+         ten times either way. A scan under a hash join keeps only the keys the other side found, \
+         so its q-error is partly the join working and not only the estimate being wrong. \
+         `reference` is how many operators ran the reference implementation of their seam, which \
+         is the slow path kept for differential testing.\n\n",
     );
+    out.push_str(&worst_q(result));
     out
+}
+
+/// The worst q-error of each query, summarized over the suite the way the JOB paper does.
+///
+/// Empty when no query had an estimate. Quantiles of the per query worst rather than of every
+/// operator, because a record keeps the worst and the middle of each query and not the operators.
+fn worst_q(result: &SuiteResult) -> String {
+    let mut worst: Vec<u64> = result
+        .queries
+        .iter()
+        .filter_map(|q| q.internal.as_ref()?.flow)
+        .filter(|flow| flow.estimated > 0)
+        .map(|flow| flow.q_worst)
+        .collect();
+    if worst.is_empty() {
+        return String::new();
+    }
+    worst.sort_unstable();
+    let at = |share: usize| worst[(worst.len() - 1) * share / 100];
+    format!(
+        "The worst q-error of each of the {} queries with estimates is {} at the median, {} at the \
+         90th percentile, {} at the 99th and {} at most.\n\n",
+        worst.len(),
+        tenths(at(50)),
+        tenths(at(90)),
+        tenths(at(99)),
+        tenths(at(100))
+    )
+}
+
+/// A count of tenths as a decimal with one place.
+fn tenths(value: u64) -> String {
+    format!("{}.{}", value / 10, value % 10)
 }
 
 /// What the planner knew when it planned each query, and what it knew over the whole suite.
