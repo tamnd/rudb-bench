@@ -2,6 +2,7 @@
 
   python3 -I job-gate.py load CONFIG DIR
   python3 -I job-gate.py run CONFIG DIR OUT.tsv [THREADS] [ONLY]
+  python3 -I job-gate.py qerror CONFIG DIR OUT.tsv [THREADS] [ONLY]
 
 `load` builds both databases for one configuration in DIR from the 21 CSVs, the same SQL for both
 engines: JOB's schema.sql, one COPY per table, and fkindexes.sql in the indexed configuration. rudb
@@ -24,11 +25,21 @@ kept its key sets as bitmaps, with no keys hashed. And every string column a que
 constant must be stored on codes in every part, either against the table's dictionary or as
 compressed text, which pragma_storage_info says.
 
+`qerror` grades both engines' row estimates, which is section 12.8 of the JOB notes. Each query runs
+once per engine, outside any timing, with rudb writing its metrics document and DuckDB writing its
+JSON profile, and every operator with an estimate is compared with the rows it produced. The q-error
+is the larger of the two over the smaller, with one row as the floor. The joins are summarized on
+their own as well as with everything else, and the top join of each query on its own again. Both
+engines filter a scan under a hash join by the keys the other side found, so an operator under a
+join can produce fewer rows than the subplan it is the root of would, and its q-error is partly the
+filter working and not only the estimate being wrong. Nothing filters the top join, so its q-error
+is the estimate against the true size of the whole join.
+
 Environment: JOB_DUCKDB, JOB_RUDB (binaries), JOB_CSV (the CSV directory), JOB_QUERIES (the query
 directory, default queries/job beside this script), JOB_RUDB_SET (statements sent to rudb only
 before every query, on top of what the configuration sends).
 """
-import json, os, re, shutil, subprocess, statistics, sys, time
+import json, os, re, shutil, subprocess, statistics, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 QUERIES = os.environ.get('JOB_QUERIES', os.path.join(HERE, '..', 'queries', 'job'))
@@ -310,8 +321,123 @@ def run(config, d, out, threads, only):
         print(f'{state:8} {name}: {why}'[:300])
 
 
+def q_error(estimated, produced):
+    high, low = max(estimated, produced, 1), max(min(estimated, produced), 1)
+    return high / low
+
+
+def joins(kind):
+    return 'JOIN' in kind.upper() or kind in ('Probe', 'NestedLoop')
+
+
+def graded(engine, config, d, sql, threads):
+    """(kind, estimated, produced, top) for every operator one engine had an estimate for, where
+    top says it is a join with no join above it."""
+    duck, rudb = databases(config, d)
+    at = os.path.join(tempfile.gettempdir(), f'job-qerror-{os.getpid()}-{engine}.json')
+    if os.path.exists(at):
+        os.remove(at)
+    pre = [f'SET threads={threads};']
+    if engine == 'rudb':
+        pre.append('SET stored_answers = false;')
+        if config == 'norule':
+            pre.append("SET \"plan.consistent\" = false;")
+        pre += [s.strip() + ';' for s in os.environ.get('JOB_RUDB_SET', '').split(';') if s.strip()]
+        command = [RUDB, '--metrics', at, '-readonly', rudb]
+    else:
+        pre += ["PRAGMA enable_profiling = 'json';", f"PRAGMA profiling_output = '{at}';"]
+        command = [DUCKDB, '-readonly', duck]
+    subprocess.run(command, input='\n'.join(pre + [f'{sql};']) + '\n', capture_output=True,
+                   text=True, timeout=600)
+    if not os.path.exists(at):
+        return None
+    got = []
+    if engine == 'rudb':
+        lines = open(at).read().splitlines()
+        operators = json.loads(lines[-1])['operators'] if lines else []
+        by_id = {o['id']: o for o in operators}
+
+        def under_join(o):
+            seen = set()
+            while o.get('parent') is not None and o['parent'] not in seen:
+                seen.add(o['parent'])
+                o = by_id.get(o['parent'], {})
+                if joins(o.get('kind', '')):
+                    return True
+            return False
+        for o in operators:
+            if o.get('estimated_rows') is not None:
+                top = joins(o['kind']) and not under_join(o)
+                got.append((o['kind'], int(o['estimated_rows']), int(o['rows_out']), top))
+    else:
+        def walk(node, below):
+            extra = node.get('extra_info')
+            estimate = extra.get('Estimated Cardinality') if isinstance(extra, dict) else None
+            if estimate is not None and str(estimate).isdigit():
+                top = joins(node['type']) and not below
+                got.append((node['type'], int(estimate), int(node.get('intermediate_rows', 0)),
+                            top))
+            for child in node.get('children', []):
+                walk(child, below or joins(node['type']))
+        for node in json.load(open(at)).get('operator', []):
+            walk(node, False)
+    os.remove(at)
+    return got
+
+
+def quantiles(xs):
+    xs = sorted(xs)
+    if not xs:
+        return 'none'
+    at = lambda share: xs[min(len(xs) - 1, int(round((len(xs) - 1) * share)))]
+    return (f'{len(xs)} estimates, median {at(0.5):.1f}, 90th {at(0.9):.1f}, 99th {at(0.99):.1f}, '
+            f'max {xs[-1]:.1f}')
+
+
+def qerror(config, d, out, threads, only):
+    every = {'duckdb': [], 'rudb': []}
+    joined = {'duckdb': [], 'rudb': []}
+    topmost = {'duckdb': [], 'rudb': []}
+    better, worse = [], []
+    with open(out, 'w') as f:
+        f.write('query\tduck_joins\tduck_join_median\tduck_join_max\tduck_max\tduck_top'
+                '\trudb_joins\trudb_join_median\trudb_join_max\trudb_max\trudb_top\n')
+        for q in names():
+            if only and q not in only:
+                continue
+            sql = open(os.path.join(QUERIES, q + '.sql')).read().strip().rstrip(';')
+            got = {e: graded(e, config, d, sql, threads) for e in ('duckdb', 'rudb')}
+            if any(g is None for g in got.values()):
+                f.write(f'{q}\terror\n')
+                print(f'{q} error', flush=True)
+                continue
+            cells = [q]
+            worst = {}
+            for e in ('duckdb', 'rudb'):
+                all_q = [q_error(est, rows) for _, est, rows, _ in got[e]]
+                join_q = sorted(q_error(est, rows) for kind, est, rows, _ in got[e] if joins(kind))
+                top_q = [q_error(est, rows) for _, est, rows, top in got[e] if top]
+                every[e] += all_q
+                joined[e] += join_q
+                topmost[e] += top_q
+                worst[e] = join_q[-1] if join_q else 1.0
+                median = join_q[(len(join_q) - 1) // 2] if join_q else 1.0
+                cells += [str(len(join_q)), f'{median:.1f}', f'{worst[e]:.1f}',
+                          f'{max(all_q, default=1.0):.1f}', f'{max(top_q, default=1.0):.1f}']
+            (better if worst['rudb'] < worst['duckdb'] else worse).append(q)
+            f.write('\t'.join(cells) + '\n')
+            print('\t'.join(cells), flush=True)
+    for e in ('duckdb', 'rudb'):
+        print(f'{e} top joins: {quantiles(topmost[e])}')
+        print(f'{e} joins: {quantiles(joined[e])}')
+        print(f'{e} every operator: {quantiles(every[e])}')
+    print(f'rudb worst join estimate closer than DuckDB in {len(better)} queries, not closer in '
+          f'{len(worse)}')
+
+
 def main():
-    if len(sys.argv) < 4 or sys.argv[1] not in ('load', 'run') or sys.argv[2] not in CONFIGS:
+    if len(sys.argv) < 4 or sys.argv[1] not in ('load', 'run', 'qerror') or \
+            sys.argv[2] not in CONFIGS:
         sys.exit(__doc__)
     what, config, d = sys.argv[1:4]
     if what == 'load':
@@ -319,7 +445,7 @@ def main():
     else:
         threads = int(sys.argv[5]) if len(sys.argv) > 5 else os.cpu_count()
         only = set(sys.argv[6].split(',')) if len(sys.argv) > 6 else None
-        run(config, d, sys.argv[4], threads, only)
+        (run if what == 'run' else qerror)(config, d, sys.argv[4], threads, only)
 
 
 if __name__ == '__main__':

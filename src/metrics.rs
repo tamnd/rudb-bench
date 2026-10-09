@@ -151,6 +151,8 @@ pub struct Operator {
     /// where every operator is one is a run measuring the thing the fast paths exist to replace.
     /// Worth carrying into the report rather than reading off a log.
     pub reference_impl: bool,
+    /// How many rows the plan said it would hand on, and nothing where the plan had no number.
+    pub estimated: Option<u64>,
 }
 
 impl Operator {
@@ -441,7 +443,15 @@ impl Document {
                 Some(_) => (intermediate + o.rows_out, result),
                 None => (intermediate, result + o.rows_out),
             });
-        Some(Flow { intermediate, result })
+        let mut errors: Vec<u64> = self
+            .operators
+            .iter()
+            .filter_map(|o| o.estimated.map(|estimated| q_tenths(estimated, o.rows_out)))
+            .collect();
+        errors.sort_unstable();
+        let q_median = errors.get(errors.len().saturating_sub(1) / 2).copied().unwrap_or(0);
+        let q_worst = errors.last().copied().unwrap_or(0);
+        Some(Flow { intermediate, result, estimated: errors.len() as u64, q_median, q_worst })
     }
 
     /// Every operator whose input disagrees with what the operators under it produced.
@@ -576,6 +586,7 @@ impl Operator {
             wall: nanos(json, "wall_ns"),
             cpu: nanos(json, "cpu_ns"),
             reference_impl: json.at("reference_impl").and_then(Json::flag).unwrap_or(false),
+            estimated: json.at("estimated_rows").and_then(Json::count),
         }
     }
 }
@@ -606,6 +617,33 @@ pub struct Flow {
     /// a plan holding a materialised `WITH`, since a materialisation is filled and read back rather
     /// than handed upwards and produces nothing itself.
     pub result: u64,
+    /// How many operators the plan had a row estimate for.
+    ///
+    /// Zero for an engine that writes none and for a record written before the estimates were
+    /// read, and then the two q-errors after it are zero too and say nothing.
+    pub estimated: u64,
+    /// The middle q-error over those operators, in tenths, the lower of the two for an even count.
+    pub q_median: u64,
+    /// The largest q-error over those operators, in tenths.
+    ///
+    /// The number the JOB paper grades estimators by, and the one that says whether a plan was
+    /// chosen on a guess that was out by a thousand times somewhere. A scan under a hash join is
+    /// handed the keys of the side that finished first and keeps fewer rows than its filters
+    /// would, so its q-error is partly the join working and not only the estimate being wrong.
+    pub q_worst: u64,
+}
+
+/// A q-error in tenths, rounded up.
+///
+/// The estimate over the rows produced or the other way round, whichever is larger, so ten is a
+/// perfect estimate and a hundred is one that was out by ten times in either direction. One row is
+/// the floor on both sides, so an estimate of nothing that produced nothing is perfect rather than
+/// a division by zero. Tenths so a record stays whole numbers.
+#[must_use]
+pub fn q_tenths(estimated: u64, produced: u64) -> u64 {
+    let high = u128::from(estimated.max(produced).max(1));
+    let low = u128::from(estimated.min(produced).max(1));
+    u64::try_from((high * 10).div_ceil(low)).unwrap_or(u64::MAX)
 }
 
 impl Flow {
@@ -1105,7 +1143,7 @@ impl Reader<'_> {
 mod tests {
     use std::time::Duration;
 
-    use super::{Accounting, Classes, Document, Json, Spend, TOLERANCE, folded};
+    use super::{Accounting, Classes, Document, Json, Spend, TOLERANCE, folded, q_tenths};
 
     /// A document the shape rudb writes, small enough to read.
     fn one(cpu_ns: u64, operators: &str) -> String {
@@ -1451,6 +1489,48 @@ mod tests {
         assert_eq!(flow.intermediate, 110, "the scan's hundred and the filter's ten");
         assert_eq!(flow.result, 1, "the aggregate is what nothing reads from");
         assert!((flow.ratio().expect("it returned a row") - 110.0).abs() < 1e-9);
+    }
+
+    /// A scan estimated at a hundred that produced ten, a join estimated at five that produced
+    /// five hundred, and an aggregate with no estimate at all, which is left out rather than
+    /// counted as infinitely wrong.
+    #[test]
+    fn the_estimates_are_graded_by_how_far_they_were_from_the_rows_produced() {
+        let estimated = |id: u64, parent: &str, rows_out: u64, estimate: &str| {
+            format!(
+                "{{\"id\":{id},\"pipeline\":0,\"parent\":{parent},\"kind\":\"Get\",\
+                 \"rows_in\":0,\"rows_out\":{rows_out},\"wall_ns\":1,\"cpu_ns\":1,\
+                 \"reference_impl\":false,\"estimated_rows\":{estimate}}}"
+            )
+        };
+        let text = one(
+            1000,
+            &format!(
+                "{},{},{}",
+                estimated(0, "null", 1, "null"),
+                estimated(1, "0", 500, "5"),
+                estimated(2, "1", 10, "100")
+            ),
+        );
+        let flow = Document::parse(&text).expect("valid").flow().expect("the document has edges");
+        assert_eq!(flow.estimated, 2, "the aggregate had no number to grade");
+        assert_eq!(flow.q_median, 100, "ten times too many rows on the scan");
+        assert_eq!(flow.q_worst, 1000, "a hundred times too few on the join");
+        let text = one(1000, &format!("{},{}", linked(0, "null", 10, 1), linked(1, "0", 0, 10)));
+        let flow = Document::parse(&text).expect("valid").flow().expect("the document has edges");
+        assert_eq!((flow.estimated, flow.q_median, flow.q_worst), (0, 0, 0));
+    }
+
+    #[test]
+    fn a_q_error_is_the_larger_side_over_the_smaller_with_a_row_as_the_floor() {
+        assert_eq!(q_tenths(100, 100), 10);
+        assert_eq!(q_tenths(3, 2), 15);
+        assert_eq!(q_tenths(2, 3), 15);
+        assert_eq!(q_tenths(3, 1), 30);
+        assert_eq!(q_tenths(7, 3), 24, "rounded up");
+        assert_eq!(q_tenths(0, 0), 10);
+        assert_eq!(q_tenths(0, 40), 400);
+        assert_eq!(q_tenths(u64::MAX, 1), u64::MAX);
     }
 
     /// A materialisation is filled and read back rather than handed upwards, so it has nothing
