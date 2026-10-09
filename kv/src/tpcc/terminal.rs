@@ -9,6 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use rudb_bench::histogram::Histogram;
 
 use super::data::{self, CUSTOMERS, DISTRICTS, ITEMS, nurand, uniform};
+use super::fresh::Acks;
 use super::text::{Id, MAX_LINES, MIN_LINES, order_lines};
 use crate::backend::{Backend, Failed, Session, Values};
 use crate::workload::Rng;
@@ -338,6 +339,8 @@ pub(crate) struct Runner<'s> {
     serializable: bool,
     out: Values,
     texts: Vec<String>,
+    /// Where each New-Order's acknowledgement is noted, when analytic streams judge freshness.
+    acks: Option<&'s Acks>,
 }
 
 impl std::fmt::Debug for Runner<'_> {
@@ -352,7 +355,20 @@ impl<'s> Runner<'s> {
         prepared: Prepared,
         serializable: bool,
     ) -> Self {
-        Self { session, prepared, serializable, out: Values::default(), texts: Vec::new() }
+        Self {
+            session,
+            prepared,
+            serializable,
+            out: Values::default(),
+            texts: Vec::new(),
+            acks: None,
+        }
+    }
+
+    /// Notes each New-Order's acknowledgement in `acks`.
+    pub(crate) fn acking(mut self, acks: Option<&'s Acks>) -> Self {
+        self.acks = acks;
+        self
     }
 
     fn begin(&mut self, kind: Kind) -> Result<(), Failed> {
@@ -481,6 +497,9 @@ impl<'s> Runner<'s> {
         let parameters: Vec<&dyn Display> = values.iter().map(|v| v as &dyn Display).collect();
         self.execute(self.prepared.lines[lines.len() - MIN_LINES], &parameters)?;
         self.session.commit()?;
+        if let (Some(acks), Ok(o_id)) = (self.acks, u64::try_from(o_id)) {
+            acks.acked(w, d, o_id, Instant::now());
+        }
         // The order total of the terminal's output, in ten-thousandths of cents times cents.
         let total =
             i128::from(total) * i128::from(10_000 - discount) * i128::from(10_000 + w_tax + d_tax)

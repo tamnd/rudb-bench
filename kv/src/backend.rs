@@ -200,6 +200,12 @@ pub(crate) trait Session: Send {
         self.begin()
     }
 
+    /// Starts a transaction that only reads and sees one snapshot from its first statement to its
+    /// last, for the freshness of document 09 section 9.6.
+    fn begin_snapshot(&mut self) -> Result<(), Failed> {
+        self.begin_read()
+    }
+
     fn commit(&mut self) -> Result<(), Failed> {
         self.batch("COMMIT")
     }

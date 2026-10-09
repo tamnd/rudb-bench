@@ -93,4 +93,10 @@ impl Session for PostgresSession<'_> {
     fn batch(&mut self, sql: &str) -> Result<(), Failed> {
         self.0.batch(sql)
     }
+
+    /// A read committed transaction takes a snapshot a statement, so the analytic streams ask for
+    /// repeatable read to read the districts and run the query in one.
+    fn begin_snapshot(&mut self) -> Result<(), Failed> {
+        self.0.batch("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+    }
 }
