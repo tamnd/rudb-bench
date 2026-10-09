@@ -47,13 +47,17 @@ counting, one process per query, and a query is written to OUT.tsv only when all
 in, so a run that stops can be started again and goes on from the first query not in the file.
 
 `perror` grades the join order each engine picks against the order the true counts would pick. Each
-query runs once per engine outside any timing, the join tree is read off its profile, and the scans
-are matched to the query's aliases by table and by every join in the tree joining aliases a
-condition connects. The cost of a tree is the sum of the true counts of its joins, C_out, and the
-best tree is found by dynamic programming over the same counts, bushy and with no cross products,
-over the aliases the engine's tree reads. The P-error is the cost of the engine's tree over the cost
-of the best one, with one row as the floor the way the q-error has it, so 1 is the best order there
-is. The counts come from the `truecounts` file named by JOB_COUNTS.
+query is planned once per engine outside any timing. rudb's join tree is read off its EXPLAIN, which
+names every alias. DuckDB's is read off its profile, which names only tables, so its scans are
+matched to the query's aliases by table, by every join in the tree joining aliases a condition
+connects, and where that leaves a choice by the literals of each alias's filters the scan mentions.
+A semi join an engine adds as a reduction, and an aggregation pushed under a join, are passed
+through, so the tree graded is the tree of inner joins. The cost of a tree is the sum of the true
+counts of its joins, C_out, and the best tree is found by dynamic programming over the same counts,
+bushy and with no cross products, over the aliases the engine's tree reads. The P-error is the cost
+of the engine's tree over the cost of the best one, with one row as the floor the way the q-error
+has it, so 1 is the best order there is. The counts come from the `truecounts` file named by
+JOB_COUNTS.
 
 Environment: JOB_DUCKDB, JOB_RUDB (binaries), JOB_CSV (the CSV directory), JOB_QUERIES (the query
 directory, default queries/job beside this script), JOB_COUNTS (the `truecounts` file `perror`
