@@ -37,7 +37,7 @@ usage: rudb-bench-kv [--mode ycsb|tpcc|ch] --backend null|sqlite|duckdb|postgres
                      [--distribution uniform|zipfian|latest] [--loop closed|open] [--rate OPS] [--poisson] [--warmup 10s] [--window 60s]
                      [--seed N] [--level full|os|none] [--card <card line>] [--unpinned]
                      [--service 100us] [--stall 100ms/10s] [--shim none|unix] [--isolation default|serializable]
-                     [--analytic N] [--analytic-threads N] [--runs N]
+                     [--analytic N] [--analytic-threads N] [--forgotten] [--runs N]
 
 The libraries come from RUDB_BENCH_LIBSQLITE, RUDB_BENCH_LIBDUCKDB and RUDB_BENCH_LIBPQ.
 --service and --stall make the null backend a fake engine with a known stall.
@@ -50,6 +50,8 @@ three CH-benCHmark adds. --isolation serializable begins each of its transaction
 SERIALIZABLE, and SQLite, which is serializable anyway, as it begins them otherwise.
 --analytic N runs N CH-benCHmark analytic streams beside the terminals, each letting its queries
 take --analytic-threads threads, 2 unless set.
+--forgotten opens a transaction that reads once as the window opens and leaves it open to the end,
+and prints the throughput of each ten seconds, to see what the writers do while it holds undo.
 --mode ch runs each of the 22 CH-benCHmark queries --runs times, 5 unless set, on one session over
 the tables as they are, or as --load loads them, which is the reference a mixed run is compared with.";
 
@@ -79,6 +81,7 @@ struct Arguments {
     serializable: bool,
     analytic: usize,
     analytic_threads: usize,
+    forgotten: bool,
     runs: usize,
 }
 
@@ -125,6 +128,7 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
         serializable: false,
         analytic: 0,
         analytic_threads: 2,
+        forgotten: false,
         runs: 5,
     };
     let mut rate = None;
@@ -218,6 +222,7 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
                 arguments.analytic_threads =
                     value()?.parse().map_err(|_| "--analytic-threads is a count")?;
             }
+            "--forgotten" => arguments.forgotten = true,
             "--runs" => arguments.runs = value()?.parse().map_err(|_| "--runs is a count")?,
             "--help" | "-h" => return Err(USAGE.to_string()),
             other => return Err(format!("{other:?} is not an option\n\n{USAGE}")),
@@ -237,6 +242,11 @@ fn parse(mut words: impl Iterator<Item = String>) -> Result<Arguments, String> {
     }
     if arguments.analytic > 0 && arguments.mode != Mode::Tpcc {
         return Err("--analytic runs streams beside the tpcc mode's terminals".to_string());
+    }
+    if arguments.forgotten && arguments.mode != Mode::Tpcc {
+        return Err(
+            "--forgotten holds a transaction open beside the tpcc mode's terminals".to_string()
+        );
     }
     if open {
         let rate = rate.filter(|rate| *rate > 0.0).ok_or("an open loop wants --rate")?;
@@ -310,6 +320,7 @@ fn drive(arguments: &Arguments) -> Result<(), String> {
             serializable: arguments.serializable,
             analytic: arguments.analytic,
             analytic_threads: arguments.analytic_threads,
+            forgotten: arguments.forgotten,
         };
         if arguments.mode == Mode::Ch {
             return tpcc::reference(&*backend, &settings, arguments.runs);
@@ -448,5 +459,7 @@ mod tests {
         assert!(parse(words("--mode tpcc --backend null --analytic-threads 0")).is_err());
         assert!(parse(words("--mode ch --backend null --analytic 1")).is_err());
         assert!(parse(words("--backend null --analytic 1")).is_err());
+        assert!(parse(words("--mode tpcc --backend null --forgotten")).unwrap().forgotten);
+        assert!(parse(words("--mode ch --backend null --forgotten")).is_err());
     }
 }

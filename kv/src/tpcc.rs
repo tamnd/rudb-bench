@@ -7,7 +7,8 @@
 //!
 //! With `--analytic N` it is the mixed run of CH-benCHmark, document 09 section 9.5: `N` streams run
 //! the 22 analytic queries over and over beside the terminals. [`reference`] is the analytic run on
-//! its own, section 9.4.
+//! its own, section 9.4. With `--forgotten` a session holds one transaction open through the
+//! window, the run that decides what writers do while undo is held past its share.
 
 mod ch;
 mod checks;
@@ -23,7 +24,7 @@ use std::time::{Duration, Instant};
 
 use rudb_bench::histogram::Histogram;
 
-use crate::backend::{Backend, Level};
+use crate::backend::{Backend, Level, Session, Values};
 pub(crate) use data::{CUSTOMERS, ITEMS};
 use terminal::{Clock, Constants, Deck, Home, Kind, Runner, Tally, Terminal};
 
@@ -46,6 +47,48 @@ pub(crate) struct Settings {
     pub(crate) analytic: usize,
     /// How many threads each analytic stream's queries may take.
     pub(crate) analytic_threads: usize,
+    /// Whether a session holds a transaction open from the start of the window to its end.
+    pub(crate) forgotten: bool,
+}
+
+/// The transaction `--forgotten` leaves open: it reads once, so it holds a snapshot, and nothing
+/// after that until the window ends.
+struct Forgotten<'s> {
+    session: Box<dyn Session + 's>,
+    read: usize,
+}
+
+impl<'s> Forgotten<'s> {
+    fn open(backend: &'s dyn Backend) -> Result<Self, String> {
+        let mut session = backend.connect()?;
+        let read = session.prepare("SELECT count(*) FROM warehouse")?;
+        Ok(Self { session, read })
+    }
+
+    /// Begins it and reads, and says when.
+    fn begin(&mut self) -> Result<Instant, String> {
+        self.session.begin_snapshot().map_err(|failed| format!("BEGIN failed: {failed}"))?;
+        self.session
+            .execute(self.read, &[], &mut Values::default())
+            .map_err(|failed| format!("the read failed: {failed}"))?;
+        Ok(Instant::now())
+    }
+
+    /// Rolls it back, and says how long it was held.
+    fn end(&mut self, began: Instant) -> Result<Duration, String> {
+        let held = began.elapsed();
+        self.session.rollback().map_err(|failed| format!("ROLLBACK failed: {failed}"))?;
+        Ok(held)
+    }
+}
+
+/// The mean transactions a second over each `every` seconds of `per_second`, the last span
+/// perhaps shorter.
+fn timeline(per_second: &[u64], every: usize) -> Vec<f64> {
+    per_second
+        .chunks(every.max(1))
+        .map(|span| span.iter().sum::<u64>() as f64 / span.len() as f64)
+        .collect()
 }
 
 /// The share of any type's transactions that may fail before the run is invalid, 0.1%.
@@ -225,6 +268,7 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
         println!("{}", ch_line(settings.analytic, settings.analytic_threads));
     }
     let mut streams = open_streams(backend, settings.analytic, settings)?;
+    let mut forgotten = settings.forgotten.then(|| Forgotten::open(backend)).transpose()?;
     if let Some(acks) = &acks {
         for (at, stream) in streams.iter_mut().enumerate() {
             if let Err(why) = stream.judging(acks)
@@ -240,59 +284,66 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
     let barrier = Barrier::new(terminals + streams.len() + 1);
     let start = Instant::now() + Duration::from_millis(20);
     let clock = Clock::new(start, settings.window);
-    let (tallies, usage, orders, analytic) = std::thread::scope(|scope| -> Result<_, String> {
-        let handles: Vec<_> = runners
-            .into_iter()
-            .enumerate()
-            .map(|(t, runner)| {
-                let t = t as u64;
-                let terminal = Terminal {
-                    runner,
-                    rng: data::stream(settings.seed, 200, t, 0),
-                    backoff: data::stream(settings.seed, 201, t, 0),
-                    deck: Deck::new(),
-                    home: Home::of(t, terminals as u64, warehouses),
-                    warehouses,
-                    constants,
-                };
-                let (stop, barrier, clock) = (&stop, &barrier, &clock);
-                scope.spawn(move || {
-                    barrier.wait();
-                    terminal.run(clock, seconds, stop)
+    let (tallies, usage, orders, analytic, held) =
+        std::thread::scope(|scope| -> Result<_, String> {
+            let handles: Vec<_> = runners
+                .into_iter()
+                .enumerate()
+                .map(|(t, runner)| {
+                    let t = t as u64;
+                    let terminal = Terminal {
+                        runner,
+                        rng: data::stream(settings.seed, 200, t, 0),
+                        backoff: data::stream(settings.seed, 201, t, 0),
+                        deck: Deck::new(),
+                        home: Home::of(t, terminals as u64, warehouses),
+                        warehouses,
+                        constants,
+                    };
+                    let (stop, barrier, clock) = (&stop, &barrier, &clock);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        terminal.run(clock, seconds, stop)
+                    })
                 })
-            })
-            .collect();
-        let streams: Vec<_> = streams
-            .into_iter()
-            .map(|stream| {
-                let (stop, barrier, clock) = (&stop, &barrier, &clock);
-                scope.spawn(move || {
-                    barrier.wait();
-                    stream.run(clock, stop)
+                .collect();
+            let streams: Vec<_> = streams
+                .into_iter()
+                .map(|stream| {
+                    let (stop, barrier, clock) = (&stop, &barrier, &clock);
+                    scope.spawn(move || {
+                        barrier.wait();
+                        stream.run(clock, stop)
+                    })
                 })
-            })
-            .collect();
-        barrier.wait();
-        sleep_until(start + settings.warmup, &stop);
-        let at_window = crate::ffi::usage();
-        let first = monitor.orders();
-        let measured = Instant::now();
-        clock.open(measured);
-        sleep_until(measured + settings.window, &stop);
-        let last = monitor.orders();
-        let at_end = crate::ffi::usage();
-        let tallies = handles
-            .into_iter()
-            .map(|handle| handle.join().map_err(|_| "a terminal panicked".to_string()))
-            .collect::<Result<Vec<_>, _>>()?;
-        let analytic = streams
-            .into_iter()
-            .map(|handle| handle.join().map_err(|_| "an analytic stream panicked".to_string()))
-            .collect::<Result<Vec<_>, _>>()?;
-        let orders = first.and_then(|first| last.map(|last| (first, last)));
-        Ok((tallies, (at_window, at_end), orders, analytic))
-    })?;
+                .collect();
+            barrier.wait();
+            sleep_until(start + settings.warmup, &stop);
+            let at_window = crate::ffi::usage();
+            let first = monitor.orders();
+            let measured = Instant::now();
+            clock.open(measured);
+            let began = forgotten.as_mut().map(Forgotten::begin);
+            sleep_until(measured + settings.window, &stop);
+            let held = forgotten
+                .as_mut()
+                .zip(began)
+                .map(|(forgotten, began)| began.and_then(|began| forgotten.end(began)));
+            let last = monitor.orders();
+            let at_end = crate::ffi::usage();
+            let tallies = handles
+                .into_iter()
+                .map(|handle| handle.join().map_err(|_| "a terminal panicked".to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let analytic = streams
+                .into_iter()
+                .map(|handle| handle.join().map_err(|_| "an analytic stream panicked".to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let orders = first.and_then(|first| last.map(|last| (first, last)));
+            Ok((tallies, (at_window, at_end), orders, analytic, held))
+        })?;
     drop(monitor);
+    drop(forgotten);
 
     let mut tally = Tally::new(seconds);
     for one in &tallies {
@@ -384,6 +435,23 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
         per_second.iter().min().copied().unwrap_or(0),
         mix.join(","),
     );
+    match held {
+        Some(Ok(held)) => {
+            let spans: Vec<String> =
+                timeline(&per_second, 10).iter().map(|tx| format!("{tx:.1}")).collect();
+            let _ = writeln!(
+                report,
+                "forgotten held_s={:.3} every_s=10 tx_per_s={}",
+                held.as_secs_f64(),
+                spans.join(",")
+            );
+        }
+        Some(Err(message)) => {
+            let _ = writeln!(report, "forgotten error={message:?}");
+            verdicts.push("forgotten_failed".to_string());
+        }
+        None => {}
+    }
     let effects = tally.effects;
     let since = checks::Since {
         warehouses,
@@ -448,4 +516,16 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
     );
     println!("end");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::timeline;
+
+    #[test]
+    fn the_timeline_is_the_mean_of_each_span_and_the_last_may_be_short() {
+        let per_second = [10, 20, 30, 40, 50, 0, 0];
+        assert_eq!(timeline(&per_second, 3), vec![20.0, 30.0, 0.0]);
+        assert_eq!(timeline(&[], 10), Vec::<f64>::new());
+    }
 }
