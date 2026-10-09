@@ -56,6 +56,14 @@ impl Backend for RudbBackend {
         Ok(())
     }
 
+    fn visibility(&self, committed: bool) -> Result<(), String> {
+        let word = if committed { "committed" } else { "durable" };
+        self.database
+            .execute(&format!("SET visibility = '{word}'"))
+            .map(|_| ())
+            .map_err(|error| format!("setting visibility: {error}"))
+    }
+
     fn analytic_threads(&self, threads: usize) -> Option<String> {
         Some(format!("SET threads = {threads}"))
     }

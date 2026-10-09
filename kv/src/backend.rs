@@ -152,6 +152,20 @@ pub(crate) trait Backend: Sync {
         true
     }
 
+    /// Shows each commit's rows to other sessions once it is ordered and before it is durable, for
+    /// `--visibility committed`. Only rudb has that setting, and an engine without it shows a
+    /// commit once it is durable, which is `durable`, so it refuses `committed`.
+    fn visibility(&self, committed: bool) -> Result<(), String> {
+        if committed {
+            Err(format!(
+                "{} has no visibility setting, and shows a commit once durable",
+                self.name()
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     /// The statement that lets an analytic session's queries take `threads` threads, for the
     /// CH-benCHmark streams, or `None` for an engine that has no such setting.
     fn analytic_threads(&self, _threads: usize) -> Option<String> {

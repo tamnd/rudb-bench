@@ -82,6 +82,10 @@ impl<B: Backend + Send + 'static> Backend for Shim<B> {
         self.inner.keeps_rows()
     }
 
+    fn visibility(&self, committed: bool) -> Result<(), String> {
+        self.inner.visibility(committed)
+    }
+
     fn analytic_threads(&self, threads: usize) -> Option<String> {
         self.inner.analytic_threads(threads)
     }

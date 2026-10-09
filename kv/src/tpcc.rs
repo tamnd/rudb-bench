@@ -49,6 +49,8 @@ pub(crate) struct Settings {
     pub(crate) analytic_threads: usize,
     /// Whether a session holds a transaction open from the start of the window to its end.
     pub(crate) forgotten: bool,
+    /// Whether rudb shows a commit's rows once it is ordered, before it is durable.
+    pub(crate) committed: bool,
 }
 
 /// The transaction `--forgotten` leaves open: it reads once, so it holds a snapshot, and nothing
@@ -207,7 +209,7 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
     let warehouses = settings.warehouses;
     println!(
         "tpcc 1 backend={} version={} warehouses={warehouses} terminals={terminals} loop=closed \
-         seed={:#x} c_load={} c_run={} c_id={} c_item={} level={} isolation={} warmup_s={} window_s={} pinned={} \
+         seed={:#x} c_load={} c_run={} c_id={} c_item={} level={} isolation={} visibility={} warmup_s={} window_s={} pinned={} \
          boundary={}",
         backend.name(),
         backend.version().replace(' ', "_"),
@@ -218,6 +220,7 @@ pub(crate) fn drive(backend: &dyn Backend, settings: &Settings) -> Result<(), St
         constants.c_item,
         settings.level.name(),
         if settings.serializable { "serializable" } else { "default" },
+        if settings.committed { "committed" } else { "durable" },
         settings.warmup.as_secs_f64(),
         settings.window.as_secs_f64(),
         if settings.pinned { "yes" } else { "no" },
