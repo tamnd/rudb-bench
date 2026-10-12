@@ -688,7 +688,9 @@ def truecounts(config, d, out, threads, only):
             rows = [line for line in ran.stdout.splitlines() if line.strip()]
             if len(rows) != len(chunk) or not all(re.fullmatch(r'[0-9.e+]+', r) for r in rows):
                 got = None
-                print(f'{q} counting failed: {ran.stderr.strip()[:300]}', flush=True)
+                odd = next((r for r in rows if not re.fullmatch(r'[0-9.e+]+', r)), '')
+                print(f'{q} counting failed at {at}, exit {ran.returncode}, {len(rows)} rows, '
+                      f'{odd[:80]!r}: {ran.stderr.strip()[:300]}', flush=True)
                 break
             got += [round(float(r)) for r in rows]
         if got is None:
