@@ -4,6 +4,8 @@ Reports are grouped by the UTC date when the measurement was taken or the analys
 
 | Date | Reports |
 | --- | --- |
+| 2026-10-12 | [JOB, join orders against the true counts](2026-10-12/job-perror.md) |
+| 2026-10-10 | [JOB, row estimates against DuckDB's](2026-10-10/job-qerror.md) |
 | 2026-10-08 | [JOB, the J7 gate](2026-10-08/job-gate.md) |
 | 2026-09-25 | [JOB, the J0 baseline](2026-09-25/job-baseline.md) |
 | 2026-09-24 | [JOB, the reduced SQL on DuckDB](2026-09-24/job-reduced-prototype.md) |
