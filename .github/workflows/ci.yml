@@ -43,7 +43,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@v2.9.3
       - name: cargo fmt
         run: cargo fmt --all --check
       - name: cargo clippy
@@ -59,7 +59,7 @@ jobs:
         os: [ubuntu-24.04, macos-26]
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@v2.9.3
       - name: install duckdb
         shell: bash
         run: |
@@ -136,7 +136,7 @@ jobs:
           repository: tamnd/rudb
           ref: ${{ env.RUDB_VERSION }}
           path: rudb
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           # Its own cache, keyed off the pinned tag. Sharing one with the jobs above would mean the
           # engine's dependency tree evicting the harness's on every run.
@@ -174,7 +174,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: Swatinem/rust-cache@v2.9.2
+      - uses: Swatinem/rust-cache@v2.9.3
       - run: cargo doc --all-features --no-deps
 
   ci:
